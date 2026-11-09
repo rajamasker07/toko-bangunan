@@ -1,20 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { StockMovement } from '../types';
 import { formatStock, formatDate } from '../utils/format';
+import { Pagination } from './common/Pagination';
 import { 
   History, 
   Search, 
-  Filter, 
   ArrowUpRight, 
   ArrowDownLeft, 
   RefreshCw, 
-  Calendar,
-  User,
-  FileText
+  User
 } from 'lucide-react';
 
 export const StockMovementsView: React.FC = () => {
   const [movements, setMovements] = useState<StockMovement[]>([]);
+  const [totalMovements, setTotalMovements] = useState<number>(0);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(15);
   const [loading, setLoading] = useState<boolean>(true);
   const [search, setSearch] = useState<string>('');
   const [selectedType, setSelectedType] = useState<string>('ALL');
@@ -22,14 +23,18 @@ export const StockMovementsView: React.FC = () => {
   const fetchMovements = async () => {
     try {
       setLoading(true);
+      const offset = (currentPage - 1) * pageSize;
       const params = new URLSearchParams();
       if (selectedType !== 'ALL') params.append('type', selectedType);
       if (search) params.append('search', search);
+      params.append('limit', String(pageSize));
+      params.append('offset', String(offset));
 
       const res = await fetch(`/api/stock/movements?${params.toString()}`);
       const json = await res.json();
       if (json.success) {
         setMovements(json.data.items || []);
+        setTotalMovements(json.data.total || 0);
       }
     } catch (err) {
       console.error(err);
@@ -40,10 +45,11 @@ export const StockMovementsView: React.FC = () => {
 
   useEffect(() => {
     fetchMovements();
-  }, [selectedType]);
+  }, [selectedType, currentPage, pageSize]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setCurrentPage(1);
     fetchMovements();
   };
 
@@ -108,7 +114,10 @@ export const StockMovementsView: React.FC = () => {
           <div className="md:col-span-4">
             <select
               value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value)}
+              onChange={(e) => {
+                setSelectedType(e.target.value);
+                setCurrentPage(1);
+              }}
               className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
             >
               <option value="ALL">Semua Tipe Transaksi</option>
@@ -134,91 +143,106 @@ export const StockMovementsView: React.FC = () => {
             Belum ada log mutasi yang sesuai filter.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
-                <tr>
-                  <th className="py-3 px-4">Waktu</th>
-                  <th className="py-3 px-4">Barang & Varian</th>
-                  <th className="py-3 px-4">Tipe Transaksi</th>
-                  <th className="py-3 px-4 text-center">Stok Awal</th>
-                  <th className="py-3 px-4 text-center">Perubahan</th>
-                  <th className="py-3 px-4 text-center">Stok Akhir</th>
-                  <th className="py-3 px-4">Referensi & Alasan</th>
-                  <th className="py-3 px-4">Petugas</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {movements.map((m) => {
-                  const change = Number(m.quantity_change);
-                  const isPositive = change > 0;
-                  return (
-                    <tr key={m.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                      <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
-                        <div className="font-medium text-slate-700 dark:text-slate-300">
-                          {formatDate(m.created_at)}
-                        </div>
-                        <span className="font-mono text-[9px] text-slate-400">
-                          {m.id.slice(0, 13)}...
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-900 dark:text-white">
-                          {m.product_name}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          {m.variant_name} • <span className="font-mono text-[10px]">{m.variant_sku}</span>
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        {getMovementBadge(m.movement_type)}
-                      </td>
-
-                      <td className="py-3 px-4 text-center font-mono font-medium text-slate-500">
-                        {formatStock(m.previous_stock)}
-                      </td>
-
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center gap-1 font-bold px-2.5 py-1 rounded-full ${
-                            isPositive
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                              : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
-                          }`}
-                        >
-                          {isPositive ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5" />}
-                          {isPositive ? `+${formatStock(change)}` : formatStock(change)}
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-4 text-center font-mono font-extrabold text-slate-900 dark:text-white">
-                        {formatStock(m.current_stock)}
-                      </td>
-
-                      <td className="py-3 px-4 max-w-[200px]">
-                        {m.reference_no && (
-                          <span className="block font-mono text-[10px] text-slate-400 mb-0.5">
-                            Ref: {m.reference_no}
+          <div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
+                  <tr>
+                    <th className="py-3 px-4">Waktu</th>
+                    <th className="py-3 px-4">Barang & Varian</th>
+                    <th className="py-3 px-4">Tipe Transaksi</th>
+                    <th className="py-3 px-4 text-center">Stok Awal</th>
+                    <th className="py-3 px-4 text-center">Perubahan</th>
+                    <th className="py-3 px-4 text-center">Stok Akhir</th>
+                    <th className="py-3 px-4">Referensi & Alasan</th>
+                    <th className="py-3 px-4">Petugas</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {movements.map((m) => {
+                    const change = Number(m.quantity_change);
+                    const isPositive = change > 0;
+                    return (
+                      <tr key={m.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                        <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
+                          <div className="font-medium text-slate-700 dark:text-slate-300">
+                            {formatDate(m.created_at)}
+                          </div>
+                          <span className="font-mono text-[9px] text-slate-400">
+                            {m.id.slice(0, 13)}...
                           </span>
-                        )}
-                        <p className="text-slate-700 dark:text-slate-300 text-xs truncate" title={m.notes || ''}>
-                          {m.notes || '-'}
-                        </p>
-                      </td>
+                        </td>
 
-                      <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
-                        <span className="flex items-center gap-1 text-[11px]">
-                          <User className="w-3 h-3 text-slate-400" />
-                          {m.created_by || 'Admin'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        <td className="py-3 px-4">
+                          <div className="font-bold text-slate-900 dark:text-white">
+                            {m.product_name}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {m.variant_name} • <span className="font-mono text-[10px]">{m.variant_sku}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          {getMovementBadge(m.movement_type)}
+                        </td>
+
+                        <td className="py-3 px-4 text-center font-mono font-medium text-slate-500">
+                          {formatStock(m.previous_stock)}
+                        </td>
+
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center gap-1 font-bold px-2.5 py-1 rounded-full ${
+                              isPositive
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                            }`}
+                          >
+                            {isPositive ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5" />}
+                            {isPositive ? `+${formatStock(change)}` : formatStock(change)}
+                          </span>
+                        </td>
+
+                        <td className="py-3 px-4 text-center font-mono font-extrabold text-slate-900 dark:text-white">
+                          {formatStock(m.current_stock)}
+                        </td>
+
+                        <td className="py-3 px-4 max-w-[200px]">
+                          {m.reference_no && (
+                            <span className="block font-mono text-[10px] text-slate-400 mb-0.5">
+                              Ref: {m.reference_no}
+                            </span>
+                          )}
+                          <p className="text-slate-700 dark:text-slate-300 text-xs truncate" title={m.notes || ''}>
+                            {m.notes || '-'}
+                          </p>
+                        </td>
+
+                        <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
+                          <span className="flex items-center gap-1 text-[11px]">
+                            <User className="w-3 h-3 text-slate-400" />
+                            {m.created_by || 'Admin'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination for Stock Movements */}
+            <Pagination
+              currentPage={currentPage}
+              totalItems={totalMovements}
+              pageSize={pageSize}
+              onPageChange={(page) => setCurrentPage(page)}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setCurrentPage(1);
+              }}
+              pageSizeOptions={[10, 15, 25, 50]}
+            />
           </div>
         )}
       </div>

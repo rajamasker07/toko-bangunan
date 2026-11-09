@@ -117,13 +117,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  getStockMovements: (filters?: { variantId?: string; productId?: string; type?: string; search?: string; limit?: number }) => {
+  getStockMovements: (filters?: { variantId?: string; productId?: string; type?: string; search?: string; limit?: number; offset?: number }) => {
     const params = new URLSearchParams();
     if (filters?.variantId) params.append('variantId', filters.variantId);
     if (filters?.productId) params.append('productId', filters.productId);
     if (filters?.type && filters.type !== 'ALL') params.append('type', filters.type);
     if (filters?.search) params.append('search', filters.search);
     if (filters?.limit) params.append('limit', String(filters.limit));
+    if (filters?.offset !== undefined) params.append('offset', String(filters.offset));
     const queryStr = params.toString() ? `?${params.toString()}` : '';
     return fetchJson<{ total: number; items: StockMovement[] }>(`/stock/movements${queryStr}`);
   },

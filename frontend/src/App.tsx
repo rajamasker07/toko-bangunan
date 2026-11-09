@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from './services/api';
-import { Product, Category, DashboardSummary } from './types';
+import { Product, ProductVariant, Category, DashboardSummary } from './types';
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
 import { ProductListView } from './components/ProductListView';
+import { ProductDetailView } from './components/ProductDetailView';
+import { VariantDetailView } from './components/VariantDetailView';
+import { AddVariantModal } from './components/AddVariantModal';
 import { ProductFormModal } from './components/ProductFormModal';
 import { StockAdjustmentModal } from './components/StockAdjustmentModal';
 import { StockMovementsView } from './components/StockMovementsView';
 import { CategoryManagementView } from './components/CategoryManagementView';
-import { ProductDetailModal } from './components/ProductDetailModal';
 import { DocsView } from './components/DocsView';
 import { useToast } from './components/Toast';
 
@@ -23,12 +25,20 @@ export const App: React.FC = () => {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  // Navigation drill-down state for "Data Produk"
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null);
+
   // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState<boolean>(false);
   const [isAdjustOpen, setIsAdjustOpen] = useState<boolean>(false);
   const [adjustVariantId, setAdjustVariantId] = useState<string | undefined>(undefined);
-  const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const [productStockFilter, setProductStockFilter] = useState<string>('all');
+
+  // Add Variant Modal state
+  const [isAddVariantOpen, setIsAddVariantOpen] = useState<boolean>(false);
+  const [addVariantProductId, setAddVariantProductId] = useState<string>('');
+  const [addVariantProductName, setAddVariantProductName] = useState<string>('');
 
   const loadData = useCallback(async () => {
     try {
@@ -44,6 +54,21 @@ export const App: React.FC = () => {
       setProducts(prodData);
       setCategories(catFlat);
       setCategoriesTree(catTree);
+
+      // Keep selected product & variant in sync if currently viewing them
+      setSelectedProduct((prevProd) => {
+        if (!prevProd) return null;
+        const fresh = prodData.find((p) => p.id === prevProd.id);
+        if (!fresh) return null;
+
+        // Also sync selected variant if open
+        setSelectedVariant((prevVar) => {
+          if (!prevVar) return null;
+          return fresh.variants?.find((v) => v.id === prevVar.id) || null;
+        });
+
+        return fresh;
+      });
     } catch (err: any) {
       console.error(err);
       showToast(err.message || 'Gagal memuat data dari server', 'error');
@@ -65,7 +90,19 @@ export const App: React.FC = () => {
   // Handle navigate to products with specific stock filter
   const handleNavigateToProducts = (filter = 'all') => {
     setProductStockFilter(filter);
+    setSelectedProduct(null);
+    setSelectedVariant(null);
     setActiveTab('products');
+  };
+
+  // Handle tab change from sidebar
+  const handleTabChange = (tab: ActiveTab) => {
+    if (tab === 'products' && activeTab === 'products') {
+      // If already on products tab and user clicks sidebar, reset to list
+      setSelectedProduct(null);
+      setSelectedVariant(null);
+    }
+    setActiveTab(tab);
   };
 
   // Handle delete product
@@ -77,6 +114,8 @@ export const App: React.FC = () => {
     try {
       await api.deleteProduct(id);
       showToast(`Produk "${name}" berhasil dihapus`, 'success');
+      setSelectedProduct(null);
+      setSelectedVariant(null);
       loadData();
     } catch (err: any) {
       showToast(err.message || 'Gagal menghapus produk', 'error');
@@ -95,7 +134,7 @@ export const App: React.FC = () => {
         {/* Left Sidebar */}
         <Sidebar
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
+          setActiveTab={handleTabChange}
           lowStockCount={summary?.low_stock_count}
         />
 
@@ -113,17 +152,52 @@ export const App: React.FC = () => {
           )}
 
           {activeTab === 'products' && (
-            <ProductListView
-              products={products}
-              categories={categories}
-              loading={loading}
-              onRefresh={loadData}
-              onOpenCreate={() => setIsCreateOpen(true)}
-              onOpenDetail={(p) => setDetailProduct(p)}
-              onOpenAdjust={handleOpenAdjust}
-              onDeleteProduct={handleDeleteProduct}
-              initialStockFilter={productStockFilter}
-            />
+            <>
+              {selectedProduct && selectedVariant ? (
+                <VariantDetailView
+                  product={selectedProduct}
+                  variant={selectedVariant}
+                  onBackToProduct={() => setSelectedVariant(null)}
+                  onBackToCatalog={() => {
+                    setSelectedVariant(null);
+                    setSelectedProduct(null);
+                  }}
+                  onOpenAdjust={handleOpenAdjust}
+                  showToast={showToast}
+                />
+              ) : selectedProduct ? (
+                <ProductDetailView
+                  product={selectedProduct}
+                  onBackToCatalog={() => {
+                    setSelectedVariant(null);
+                    setSelectedProduct(null);
+                  }}
+                  onSelectVariant={(v) => setSelectedVariant(v)}
+                  onOpenAdjust={handleOpenAdjust}
+                  onAddVariant={(pId) => {
+                    setAddVariantProductId(pId);
+                    setAddVariantProductName(selectedProduct.name);
+                    setIsAddVariantOpen(true);
+                  }}
+                  onDeleteProduct={handleDeleteProduct}
+                />
+              ) : (
+                <ProductListView
+                  products={products}
+                  categories={categories}
+                  loading={loading}
+                  onRefresh={loadData}
+                  onOpenCreate={() => setIsCreateOpen(true)}
+                  onOpenDetail={(p) => {
+                    setSelectedProduct(p);
+                    setSelectedVariant(null);
+                  }}
+                  onOpenAdjust={handleOpenAdjust}
+                  onDeleteProduct={handleDeleteProduct}
+                  initialStockFilter={productStockFilter}
+                />
+              )}
+            </>
           )}
 
           {activeTab === 'adjust' && (
@@ -186,13 +260,13 @@ export const App: React.FC = () => {
         showToast={showToast}
       />
 
-      <ProductDetailModal
-        product={detailProduct}
-        onClose={() => setDetailProduct(null)}
-        onAdjustStock={(varId) => {
-          setDetailProduct(null);
-          handleOpenAdjust(varId);
-        }}
+      <AddVariantModal
+        isOpen={isAddVariantOpen}
+        onClose={() => setIsAddVariantOpen(false)}
+        productId={addVariantProductId}
+        productName={addVariantProductName}
+        onSuccess={loadData}
+        showToast={showToast}
       />
     </div>
   );

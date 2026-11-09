@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Product, Category } from '../types';
 import { formatRupiah, formatStock } from '../utils/format';
+import { Pagination } from './common/Pagination';
 import { 
   Search, 
   Filter, 
@@ -12,7 +13,8 @@ import {
   ShieldCheck, 
   Download,
   Trash2,
-  Package
+  Package,
+  ChevronRight
 } from 'lucide-react';
 
 interface ProductListViewProps {
@@ -42,6 +44,15 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState('');
   const [stockFilter, setStockFilter] = useState(initialStockFilter);
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
+
+  // Reset to page 1 whenever filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, selectedCategory, stockFilter]);
+
   // Filter products client-side for ultra-responsive instant UX
   const filteredProducts = products.filter((p) => {
     const query = search.toLowerCase();
@@ -70,6 +81,12 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
     return matchSearch && matchCategory && matchStock;
   });
+
+  // Paginated slice
+  const paginatedProducts = filteredProducts.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
 
   const exportCSV = () => {
     const headers = ['ID (UUIDv7)', 'Nama Produk', 'SKU', 'Merk', 'Kategori', 'Total Stok', 'Batas Min', 'Varian', 'Harga Dasar'];
@@ -248,7 +265,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {filteredProducts.map((product) => {
+                {paginatedProducts.map((product) => {
                   const firstVariant = product.variants?.[0];
                   const primaryUnit = firstVariant?.units?.find((u) => u.is_base_unit) || firstVariant?.units?.[0];
                   const isLow = product.has_low_stock && Number(product.total_stock) > 0;
@@ -260,9 +277,15 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                       className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
                     >
                       <td className="py-3.5 px-4">
-                        <div className="font-bold text-slate-900 dark:text-white text-sm">
-                          {product.name}
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onOpenDetail(product)}
+                          className="font-bold text-slate-900 dark:text-white text-sm hover:text-amber-600 dark:hover:text-amber-400 transition-colors text-left flex items-center gap-1.5 group/name"
+                          title="Klik untuk melihat detail & varian produk ini"
+                        >
+                          <span>{product.name}</span>
+                          <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover/name:opacity-100 transition-opacity text-amber-500 shrink-0" />
+                        </button>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="font-mono text-[10px] text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
                             {product.sku}
@@ -370,6 +393,19 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
               </tbody>
             </table>
           </div>
+
+          {/* Pagination for Products List */}
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filteredProducts.length}
+            pageSize={pageSize}
+            onPageChange={(page) => setCurrentPage(page)}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setCurrentPage(1);
+            }}
+            pageSizeOptions={[5, 10, 20, 50]}
+          />
         </div>
       )}
     </div>
