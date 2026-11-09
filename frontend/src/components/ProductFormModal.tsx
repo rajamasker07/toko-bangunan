@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Category } from '../types';
-import { X, Plus, Trash2, CheckCircle2, Layers, Package, Tag, Sparkles } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Category, Brand } from '../types';
+import { api } from '../services/api';
+import { X, Plus, Trash2, CheckCircle2, Layers, Package, Tag, Sparkles, FolderPlus, Award } from 'lucide-react';
 
 interface ProductFormModalProps {
   isOpen: boolean;
@@ -25,9 +26,98 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [sku, setSku] = useState<string>('');
   const [barcode, setBarcode] = useState<string>('');
   const [categoryId, setCategoryId] = useState<string>('');
-  const [brand, setBrand] = useState<string>('');
+  const [brandId, setBrandId] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [minStockAlert, setMinStockAlert] = useState<number>(5);
+
+  // Master Brands List
+  const [brands, setBrands] = useState<Brand[]>([]);
+
+  // Local Categories List (allows immediate addition without full page reload)
+  const [localCategories, setLocalCategories] = useState<Category[]>(categories);
+
+  // Shortcut: Quick Add Category State
+  const [showQuickCategory, setShowQuickCategory] = useState<boolean>(false);
+  const [quickCatName, setQuickCatName] = useState<string>('');
+  const [quickCatParentId, setQuickCatParentId] = useState<string>('');
+  const [isSubmittingQuickCat, setIsSubmittingQuickCat] = useState<boolean>(false);
+
+  // Shortcut: Quick Add Brand State (anti-duplication)
+  const [showQuickBrand, setShowQuickBrand] = useState<boolean>(false);
+  const [quickBrandName, setQuickBrandName] = useState<string>('');
+  const [isSubmittingQuickBrand, setIsSubmittingQuickBrand] = useState<boolean>(false);
+
+  // Load brands on modal open
+  useEffect(() => {
+    if (isOpen) {
+      api.getBrands().then((data) => setBrands(data)).catch((err) => console.error(err));
+      setLocalCategories(categories);
+    }
+  }, [isOpen, categories]);
+
+  // Handle Quick Add Category
+  const handleQuickAddCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickCatName.trim()) {
+      showToast('Nama kategori wajib diisi', 'error');
+      return;
+    }
+    try {
+      setIsSubmittingQuickCat(true);
+      const newCat = await api.createCategory({
+        name: quickCatName.trim(),
+        parent_id: quickCatParentId || null,
+      });
+
+      // Update local categories list
+      const updatedCategories = await api.getCategories(true);
+      setLocalCategories(updatedCategories);
+
+      // Select the newly created category immediately
+      setCategoryId(newCat.id);
+      setQuickCatName('');
+      setQuickCatParentId('');
+      setShowQuickCategory(false);
+      showToast(`Kategori "${newCat.name}" berhasil ditambahkan & dipilih`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Gagal menambahkan kategori', 'error');
+    } finally {
+      setIsSubmittingQuickCat(false);
+    }
+  };
+
+  // Handle Quick Add Brand (Anti-duplikat)
+  const handleQuickAddBrand = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickBrandName.trim()) {
+      showToast('Nama merek wajib diisi', 'error');
+      return;
+    }
+    try {
+      setIsSubmittingQuickBrand(true);
+      const res = await api.createBrand({ name: quickBrandName.trim() });
+      const brandData = res.brand;
+
+      // Refresh brands list
+      const updatedBrands = await api.getBrands();
+      setBrands(updatedBrands);
+
+      // Select brand
+      setBrandId(brandData.id);
+      setQuickBrandName('');
+      setShowQuickBrand(false);
+
+      if (res.created) {
+        showToast(`Merek "${brandData.name}" berhasil ditambahkan`, 'success');
+      } else {
+        showToast(`Merek "${brandData.name}" sudah terdaftar, otomatis dipilih`, 'info');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Gagal menambahkan merek', 'error');
+    } finally {
+      setIsSubmittingQuickBrand(false);
+    }
+  };
 
   // Simple Product Form States
   const [initialStock, setInitialStock] = useState<number>(0);
@@ -98,7 +188,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       }
     };
 
-    traverse(categories);
+    traverse(localCategories);
     return options;
   };
 
@@ -201,7 +291,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         sku: sku.trim() || undefined,
         barcode: barcode.trim() || undefined,
         category_id: categoryId || null,
-        brand: brand.trim() || undefined,
+        brand_id: brandId || null,
         description: description.trim() || undefined,
         min_stock_alert: Number(minStockAlert) || 5,
         has_variants: hasVariants,
@@ -336,10 +426,21 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 />
               </div>
 
+              {/* Kategori Field with Quick-Add Shortcut */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Kategori / Sub-Kategori:
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Kategori / Sub-Kategori:
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickCategory((prev) => !prev)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
+                  >
+                    <FolderPlus className="w-3.5 h-3.5" />
+                    <span>{showQuickCategory ? 'Tutup' : '+ Kategori Baru'}</span>
+                  </button>
+                </div>
                 <select
                   value={categoryId}
                   onChange={(e) => setCategoryId(e.target.value)}
@@ -348,19 +449,114 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <option value="">-- Pilih Kategori --</option>
                   {renderCategoryOptions()}
                 </select>
+
+                {/* Inline Quick Category Form */}
+                {showQuickCategory && (
+                  <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2 animate-in fade-in slide-in-from-top-1">
+                    <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
+                      Tambah Kategori Cepat:
+                    </p>
+                    <input
+                      type="text"
+                      value={quickCatName}
+                      onChange={(e) => setQuickCatName(e.target.value)}
+                      placeholder="Nama kategori baru..."
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
+                    <select
+                      value={quickCatParentId}
+                      onChange={(e) => setQuickCatParentId(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    >
+                      <option value="">Sebagai Kategori Utama (Tanpa Induk)</option>
+                      {renderCategoryOptions()}
+                    </select>
+                    <div className="flex items-center justify-end gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickCategory(false)}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleQuickAddCategory}
+                        disabled={isSubmittingQuickCat}
+                        className="px-3 py-1 rounded-lg text-[11px] font-bold bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        {isSubmittingQuickCat ? 'Menyimpan...' : 'Simpan Kategori'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
+              {/* Merek / Brand Field with Quick-Add Shortcut & Anti-Duplication */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Merk / Brand:
-                </label>
-                <input
-                  type="text"
-                  value={brand}
-                  onChange={(e) => setBrand(e.target.value)}
-                  placeholder="Misal: Holcim, Rucika, Dulux, Roman..."
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Merk / Brand:
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickBrand((prev) => !prev)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
+                  >
+                    <Award className="w-3.5 h-3.5" />
+                    <span>{showQuickBrand ? 'Tutup' : '+ Merk Baru'}</span>
+                  </button>
+                </div>
+                <select
+                  value={brandId}
+                  onChange={(e) => setBrandId(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                />
+                >
+                  <option value="">-- Pilih Merk (Opsional) --</option>
+                  {brands.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Inline Quick Brand Form */}
+                {showQuickBrand && (
+                  <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2 animate-in fade-in slide-in-from-top-1">
+                    <div>
+                      <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
+                        Tambah Merk Baru:
+                      </p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Sistem otomatis memeriksa agar nama merek tidak duplikat.
+                      </p>
+                    </div>
+                    <input
+                      type="text"
+                      value={quickBrandName}
+                      onChange={(e) => setQuickBrandName(e.target.value)}
+                      placeholder="Contoh: Semen Gresik, Rucika, Dulux, Roman..."
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    />
+                    <div className="flex items-center justify-end gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickBrand(false)}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleQuickAddBrand}
+                        disabled={isSubmittingQuickBrand}
+                        className="px-3 py-1 rounded-lg text-[11px] font-bold bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        {isSubmittingQuickBrand ? 'Menyimpan...' : 'Simpan Merk'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>

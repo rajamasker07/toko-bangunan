@@ -6,8 +6,23 @@ import {
   History, 
   FolderTree, 
   BookOpen,
-  Sparkles
+  Sparkles,
+  AlertTriangle,
+  LucideIcon
 } from 'lucide-react';
+
+/** Format angka badge: tampilkan "99+" jika melebihi 99 agar badge tetap ringkas */
+const formatBadgeCount = (count: number): string => (count > 99 ? '99+' : String(count));
+
+interface NavItem {
+  id: ActiveTab;
+  label: string;
+  icon: LucideIcon;
+  badge: string | null;
+  badgeIcon?: LucideIcon;
+  badgeTitle?: string;
+  badgeColor?: string;
+}
 
 export type ActiveTab = 'dashboard' | 'products' | 'adjust' | 'movements' | 'categories' | 'docs';
 
@@ -18,7 +33,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, lowStockCount = 0 }) => {
-  const navItems = [
+  const navItems: NavItem[] = [
     {
       id: 'dashboard' as ActiveTab,
       label: 'Dashboard',
@@ -29,7 +44,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, lowSt
       id: 'products' as ActiveTab,
       label: 'Data Produk & Varian',
       icon: Package,
-      badge: lowStockCount > 0 ? `${lowStockCount} tipis` : null,
+      badge: lowStockCount > 0 ? formatBadgeCount(lowStockCount) : null,
+      badgeIcon: AlertTriangle,
+      badgeTitle: `${lowStockCount} varian dengan stok menipis`,
       badgeColor: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400',
     },
     {
@@ -79,16 +96,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, lowSt
                     : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-white dark:text-slate-950' : 'text-slate-400 dark:text-slate-400'}`} />
-                  <span>{item.label}</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white dark:text-slate-950' : 'text-slate-400 dark:text-slate-400'}`} />
+                  <span className="truncate">{item.label}</span>
                 </div>
                 {item.badge && (
                   <span
-                    className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                    title={item.badgeTitle}
+                    className={`ml-2 shrink-0 inline-flex items-center gap-0.5 text-[10px] leading-none px-1.5 py-1 rounded-full font-bold tabular-nums ${
                       isActive ? 'bg-white/20 text-white dark:bg-slate-950/30 dark:text-slate-950' : item.badgeColor
                     }`}
                   >
+                    {item.badgeIcon && <item.badgeIcon className="w-3 h-3" />}
                     {item.badge}
                   </span>
                 )}

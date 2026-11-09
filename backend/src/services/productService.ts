@@ -1,5 +1,9 @@
+import type { Pool, PoolClient } from 'pg';
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
+import { BrandService } from './brandService.js';
+
+type Queryable = Pool | PoolClient;
 
 export interface CreateUnitInput {
   unit_name: string;
@@ -24,7 +28,8 @@ export interface CreateProductInput {
   sku?: string;
   barcode?: string;
   category_id?: string | null;
-  brand?: string;
+  brand_id?: string | null; // ID merek dari master `brands`
+  brand?: string;           // atau nama merek -> otomatis cari/buat (anti-duplikat)
   description?: string;
   min_stock_alert?: number;
   has_variants?: boolean;
@@ -59,7 +64,7 @@ export class ProductService {
       conditions.push(`(
         LOWER(p.name) LIKE $${params.length} OR
         LOWER(p.sku) LIKE $${params.length} OR
-        LOWER(COALESCE(p.brand, '')) LIKE $${params.length} OR
+        LOWER(COALESCE(b.name, '')) LIKE $${params.length} OR
         EXISTS (
           SELECT 1 FROM product_variants pv 
           WHERE pv.product_id = p.id AND (
@@ -89,6 +94,7 @@ export class ProductService {
       SELECT 
         p.*,
         c.name as category_name,
+        b.name as brand,
         COALESCE(SUM(pv.current_stock), 0)::numeric as total_stock,
         COUNT(pv.id)::int as variant_count,
         BOOL_OR(pv.current_stock <= pv.min_stock) as has_low_stock,
@@ -121,9 +127,10 @@ export class ProductService {
         ) as variants
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
+      LEFT JOIN brands b ON p.brand_id = b.id
       LEFT JOIN product_variants pv ON p.id = pv.product_id
       ${whereClause}
-      GROUP BY p.id, c.name
+      GROUP BY p.id, c.name, b.name
       ORDER BY p.created_at DESC
     `;
 
@@ -151,6 +158,7 @@ export class ProductService {
       SELECT 
         p.*,
         c.name as category_name,
+        b.name as brand,
         (
           SELECT json_agg(
             json_build_object(
@@ -181,8 +189,9 @@ export class ProductService {
         ) as variants
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
+      LEFT JOIN brands b ON p.brand_id = b.id
       WHERE p.id = $1
-      GROUP BY p.id, c.name
+      GROUP BY p.id, c.name, b.name
     `;
     const res = await query(sql, [id]);
     return res.rows[0] || null;
@@ -198,6 +207,25 @@ export class ProductService {
   }
 
   /**
+   * Tentukan brand_id produk:
+   * - `brand_id` dikirim  -> dipakai langsung (null/'' = tanpa merek)
+   * - `brand` (nama) dikirim -> cari merek setara atau buat baru (tidak pernah menduplikasi)
+   * - keduanya tidak dikirim -> undefined (tidak diubah)
+   */
+  private static async resolveBrandId(
+    data: { brand_id?: string | null; brand?: string | null },
+    db: Queryable
+  ): Promise<string | null | undefined> {
+    if (data.brand_id !== undefined) return data.brand_id || null;
+    if (data.brand !== undefined) {
+      if (!data.brand || !String(data.brand).trim()) return null;
+      const { brand } = await BrandService.findOrCreate(String(data.brand), db);
+      return brand.id;
+    }
+    return undefined;
+  }
+
+  /**
    * Create product: handles single-variant (auto-create variant) or multi-variant
    */
   static async createProduct(data: CreateProductInput) {
@@ -210,10 +238,13 @@ export class ProductService {
 
       const hasVariants = Boolean(data.has_variants && data.variants && data.variants.length > 0);
 
+      // Resolve merek: pakai brand_id jika ada, atau cari/buat dari nama (anti-duplikat)
+      const brandId = await this.resolveBrandId(data, client);
+
       // 1. Insert Product
       await client.query(
         `INSERT INTO products (
-          id, name, sku, barcode, category_id, brand, description, min_stock_alert, has_variants
+          id, name, sku, barcode, category_id, brand_id, description, min_stock_alert, has_variants
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
           productId,
@@ -221,7 +252,7 @@ export class ProductService {
           productSku,
           data.barcode || null,
           data.category_id || null,
-          data.brand || null,
+          brandId ?? null,
           data.description || null,
           data.min_stock_alert ?? 5,
           hasVariants
@@ -357,13 +388,20 @@ export class ProductService {
     sku?: string;
     barcode?: string;
     category_id?: string | null;
-    brand?: string;
+    brand_id?: string | null;
+    brand?: string | null;
     description?: string;
     min_stock_alert?: number;
     is_active?: boolean;
   }) {
     const fields: string[] = [];
     const values: any[] = [];
+
+    const brandId = await this.resolveBrandId(data, pool);
+    if (brandId !== undefined) {
+      values.push(brandId);
+      fields.push(`brand_id = $${values.length}`);
+    }
 
     if (data.name !== undefined) {
       values.push(data.name);
@@ -380,10 +418,6 @@ export class ProductService {
     if (data.category_id !== undefined) {
       values.push(data.category_id);
       fields.push(`category_id = $${values.length}`);
-    }
-    if (data.brand !== undefined) {
-      values.push(data.brand);
-      fields.push(`brand = $${values.length}`);
     }
     if (data.description !== undefined) {
       values.push(data.description);

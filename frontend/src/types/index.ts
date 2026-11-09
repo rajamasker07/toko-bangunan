@@ -9,6 +9,15 @@ export interface Category {
   children?: Category[];
 }
 
+export interface Brand {
+  id: string;
+  name: string;
+  name_key: string;
+  created_at: string;
+  updated_at: string;
+  product_count?: number;
+}
+
 export interface VariantUnit {
   id: string;
   unit_name: string;

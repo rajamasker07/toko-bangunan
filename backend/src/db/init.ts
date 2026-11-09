@@ -1,4 +1,53 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../config/db.js';
+import { generateUUIDv7 } from '../utils/uuid.js';
+import { brandKey, normalizeBrandName } from '../utils/brand.js';
+
+async function columnExists(client: PoolClient, table: string, column: string): Promise<boolean> {
+  const res = await client.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2`,
+    [table, column]
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+/**
+ * Migrasi database versi lama yang menyimpan merek sebagai teks bebas di `products.brand`.
+ * - Menambah kolom `products.brand_id` (PostgreSQL 9.5 belum mendukung ADD COLUMN IF NOT EXISTS)
+ * - Memindahkan merek unik ke tabel `brands` (dedup via name_key)
+ * - Menghubungkan produk ke brand, lalu menghapus kolom teks lama
+ * Berjalan di dalam transaksi yang sama dengan inisialisasi skema.
+ */
+async function migrateLegacyBrandColumn(client: PoolClient) {
+  if (!(await columnExists(client, 'products', 'brand_id'))) {
+    await client.query('ALTER TABLE products ADD COLUMN brand_id UUID REFERENCES brands(id) ON DELETE SET NULL');
+  }
+
+  if (!(await columnExists(client, 'products', 'brand'))) return;
+
+  console.log('🔁 Migrasi kolom products.brand -> tabel brands...');
+  const legacy = await client.query(
+    `SELECT id, brand FROM products WHERE brand IS NOT NULL AND TRIM(brand) <> ''`
+  );
+
+  for (const row of legacy.rows as Array<{ id: string; brand: string }>) {
+    const name = normalizeBrandName(row.brand);
+    const key = brandKey(name);
+    await client.query(
+      `INSERT INTO brands (id, name, name_key) VALUES ($1, $2, $3)
+       ON CONFLICT (name_key) DO NOTHING`,
+      [generateUUIDv7(), name, key]
+    );
+    await client.query(
+      `UPDATE products SET brand_id = (SELECT id FROM brands WHERE name_key = $1) WHERE id = $2`,
+      [key, row.id]
+    );
+  }
+
+  await client.query('ALTER TABLE products DROP COLUMN brand');
+  console.log(`✅ Migrasi merek selesai (${legacy.rowCount} produk diperbarui).`);
+}
 
 export async function initializeDatabase() {
   const client = await pool.connect();
@@ -20,7 +69,21 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
     `);
 
-    // 2. Products Table
+    // 2. Brands Table (Master merek - mencegah input merek berulang)
+    //    `name_key` = kunci pembanding ternormalisasi (lihat utils/brand.ts) dengan UNIQUE constraint,
+    //    sehingga "Tiga Roda", "tiga-roda", "TIGA RODA" tidak bisa tersimpan dua kali.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS brands (
+        id UUID PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        name_key VARCHAR(100) NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_brands_name_key ON brands(name_key);
+    `);
+
+    // 3. Products Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS products (
         id UUID PRIMARY KEY,
@@ -28,7 +91,7 @@ export async function initializeDatabase() {
         sku VARCHAR(100) UNIQUE NOT NULL,
         barcode VARCHAR(100),
         category_id UUID REFERENCES categories(id) ON DELETE SET NULL,
-        brand VARCHAR(100),
+        brand_id UUID REFERENCES brands(id) ON DELETE SET NULL,
         description TEXT,
         min_stock_alert NUMERIC(12, 2) DEFAULT 5,
         is_active BOOLEAN DEFAULT TRUE,
@@ -39,6 +102,10 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
       CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
     `);
+
+    // 3b. Migrasi skema lama: kolom teks `products.brand` -> relasi `products.brand_id`
+    await migrateLegacyBrandColumn(client);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand_id);');
 
     // 3. Product Variants Table
     await client.query(`

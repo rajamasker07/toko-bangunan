@@ -1,4 +1,4 @@
-import { Category, Product, StockMovement, DashboardSummary } from '../types';
+import { Category, Brand, Product, StockMovement, DashboardSummary } from '../types';
 
 const BASE_URL = '/api';
 
@@ -38,6 +38,14 @@ export const api = {
   deleteCategory: (id: string) =>
     fetchJson<void>(`/categories/${id}`, {
       method: 'DELETE',
+    }),
+
+  // Brands (Master Merek anti-duplikat)
+  getBrands: () => fetchJson<Brand[]>('/brands'),
+  createBrand: (data: { name: string }) =>
+    fetchJson<{ brand: Brand; created: boolean }>('/brands', {
+      method: 'POST',
+      body: JSON.stringify(data),
     }),
 
   // Products
