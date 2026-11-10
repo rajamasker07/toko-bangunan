@@ -50,6 +50,35 @@ export const App: React.FC = () => {
   const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
   const [editingVariantProductName, setEditingVariantProductName] = useState<string>('');
 
+  // Sidebar collapsed state with localStorage persistence
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('sidebar_collapsed') === 'true';
+  });
+
+  const toggleSidebar = useCallback(() => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('sidebar_collapsed', String(next));
+      return next;
+    });
+  }, []);
+
+  // Keyboard shortcut Ctrl+B or Cmd+B to toggle sidebar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        // Prevent default if not typing in input/textarea
+        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+        if (tag !== 'input' && tag !== 'textarea') {
+          e.preventDefault();
+          toggleSidebar();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleSidebar]);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -151,6 +180,8 @@ export const App: React.FC = () => {
       <Navbar
         lowStockCount={summary?.low_stock_count || 0}
         onNavigateToLowStock={() => handleNavigateToProducts('low')}
+        isSidebarCollapsed={isSidebarCollapsed}
+        onToggleSidebar={toggleSidebar}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -159,6 +190,8 @@ export const App: React.FC = () => {
           activeTab={activeTab}
           setActiveTab={handleTabChange}
           lowStockCount={summary?.low_stock_count}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={toggleSidebar}
         />
 
         {/* Main Content Area */}
