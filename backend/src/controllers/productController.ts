@@ -6,8 +6,9 @@ export class ProductController {
     try {
       const search = req.query.search as string;
       const categoryId = req.query.categoryId as string;
+      const brand = req.query.brand as string;
       const stockStatus = req.query.stockStatus as any;
-      const products = await ProductService.getProducts({ search, categoryId, stockStatus });
+      const products = await ProductService.getProducts({ search, categoryId, brand, stockStatus });
       res.json({ success: true, data: products });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });

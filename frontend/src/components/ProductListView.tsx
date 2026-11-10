@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Product, Category } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Product, Category, Brand } from '../types';
 import { formatRupiah, formatStock } from '../utils/format';
 import { Pagination } from './common/Pagination';
 import { 
@@ -21,6 +21,7 @@ import {
 interface ProductListViewProps {
   products: Product[];
   categories: Category[];
+  brands?: Brand[];
   loading: boolean;
   onRefresh: () => void;
   onOpenCreate: () => void;
@@ -34,6 +35,7 @@ interface ProductListViewProps {
 export const ProductListView: React.FC<ProductListViewProps> = ({
   products,
   categories,
+  brands = [],
   loading,
   onRefresh,
   onOpenCreate,
@@ -45,7 +47,22 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 }) => {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedBrand, setSelectedBrand] = useState('');
   const [stockFilter, setStockFilter] = useState(initialStockFilter);
+
+  // Extract unique brands list
+  const brandList = useMemo(() => {
+    const list: string[] = [];
+    if (brands && brands.length > 0) {
+      brands.forEach((b) => {
+        if (b.name && !list.includes(b.name)) list.push(b.name);
+      });
+    }
+    products.forEach((p) => {
+      if (p.brand && !list.includes(p.brand)) list.push(p.brand);
+    });
+    return list.sort((a, b) => a.localeCompare(b));
+  }, [brands, products]);
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -54,7 +71,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   // Reset to page 1 whenever filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, selectedCategory, stockFilter]);
+  }, [search, selectedCategory, selectedBrand, stockFilter]);
 
   // Filter products client-side for ultra-responsive instant UX
   const filteredProducts = products.filter((p) => {
@@ -73,6 +90,9 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
     const matchCategory =
       !selectedCategory || p.category_id === selectedCategory;
 
+    const matchBrand =
+      !selectedBrand || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
+
     let matchStock = true;
     if (stockFilter === 'low') {
       matchStock = Boolean(p.has_low_stock && Number(p.total_stock) > 0);
@@ -82,7 +102,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
       matchStock = !p.has_low_stock && Number(p.total_stock) > 0;
     }
 
-    return matchSearch && matchCategory && matchStock;
+    return matchSearch && matchCategory && matchBrand && matchStock;
   });
 
   // Paginated slice
@@ -151,25 +171,25 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
       {/* Filter and Search Bar */}
       <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
           {/* Search Input */}
-          <div className="md:col-span-5 relative">
+          <div className="sm:col-span-5 relative">
             <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Cari nama semen, pipa, cat, merk, atau SKU..."
-              className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
             />
           </div>
 
           {/* Category Filter */}
-          <div className="md:col-span-4">
+          <div className="sm:col-span-4">
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
             >
               <option value="">Semua Kategori</option>
               {categories.map((c) => (
@@ -180,54 +200,90 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
             </select>
           </div>
 
-          {/* Stock Status Filter */}
-          <div className="md:col-span-3">
+          {/* Brand Filter (Merek) */}
+          <div className="sm:col-span-3">
             <select
-              value={stockFilter}
-              onChange={(e) => setStockFilter(e.target.value)}
+              value={selectedBrand}
+              onChange={(e) => setSelectedBrand(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
             >
-              <option value="all">Semua Status Stok</option>
-              <option value="low">⚠️ Stok Kritis (Menipis)</option>
-              <option value="out">🛑 Stok Habis (0)</option>
-              <option value="normal">✅ Stok Aman</option>
+              <option value="">Semua Merek ({brandList.length})</option>
+              {brandList.map((brandName) => (
+                <option key={brandName} value={brandName}>
+                  {brandName}
+                </option>
+              ))}
             </select>
           </div>
         </div>
 
-        {/* Quick status pills */}
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-          <span className="text-slate-400">Filter Cepat:</span>
-          <button
-            onClick={() => setStockFilter('all')}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
-              stockFilter === 'all'
-                ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            Semua ({products.length})
-          </button>
-          <button
-            onClick={() => setStockFilter('low')}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
-              stockFilter === 'low'
-                ? 'bg-amber-500 text-white'
-                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-            }`}
-          >
-            Stok Kritis ({products.filter((p) => p.has_low_stock && Number(p.total_stock) > 0).length})
-          </button>
-          <button
-            onClick={() => setStockFilter('out')}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
-              stockFilter === 'out'
-                ? 'bg-rose-600 text-white'
-                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
-            }`}
-          >
-            Stok Habis ({products.filter((p) => Number(p.total_stock) <= 0).length})
-          </button>
+        {/* Quick status pills for Stock */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-100 dark:border-slate-800 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-slate-400 font-semibold text-[11px] mr-1">Filter Cepat Stok:</span>
+            <button
+              type="button"
+              onClick={() => setStockFilter('all')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                stockFilter === 'all'
+                  ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              Semua ({products.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStockFilter('low')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1 ${
+                stockFilter === 'low'
+                  ? 'bg-amber-500 text-white shadow-sm'
+                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'
+              }`}
+            >
+              <AlertTriangle className="w-3 h-3" />
+              <span>Stok Kritis ({products.filter((p) => p.has_low_stock && Number(p.total_stock) > 0).length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStockFilter('out')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1 ${
+                stockFilter === 'out'
+                  ? 'bg-rose-600 text-white shadow-sm'
+                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block"></span>
+              <span>Stok Habis ({products.filter((p) => Number(p.total_stock) <= 0).length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStockFilter('normal')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1 ${
+                stockFilter === 'normal'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
+              }`}
+            >
+              <ShieldCheck className="w-3 h-3" />
+              <span>Stok Aman ({products.filter((p) => !p.has_low_stock && Number(p.total_stock) > 0).length})</span>
+            </button>
+          </div>
+
+          {(search || selectedCategory || selectedBrand || stockFilter !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch('');
+                setSelectedCategory('');
+                setSelectedBrand('');
+                setStockFilter('all');
+              }}
+              className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline font-semibold"
+            >
+              Reset Semua Filter
+            </button>
+          )}
         </div>
       </div>
 
@@ -244,14 +300,30 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
             Tidak ada produk yang cocok
           </h3>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            Coba ubah kata kunci pencarian atau filter status stok.
+            Coba ubah kata kunci pencarian, kategori, merek, atau filter stok.
           </p>
-          <button
-            onClick={onOpenCreate}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700"
-          >
-            <Plus className="w-4 h-4" /> Tambah Produk Baru
-          </button>
+          <div className="flex items-center justify-center gap-2 pt-1">
+            {(search || selectedCategory || selectedBrand || stockFilter !== 'all') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setSelectedCategory('');
+                  setSelectedBrand('');
+                  setStockFilter('all');
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200"
+              >
+                Reset Filter
+              </button>
+            )}
+            <button
+              onClick={onOpenCreate}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700"
+            >
+              <Plus className="w-4 h-4" /> Tambah Produk Baru
+            </button>
+          </div>
         </div>
       ) : (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from './services/api';
-import { Product, ProductVariant, Category, DashboardSummary } from './types';
+import { Product, ProductVariant, Category, Brand, DashboardSummary } from './types';
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
@@ -24,6 +24,7 @@ export const App: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoriesTree, setCategoriesTree] = useState<Category[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -82,17 +83,19 @@ export const App: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [sumData, prodData, catFlat, catTree] = await Promise.all([
+      const [sumData, prodData, catFlat, catTree, brandData] = await Promise.all([
         api.getDashboardSummary(),
         api.getProducts(),
         api.getCategories(false),
         api.getCategories(true),
+        api.getBrands(),
       ]);
 
       setSummary(sumData);
       setProducts(prodData);
       setCategories(catFlat);
       setCategoriesTree(catTree);
+      setBrands(brandData);
 
       // Keep selected product & variant in sync if currently viewing them
       setSelectedProduct((prevProd) => {
@@ -245,6 +248,7 @@ export const App: React.FC = () => {
                 <ProductListView
                   products={products}
                   categories={categories}
+                  brands={brands}
                   loading={loading}
                   onRefresh={loadData}
                   onOpenCreate={() => setIsCreateOpen(true)}

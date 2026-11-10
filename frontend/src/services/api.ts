@@ -49,10 +49,11 @@ export const api = {
     }),
 
   // Products
-  getProducts: (filters?: { search?: string; categoryId?: string; stockStatus?: string }) => {
+  getProducts: (filters?: { search?: string; categoryId?: string; brand?: string; stockStatus?: string }) => {
     const params = new URLSearchParams();
     if (filters?.search) params.append('search', filters.search);
     if (filters?.categoryId) params.append('categoryId', filters.categoryId);
+    if (filters?.brand) params.append('brand', filters.brand);
     if (filters?.stockStatus && filters.stockStatus !== 'all') params.append('stockStatus', filters.stockStatus);
     const queryStr = params.toString() ? `?${params.toString()}` : '';
     return fetchJson<Product[]>(`/products${queryStr}`);

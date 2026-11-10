@@ -52,6 +52,7 @@ export class ProductService {
   static async getProducts(filters?: {
     search?: string;
     categoryId?: string;
+    brand?: string;
     stockStatus?: 'all' | 'low' | 'out' | 'normal';
     limit?: number;
     offset?: number;
@@ -86,6 +87,11 @@ export class ProductService {
         )
         SELECT id FROM cat_tree
       )`);
+    }
+
+    if (filters?.brand) {
+      params.push(filters.brand.toLowerCase());
+      conditions.push(`LOWER(b.name) = $${params.length}`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
