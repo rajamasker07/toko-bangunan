@@ -3,6 +3,7 @@ import { Product, ProductVariant, StockMovement, VariantUnit } from '../types';
 import { api } from '../services/api';
 import { formatRupiah, formatStock, formatDate } from '../utils/format';
 import { Pagination } from './common/Pagination';
+import { EditUnitModal } from './EditUnitModal';
 import { 
   ArrowLeft, 
   Layers, 
@@ -18,7 +19,8 @@ import {
   Trash2,
   Calendar,
   User,
-  Barcode
+  Barcode,
+  Edit2
 } from 'lucide-react';
 
 interface VariantDetailViewProps {
@@ -28,6 +30,8 @@ interface VariantDetailViewProps {
   onBackToCatalog: () => void;
   onOpenAdjust: (variantId: string) => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  onEditVariant?: (variant: ProductVariant) => void;
+  onRefresh?: () => void;
 }
 
 export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
@@ -37,6 +41,8 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
   onBackToCatalog,
   onOpenAdjust,
   showToast,
+  onEditVariant,
+  onRefresh,
 }) => {
   // Movements log state with paging
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -54,6 +60,10 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
   const [newBuyPrice, setNewBuyPrice] = useState<number>(0);
   const [newWholesalePrice, setNewWholesalePrice] = useState<string>('');
   const [isSubmittingUnit, setIsSubmittingUnit] = useState<boolean>(false);
+
+  // Edit Unit modal state
+  const [editingUnit, setEditingUnit] = useState<VariantUnit | null>(null);
+  const [isEditUnitOpen, setIsEditUnitOpen] = useState<boolean>(false);
 
   // Fetch variant-specific movements with pagination
   const fetchVariantMovements = useCallback(async () => {
@@ -112,11 +122,22 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
       setNewWholesalePrice('');
 
       // Refresh product data
-      onBackToProduct();
+      if (onRefresh) onRefresh();
     } catch (err: any) {
       showToast(err.message || 'Gagal menambahkan satuan harga', 'error');
     } finally {
       setIsSubmittingUnit(false);
+    }
+  };
+
+  const handleDeleteUnit = async (unitId: string, unitName: string) => {
+    if (!confirm(`Hapus satuan harga "${unitName}" dari varian ini?`)) return;
+    try {
+      await api.deleteUnit(unitId);
+      showToast(`Satuan "${unitName}" berhasil dihapus`, 'success');
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      showToast(err.message || 'Gagal menghapus satuan', 'error');
     }
   };
 
@@ -231,6 +252,17 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
               </span>
             </div>
 
+            {onEditVariant && (
+              <button
+                onClick={() => onEditVariant(variant)}
+                className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all shrink-0 border border-slate-200 dark:border-slate-700"
+                title="Edit Data Varian"
+              >
+                <Edit2 className="w-4 h-4 text-blue-500" />
+                <span>Edit Varian</span>
+              </button>
+            )}
+
             {/* Quick Adjust Button */}
             <button
               onClick={() => onOpenAdjust(variant.id)}
@@ -280,15 +312,38 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                   <Tag className="w-3.5 h-3.5 text-amber-500" />
                   {u.unit_name}
                 </span>
-                {u.is_base_unit ? (
-                  <span className="text-[10px] font-extrabold uppercase bg-amber-500 text-white px-2 py-0.5 rounded-full">
-                    Satuan Dasar Stok
-                  </span>
-                ) : (
-                  <span className="text-[11px] font-medium text-slate-400">
-                    1 {u.unit_name} = {formatStock(u.conversion_factor)} unit dasar
-                  </span>
-                )}
+                <div className="flex items-center gap-1.5">
+                  {u.is_base_unit ? (
+                    <span className="text-[10px] font-extrabold uppercase bg-amber-500 text-white px-2 py-0.5 rounded-full">
+                      Satuan Dasar
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-medium text-slate-400">
+                      1 {u.unit_name} = {formatStock(u.conversion_factor)} unit dasar
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingUnit(u);
+                      setIsEditUnitOpen(true);
+                    }}
+                    className="p-1 rounded-md text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors ml-1"
+                    title="Edit Satuan & Harga"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                  {!u.is_base_unit && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteUnit(u.id, u.unit_name)}
+                      className="p-1 rounded-md text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                      title="Hapus Satuan"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-1.5 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
@@ -567,6 +622,21 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Edit Unit Modal */}
+      <EditUnitModal
+        isOpen={isEditUnitOpen}
+        onClose={() => {
+          setIsEditUnitOpen(false);
+          setEditingUnit(null);
+        }}
+        unit={editingUnit}
+        variantName={variant.variant_name}
+        onSuccess={() => {
+          if (onRefresh) onRefresh();
+        }}
+        showToast={showToast}
+      />
     </div>
   );
 };

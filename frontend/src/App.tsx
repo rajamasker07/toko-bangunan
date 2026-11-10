@@ -9,6 +9,8 @@ import { ProductDetailView } from './components/ProductDetailView';
 import { VariantDetailView } from './components/VariantDetailView';
 import { AddVariantModal } from './components/AddVariantModal';
 import { ProductFormModal } from './components/ProductFormModal';
+import { EditProductModal } from './components/EditProductModal';
+import { EditVariantModal } from './components/EditVariantModal';
 import { StockAdjustmentModal } from './components/StockAdjustmentModal';
 import { StockMovementsView } from './components/StockMovementsView';
 import { CategoryManagementView } from './components/CategoryManagementView';
@@ -39,6 +41,14 @@ export const App: React.FC = () => {
   const [isAddVariantOpen, setIsAddVariantOpen] = useState<boolean>(false);
   const [addVariantProductId, setAddVariantProductId] = useState<string>('');
   const [addVariantProductName, setAddVariantProductName] = useState<string>('');
+
+  // Edit Product & Variant state
+  const [isEditProductOpen, setIsEditProductOpen] = useState<boolean>(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+
+  const [isEditVariantOpen, setIsEditVariantOpen] = useState<boolean>(false);
+  const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
+  const [editingVariantProductName, setEditingVariantProductName] = useState<string>('');
 
   const loadData = useCallback(async () => {
     try {
@@ -122,6 +132,19 @@ export const App: React.FC = () => {
     }
   };
 
+  // Handle open edit product
+  const handleOpenEditProduct = (prod: Product) => {
+    setEditingProduct(prod);
+    setIsEditProductOpen(true);
+  };
+
+  // Handle open edit variant
+  const handleOpenEditVariant = (variant: ProductVariant, prodName?: string) => {
+    setEditingVariant(variant);
+    setEditingVariantProductName(prodName || selectedProduct?.name || '');
+    setIsEditVariantOpen(true);
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
       {/* Top Navbar */}
@@ -164,6 +187,8 @@ export const App: React.FC = () => {
                   }}
                   onOpenAdjust={handleOpenAdjust}
                   showToast={showToast}
+                  onEditVariant={(v) => handleOpenEditVariant(v, selectedProduct.name)}
+                  onRefresh={loadData}
                 />
               ) : selectedProduct ? (
                 <ProductDetailView
@@ -180,6 +205,8 @@ export const App: React.FC = () => {
                     setIsAddVariantOpen(true);
                   }}
                   onDeleteProduct={handleDeleteProduct}
+                  onEditProduct={handleOpenEditProduct}
+                  onEditVariant={(v) => handleOpenEditVariant(v, selectedProduct.name)}
                 />
               ) : (
                 <ProductListView
@@ -194,6 +221,7 @@ export const App: React.FC = () => {
                   }}
                   onOpenAdjust={handleOpenAdjust}
                   onDeleteProduct={handleDeleteProduct}
+                  onEditProduct={handleOpenEditProduct}
                   initialStockFilter={productStockFilter}
                 />
               )}
@@ -265,6 +293,30 @@ export const App: React.FC = () => {
         onClose={() => setIsAddVariantOpen(false)}
         productId={addVariantProductId}
         productName={addVariantProductName}
+        onSuccess={loadData}
+        showToast={showToast}
+      />
+
+      <EditProductModal
+        isOpen={isEditProductOpen}
+        onClose={() => {
+          setIsEditProductOpen(false);
+          setEditingProduct(null);
+        }}
+        product={editingProduct}
+        categories={categoriesTree}
+        onSuccess={loadData}
+        showToast={showToast}
+      />
+
+      <EditVariantModal
+        isOpen={isEditVariantOpen}
+        onClose={() => {
+          setIsEditVariantOpen(false);
+          setEditingVariant(null);
+        }}
+        variant={editingVariant}
+        productName={editingVariantProductName}
         onSuccess={loadData}
         showToast={showToast}
       />

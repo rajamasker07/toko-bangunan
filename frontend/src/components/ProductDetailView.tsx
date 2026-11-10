@@ -15,7 +15,8 @@ import {
   Trash2, 
   Barcode, 
   Building2, 
-  Folder 
+  Folder,
+  Edit2
 } from 'lucide-react';
 
 interface ProductDetailViewProps {
@@ -25,6 +26,8 @@ interface ProductDetailViewProps {
   onOpenAdjust: (variantId: string) => void;
   onAddVariant: (productId: string) => void;
   onDeleteProduct: (id: string, name: string) => void;
+  onEditProduct?: (product: Product) => void;
+  onEditVariant?: (variant: ProductVariant) => void;
 }
 
 export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
@@ -34,6 +37,8 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
   onOpenAdjust,
   onAddVariant,
   onDeleteProduct,
+  onEditProduct,
+  onEditVariant,
 }) => {
   // Pagination for variants list (in case product has many variants)
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -122,6 +127,17 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                 Batas Min Alert: {formatStock(product.min_stock_alert)}
               </span>
             </div>
+
+            {onEditProduct && (
+              <button
+                onClick={() => onEditProduct(product)}
+                className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all shrink-0 border border-slate-200 dark:border-slate-700"
+                title="Edit Master Produk"
+              >
+                <Edit2 className="w-4 h-4 text-blue-500" />
+                <span>Edit Produk</span>
+              </button>
+            )}
 
             <button
               onClick={() => onAddVariant(product.id)}
@@ -226,6 +242,20 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                           Min: {formatStock(v.min_stock)}
                         </span>
                       </div>
+
+                      {onEditVariant && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditVariant(v);
+                          }}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                          title="Edit Varian"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                      )}
 
                       <button
                         type="button"

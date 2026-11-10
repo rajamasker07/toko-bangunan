@@ -14,7 +14,8 @@ import {
   Download,
   Trash2,
   Package,
-  ChevronRight
+  ChevronRight,
+  Edit2
 } from 'lucide-react';
 
 interface ProductListViewProps {
@@ -25,6 +26,7 @@ interface ProductListViewProps {
   onOpenCreate: () => void;
   onOpenDetail: (product: Product) => void;
   onOpenAdjust: (variantId: string) => void;
+  onEditProduct?: (product: Product) => void;
   onDeleteProduct: (id: string, name: string) => void;
   initialStockFilter?: string;
 }
@@ -37,6 +39,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   onOpenCreate,
   onOpenDetail,
   onOpenAdjust,
+  onEditProduct,
   onDeleteProduct,
   initialStockFilter = 'all',
 }) => {
@@ -368,6 +371,16 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                           >
                             <Eye className="w-4 h-4" />
                           </button>
+
+                          {onEditProduct && (
+                            <button
+                              onClick={() => onEditProduct(product)}
+                              className="p-1.5 rounded-lg text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                              title="Edit Produk"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                          )}
 
                           <button
                             onClick={() => onOpenAdjust(firstVariant?.id || '')}
