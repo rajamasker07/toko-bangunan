@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import { NumericInput, formatIdNumber } from './common/NumericInput';
 import { ProfitBadge } from './common/ProfitBadge';
 import { UnitSelect } from './common/UnitSelect';
+import { SearchableSelect, SearchableOption } from './common/SearchableSelect';
 import { 
   X, 
   Plus, 
@@ -250,14 +251,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     const options: React.ReactNode[] = [];
 
     const traverse = (cats: Category[], level = 0) => {
+      if (!Array.isArray(cats)) return;
       for (const cat of cats) {
+        if (!cat || !cat.id) continue;
         const prefix = '\u00A0\u00A0\u00A0\u00A0'.repeat(level) + (level > 0 ? '↳ ' : '');
         options.push(
           <option key={cat.id} value={cat.id}>
             {prefix}{cat.name}
           </option>
         );
-        if (cat.children && cat.children.length > 0) {
+        if (cat.children && Array.isArray(cat.children) && cat.children.length > 0) {
           traverse(cat.children, level + 1);
         }
       }
@@ -265,6 +268,71 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
     traverse(localCategories);
     return options;
+  };
+
+  // Build searchable category options with hierarchical indentation
+  const categoryOptions = React.useMemo(() => {
+    const opts: SearchableOption[] = [];
+    const traverse = (cats: Category[], level = 0) => {
+      if (!Array.isArray(cats)) return;
+      for (const cat of cats) {
+        if (!cat || !cat.id) continue;
+        opts.push({
+          value: cat.id,
+          label: cat.name || 'Tanpa Nama',
+          level,
+        });
+        if (cat.children && Array.isArray(cat.children) && cat.children.length > 0) {
+          traverse(cat.children, level + 1);
+        }
+      }
+    };
+    traverse(localCategories);
+    return opts;
+  }, [localCategories]);
+
+  // Build searchable brand options
+  const brandOptions = React.useMemo(() => {
+    if (!Array.isArray(brands)) return [];
+    return brands
+      .filter((b) => b && b.id)
+      .map((b) => ({
+        value: b.id,
+        label: b.name || 'Tanpa Nama',
+      }));
+  }, [brands]);
+
+  // Handle direct quick-add category from SearchableSelect inline search
+  const handleDirectAddCategory = async (nameToAdd: string) => {
+    try {
+      const newCat = await api.createCategory({
+        name: nameToAdd.trim(),
+        parent_id: null,
+      });
+      const updatedCategories = await api.getCategories(true);
+      setLocalCategories(updatedCategories);
+      setCategoryId(newCat.id);
+      showToast(`Kategori "${newCat.name}" berhasil dibuat & dipilih`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Gagal menambahkan kategori', 'error');
+    }
+  };
+
+  // Handle direct quick-add brand from SearchableSelect inline search
+  const handleDirectAddBrand = async (nameToAdd: string) => {
+    try {
+      const res = await api.createBrand({ name: nameToAdd.trim() });
+      const updatedBrands = await api.getBrands();
+      setBrands(updatedBrands);
+      setBrandId(res.brand.id);
+      if (res.created) {
+        showToast(`Merek "${res.brand.name}" berhasil dibuat & dipilih`, 'success');
+      } else {
+        showToast(`Merek "${res.brand.name}" sudah ada, otomatis dipilih`, 'info');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Gagal menambahkan merek', 'error');
+    }
   };
 
   // Helper generator for unique keys
@@ -549,7 +617,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 />
               </div>
 
-              {/* Kategori Field with Quick-Add Shortcut */}
+              {/* Kategori Field with SearchableSelect & Quick-Add Shortcut */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -564,14 +632,18 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     <span>{showQuickCategory ? 'Tutup' : '+ Kategori Baru'}</span>
                   </button>
                 </div>
-                <select
+                <SearchableSelect
                   value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                >
-                  <option value="">-- Pilih Kategori --</option>
-                  {renderCategoryOptions()}
-                </select>
+                  onChange={setCategoryId}
+                  options={categoryOptions}
+                  placeholder="-- Pilih atau Cari Kategori --"
+                  searchPlaceholder="Ketik untuk mencari kategori..."
+                  icon={FolderPlus}
+                  allowClear={true}
+                  clearLabel="-- Tanpa Kategori --"
+                  onAddNew={handleDirectAddCategory}
+                  addNewLabel={(q) => `+ Buat Kategori Baru "${q}"`}
+                />
 
                 {/* Inline Quick Category Form */}
                 {showQuickCategory && (
@@ -615,7 +687,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 )}
               </div>
 
-              {/* Merek / Brand Field with Quick-Add Shortcut & Anti-Duplication */}
+              {/* Merek / Brand Field with SearchableSelect & Quick-Add Shortcut & Anti-Duplication */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -630,18 +702,18 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     <span>{showQuickBrand ? 'Tutup' : '+ Merk Baru'}</span>
                   </button>
                 </div>
-                <select
+                <SearchableSelect
                   value={brandId}
-                  onChange={(e) => setBrandId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                >
-                  <option value="">-- Pilih Merk (Opsional) --</option>
-                  {brands.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setBrandId}
+                  options={brandOptions}
+                  placeholder="-- Pilih atau Cari Merk (Opsional) --"
+                  searchPlaceholder="Ketik untuk mencari merk..."
+                  icon={Award}
+                  allowClear={true}
+                  clearLabel="-- Tanpa Merk (Polos / No Brand) --"
+                  onAddNew={handleDirectAddBrand}
+                  addNewLabel={(q) => `+ Buat Merk Baru "${q}"`}
+                />
 
                 {/* Inline Quick Brand Form */}
                 {showQuickBrand && (
