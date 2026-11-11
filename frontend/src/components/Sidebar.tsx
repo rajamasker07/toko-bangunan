@@ -12,7 +12,9 @@ import {
   ChevronLeft,
   ChevronRight,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Award,
+  Truck
 } from 'lucide-react';
 
 /** Format angka badge: tampilkan "99+" jika melebihi 99 agar badge tetap ringkas */
@@ -28,7 +30,7 @@ interface NavItem {
   badgeColor?: string;
 }
 
-export type ActiveTab = 'dashboard' | 'products' | 'adjust' | 'movements' | 'categories' | 'docs';
+export type ActiveTab = 'dashboard' | 'products' | 'adjust' | 'movements' | 'categories' | 'brands' | 'suppliers' | 'docs';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -77,6 +79,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'categories' as ActiveTab,
       label: 'Kategori Bertingkat',
       icon: FolderTree,
+      badge: null,
+    },
+    {
+      id: 'brands' as ActiveTab,
+      label: 'Master Merek (Brand)',
+      icon: Award,
+      badge: null,
+    },
+    {
+      id: 'suppliers' as ActiveTab,
+      label: 'Master Supplier',
+      icon: Truck,
       badge: null,
     },
     {

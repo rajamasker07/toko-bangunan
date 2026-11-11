@@ -16,7 +16,8 @@ import {
   Barcode, 
   Building2, 
   Folder,
-  Edit2
+  Edit2,
+  Truck
 } from 'lucide-react';
 
 interface ProductDetailViewProps {
@@ -91,6 +92,12 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                   <span className="flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
                     <Building2 className="w-3 h-3" />
                     {product.brand}
+                  </span>
+                )}
+                {product.supplier_name && (
+                  <span className="flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                    <Truck className="w-3 h-3" />
+                    {product.supplier_name}
                   </span>
                 )}
                 <span className="text-[11px] font-medium text-slate-400">

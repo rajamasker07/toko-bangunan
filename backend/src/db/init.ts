@@ -83,6 +83,26 @@ export async function initializeDatabase() {
       CREATE UNIQUE INDEX IF NOT EXISTS uq_brands_name_key ON brands(name_key);
     `);
 
+    // 2b. Suppliers Table (Master Supplier / Pemasok Bahan Bangunan)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS suppliers (
+        id UUID PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        code VARCHAR(50) UNIQUE,
+        contact_person VARCHAR(100),
+        phone VARCHAR(50),
+        email VARCHAR(100),
+        address TEXT,
+        city VARCHAR(100),
+        notes TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name);
+      CREATE INDEX IF NOT EXISTS idx_suppliers_code ON suppliers(code);
+    `);
+
     // 3. Products Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS products (
@@ -106,6 +126,12 @@ export async function initializeDatabase() {
     // 3b. Migrasi skema lama: kolom teks `products.brand` -> relasi `products.brand_id`
     await migrateLegacyBrandColumn(client);
     await client.query('CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand_id);');
+
+    // 3c. Tambah kolom products.supplier_id jika belum ada
+    if (!(await columnExists(client, 'products', 'supplier_id'))) {
+      await client.query('ALTER TABLE products ADD COLUMN supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL;');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_products_supplier ON products(supplier_id);');
+    }
 
     // 3. Product Variants Table
     await client.query(`
@@ -161,6 +187,62 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
       CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at DESC);
     `);
+
+    // 6. Data Awal Supplier jika tabel masih kosong
+    const suppCount = await client.query('SELECT COUNT(*)::int AS count FROM suppliers');
+    if (suppCount.rows[0].count === 0) {
+      console.log('🌱 Menyiapkan data awal supplier material bangunan...');
+      const seedSuppliers = [
+        {
+          name: 'PT Indocement Tunggal Prakarsa Tbk',
+          code: 'SUP-INDO',
+          contact_person: 'Budi Santoso',
+          phone: '0812-3456-7890',
+          email: 'sales@indocement.co.id',
+          address: 'Jl. Jenderal Sudirman Kav. 70-71, Setiabudi',
+          city: 'Jakarta Selatan',
+          notes: 'Distributor utama Semen Tiga Roda, Mortar TR-10, TR-20'
+        },
+        {
+          name: 'PT Avia Avian Tbk',
+          code: 'SUP-AVIA',
+          contact_person: 'Dewi Lestari',
+          phone: '0813-8888-9999',
+          email: 'order@avianbrands.com',
+          address: 'Jl. Raya Surabaya-Krian KM 27',
+          city: 'Sidoarjo',
+          notes: 'Pemasok cat dinding Avitex, No Drop pelapis anti bocor'
+        },
+        {
+          name: 'PT Wahana Duta Jaya Rucika',
+          code: 'SUP-RUCI',
+          contact_person: 'Hendro Wijaya',
+          phone: '0811-2233-4455',
+          email: 'distributor@rucika.co.id',
+          address: 'Kawasan Industri Jababeka Tahap I, Cikarang',
+          city: 'Bekasi',
+          notes: 'Pemasok resmi pipa PVC AW/D dan fitting sambungan pipa'
+        },
+        {
+          name: 'CV Baja Sakti Sentosa',
+          code: 'SUP-BAJA',
+          contact_person: 'Ahmad Fauzi',
+          phone: '0819-7766-5544',
+          email: 'bajasakti@gmail.com',
+          address: 'Jl. Industri Pergudangan Margomulyo Permai',
+          city: 'Surabaya',
+          notes: 'Penyedia besi beton ulir/polos SNI, wiremesh, dan baja ringan'
+        }
+      ];
+
+      for (const s of seedSuppliers) {
+        await client.query(
+          `INSERT INTO suppliers (id, name, code, contact_person, phone, email, address, city, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [generateUUIDv7(), s.name, s.code, s.contact_person, s.phone, s.email, s.address, s.city, s.notes]
+        );
+      }
+    }
 
     await client.query('COMMIT');
     console.log('✅ Toko Bangunan database schema created successfully!');

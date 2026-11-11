@@ -5,6 +5,7 @@ import { VariantController } from '../controllers/variantController.js';
 import { StockController } from '../controllers/stockController.js';
 import { DashboardController } from '../controllers/dashboardController.js';
 import { BrandController } from '../controllers/brandController.js';
+import { SupplierController } from '../controllers/supplierController.js';
 
 const router = Router();
 
@@ -23,6 +24,13 @@ router.get('/brands', BrandController.list);
 router.post('/brands', BrandController.create);
 router.put('/brands/:id', BrandController.update);
 router.delete('/brands/:id', BrandController.delete);
+
+// Suppliers (master pemasok / distributor)
+router.get('/suppliers', SupplierController.list);
+router.get('/suppliers/:id', SupplierController.getById);
+router.post('/suppliers', SupplierController.create);
+router.put('/suppliers/:id', SupplierController.update);
+router.delete('/suppliers/:id', SupplierController.delete);
 
 // Products
 router.get('/products', ProductController.list);

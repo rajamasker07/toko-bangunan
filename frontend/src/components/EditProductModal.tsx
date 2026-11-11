@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Product, Category, Brand } from '../types';
+import { Product, Category, Brand, Supplier } from '../types';
 import { api } from '../services/api';
-import { X, CheckCircle2, Package, FolderPlus, Award } from 'lucide-react';
+import { X, CheckCircle2, Package, FolderPlus, Award, Truck } from 'lucide-react';
 
 interface EditProductModalProps {
   isOpen: boolean;
@@ -25,12 +25,14 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   const [barcode, setBarcode] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [brandId, setBrandId] = useState('');
+  const [supplierId, setSupplierId] = useState('');
   const [description, setDescription] = useState('');
   const [minStockAlert, setMinStockAlert] = useState<number>(5);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Brands list
+  // Brands & Suppliers list
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   // Local categories list
   const [localCategories, setLocalCategories] = useState<Category[]>(categories);
@@ -52,11 +54,12 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       setSku(product.sku || '');
       setBarcode(product.barcode || '');
       setCategoryId(product.category_id || '');
+      setSupplierId(product.supplier_id || '');
       setDescription(product.description || '');
       setMinStockAlert(Number(product.min_stock_alert) || 5);
       setLocalCategories(categories);
 
-      // Load brands and match current product's brand
+      // Load brands and suppliers
       api.getBrands().then((data) => {
         setBrands(data);
         if (product.brand) {
@@ -64,6 +67,8 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
           if (matched) setBrandId(matched.id);
         }
       }).catch(console.error);
+
+      api.getSuppliers().then(setSuppliers).catch(console.error);
     }
   }, [isOpen, product, categories]);
 
@@ -164,6 +169,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         barcode: barcode.trim() || null,
         category_id: categoryId || null,
         brand_id: brandId || null,
+        supplier_id: supplierId || null,
         description: description.trim() || null,
         min_stock_alert: Number(minStockAlert) || 5,
       });
@@ -374,6 +380,25 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Supplier Field */}
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Mitra Supplier / Pemasok:
+              </label>
+              <select
+                value={supplierId}
+                onChange={(e) => setSupplierId(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              >
+                <option value="">-- Tanpa Supplier Terpilih --</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} {s.code ? `(${s.code})` : ''} {s.city ? `• ${s.city}` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

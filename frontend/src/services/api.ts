@@ -1,4 +1,4 @@
-import { Category, Brand, Product, StockMovement, DashboardSummary } from '../types';
+import { Category, Brand, Supplier, Product, StockMovement, DashboardSummary } from '../types';
 
 const BASE_URL = '/api';
 
@@ -46,6 +46,39 @@ export const api = {
     fetchJson<{ brand: Brand; created: boolean }>('/brands', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  updateBrand: (id: string, data: { name: string }) =>
+    fetchJson<Brand>(`/brands/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteBrand: (id: string) =>
+    fetchJson<void>(`/brands/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Suppliers (Master Supplier / Pemasok)
+  getSuppliers: (filters?: { search?: string; isActive?: boolean }) => {
+    const params = new URLSearchParams();
+    if (filters?.search) params.append('search', filters.search);
+    if (filters?.isActive !== undefined) params.append('isActive', String(filters.isActive));
+    const queryStr = params.toString() ? `?${params.toString()}` : '';
+    return fetchJson<Supplier[]>(`/suppliers${queryStr}`);
+  },
+  getSupplierById: (id: string) => fetchJson<Supplier>(`/suppliers/${id}`),
+  createSupplier: (data: Partial<Supplier>) =>
+    fetchJson<Supplier>('/suppliers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateSupplier: (id: string, data: Partial<Supplier>) =>
+    fetchJson<Supplier>(`/suppliers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteSupplier: (id: string) =>
+    fetchJson<void>(`/suppliers/${id}`, {
+      method: 'DELETE',
     }),
 
   // Products

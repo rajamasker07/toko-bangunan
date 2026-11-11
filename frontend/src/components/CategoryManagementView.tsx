@@ -1,26 +1,49 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Category } from '../types';
-import { FolderTree, Plus, ChevronRight, Folder, Tag, Trash2, Edit2, CheckCircle2, X } from 'lucide-react';
+import { MasterDataNav, MasterDataTab } from './MasterDataNav';
+import { 
+  FolderTree, 
+  Plus, 
+  Folder, 
+  Trash2, 
+  Edit2, 
+  CheckCircle2, 
+  X,
+  Search,
+  GitFork
+} from 'lucide-react';
 
 interface CategoryManagementViewProps {
   categories: Category[];
   categoriesTree: Category[];
+  brandCount?: number;
+  supplierCount?: number;
   onRefresh: () => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  onNavigateTab: (tab: MasterDataTab) => void;
 }
 
 export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
   categories,
   categoriesTree,
+  brandCount = 0,
+  supplierCount = 0,
   onRefresh,
   showToast,
+  onNavigateTab,
 }) => {
+  const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [name, setName] = useState('');
   const [parentId, setParentId] = useState('');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Metrics
+  const totalCategories = categories.length;
+  const rootCategories = categories.filter((c) => !c.parent_id).length;
+  const subCategories = totalCategories - rootCategories;
 
   const openCreateModal = (parentCatId?: string) => {
     setEditingCategory(null);
@@ -97,49 +120,80 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
     }
   };
 
+  // Filter tree matching search
+  const filterTree = (nodes: Category[], query: string): Category[] => {
+    if (!query) return nodes;
+    const q = query.toLowerCase();
+
+    const matches = (node: Category): boolean => {
+      const selfMatch = node.name.toLowerCase().includes(q) || (node.description && node.description.toLowerCase().includes(q));
+      const childMatch = node.children ? node.children.some(matches) : false;
+      return Boolean(selfMatch || childMatch);
+    };
+
+    return nodes.filter(matches).map((node) => {
+      return {
+        ...node,
+        children: node.children ? filterTree(node.children, query) : [],
+      };
+    });
+  };
+
+  const displayTree = useMemo(() => filterTree(categoriesTree, search), [categoriesTree, search]);
+
   // Recursive tree renderer
   const renderCategoryNode = (cat: Category, depth = 0) => {
     const hasChildren = cat.children && cat.children.length > 0;
+    const isMatched = search && cat.name.toLowerCase().includes(search.toLowerCase());
 
     return (
       <div key={cat.id} className="space-y-1">
         <div
-          className={`group flex items-center justify-between p-3 rounded-xl border border-slate-200/60 dark:border-slate-800 transition-colors ${
+          className={`group flex items-center justify-between p-3.5 rounded-xl border transition-all ${
+            isMatched
+              ? 'ring-2 ring-amber-500 border-amber-500/50 bg-amber-500/10'
+              : 'border-slate-200/70 dark:border-slate-800'
+          } ${
             depth === 0
               ? 'bg-white dark:bg-slate-900 shadow-sm font-semibold'
               : depth === 1
-              ? 'bg-slate-50/70 dark:bg-slate-800/40 ml-6 text-sm'
+              ? 'bg-slate-50/80 dark:bg-slate-800/40 ml-6 text-sm'
               : 'bg-amber-500/5 dark:bg-amber-500/5 ml-12 text-xs'
           }`}
         >
           <div className="flex items-center gap-3">
             <div
-              className={`p-1.5 rounded-lg ${
+              className={`p-2 rounded-xl shrink-0 ${
                 depth === 0
                   ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                  : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
               }`}
             >
               <Folder className="w-4 h-4" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-slate-900 dark:text-white font-bold">{cat.name}</span>
                 {depth > 0 && (
-                  <span className="text-[10px] text-slate-400 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
+                  <span className="text-[10px] text-slate-400 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 font-semibold">
                     Sub-level {depth}
+                  </span>
+                )}
+                {hasChildren && (
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                    ({cat.children!.length} sub)
                   </span>
                 )}
               </div>
               {cat.description && (
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5">
                   {cat.description}
                 </p>
               )}
             </div>
           </div>
 
-          <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100">
+          <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 shrink-0">
             <button
               onClick={() => openCreateModal(cat.id)}
               className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-xs font-semibold flex items-center gap-1"
@@ -150,7 +204,7 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
             </button>
             <button
               onClick={() => openEditModal(cat)}
-              className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800"
               title="Edit Kategori"
             >
               <Edit2 className="w-3.5 h-3.5" />
@@ -175,7 +229,16 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      {/* Master Data Sub-Nav Header */}
+      <MasterDataNav
+        activeTab="categories"
+        onSelectTab={onNavigateTab}
+        categoryCount={totalCategories}
+        brandCount={brandCount}
+        supplierCount={supplierCount}
+      />
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -190,22 +253,80 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
 
         <button
           onClick={() => openCreateModal()}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all self-start sm:self-auto"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>Tambah Kategori Utama</span>
         </button>
       </div>
 
+      {/* Metrics Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
+          <div className="p-3 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+            <FolderTree className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[11px] font-medium text-slate-400 block">Total Seluruh Kategori</span>
+            <span className="text-xl font-black text-slate-900 dark:text-white">{totalCategories} Kategori</span>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
+          <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <Folder className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[11px] font-medium text-slate-400 block">Kategori Utama (Induk)</span>
+            <span className="text-xl font-black text-slate-900 dark:text-white">{rootCategories} Induk</span>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
+          <div className="p-3 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+            <GitFork className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[11px] font-medium text-slate-400 block">Sub-Kategori Turunan</span>
+            <span className="text-xl font-black text-slate-900 dark:text-white">{subCategories} Sub-Level</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Search Input Bar */}
+      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between gap-3">
+        <div className="relative w-full sm:w-96">
+          <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Cari kategori atau sub-kategori material..."
+            className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+          />
+        </div>
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+          >
+            Hapus Pencarian
+          </button>
+        )}
+      </div>
+
       {/* Tree Visualization */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-3">
-        {categoriesTree.length === 0 ? (
-          <div className="py-12 text-center text-slate-400 text-xs">
-            Belum ada kategori yang dibuat.
+        {displayTree.length === 0 ? (
+          <div className="py-12 text-center text-slate-400 text-xs space-y-1">
+            <FolderTree className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600" />
+            <p className="font-semibold text-slate-600 dark:text-slate-400">
+              {search ? 'Tidak ada kategori yang cocok dengan pencarian' : 'Belum ada kategori yang dibuat.'}
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {categoriesTree.map((cat) => renderCategoryNode(cat))}
+            {displayTree.map((cat) => renderCategoryNode(cat))}
           </div>
         )}
       </div>
@@ -218,7 +339,7 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
               <h3 className="font-bold text-slate-900 dark:text-white text-sm">
                 {editingCategory ? 'Edit Kategori' : 'Tambah Kategori / Sub-Kategori'}
               </h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -234,6 +355,7 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Misal: Semen & Mortar, Pipa PVC AW..."
                   required
+                  autoFocus
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
                 />
               </div>

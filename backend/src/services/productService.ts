@@ -30,6 +30,7 @@ export interface CreateProductInput {
   category_id?: string | null;
   brand_id?: string | null; // ID merek dari master `brands`
   brand?: string;           // atau nama merek -> otomatis cari/buat (anti-duplikat)
+  supplier_id?: string | null; // ID supplier dari master `suppliers`
   description?: string;
   min_stock_alert?: number;
   has_variants?: boolean;
@@ -101,6 +102,8 @@ export class ProductService {
         p.*,
         c.name as category_name,
         b.name as brand,
+        s.name as supplier_name,
+        s.code as supplier_code,
         COALESCE(SUM(pv.current_stock), 0)::numeric as total_stock,
         COUNT(pv.id)::int as variant_count,
         BOOL_OR(pv.current_stock <= pv.min_stock) as has_low_stock,
@@ -134,9 +137,10 @@ export class ProductService {
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
       LEFT JOIN brands b ON p.brand_id = b.id
+      LEFT JOIN suppliers s ON p.supplier_id = s.id
       LEFT JOIN product_variants pv ON p.id = pv.product_id
       ${whereClause}
-      GROUP BY p.id, c.name, b.name
+      GROUP BY p.id, c.name, b.name, s.name, s.code
       ORDER BY p.created_at DESC
     `;
 
@@ -192,12 +196,15 @@ export class ProductService {
           )
           FROM product_variants pv
           WHERE pv.product_id = p.id
-        ) as variants
+        ) as variants,
+        s.name as supplier_name,
+        s.code as supplier_code
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
       LEFT JOIN brands b ON p.brand_id = b.id
+      LEFT JOIN suppliers s ON p.supplier_id = s.id
       WHERE p.id = $1
-      GROUP BY p.id, c.name, b.name
+      GROUP BY p.id, c.name, b.name, s.name, s.code
     `;
     const res = await query(sql, [id]);
     return res.rows[0] || null;
@@ -250,8 +257,8 @@ export class ProductService {
       // 1. Insert Product
       await client.query(
         `INSERT INTO products (
-          id, name, sku, barcode, category_id, brand_id, description, min_stock_alert, has_variants
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          id, name, sku, barcode, category_id, brand_id, supplier_id, description, min_stock_alert, has_variants
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
           productId,
           data.name,
@@ -259,6 +266,7 @@ export class ProductService {
           data.barcode || null,
           data.category_id || null,
           brandId ?? null,
+          data.supplier_id || null,
           data.description || null,
           data.min_stock_alert ?? 5,
           hasVariants
@@ -396,6 +404,7 @@ export class ProductService {
     category_id?: string | null;
     brand_id?: string | null;
     brand?: string | null;
+    supplier_id?: string | null;
     description?: string;
     min_stock_alert?: number;
     is_active?: boolean;
@@ -407,6 +416,11 @@ export class ProductService {
     if (brandId !== undefined) {
       values.push(brandId);
       fields.push(`brand_id = $${values.length}`);
+    }
+
+    if (data.supplier_id !== undefined) {
+      values.push(data.supplier_id || null);
+      fields.push(`supplier_id = $${values.length}`);
     }
 
     if (data.name !== undefined) {

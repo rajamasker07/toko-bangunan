@@ -18,6 +18,22 @@ export interface Brand {
   product_count?: number;
 }
 
+export interface Supplier {
+  id: string;
+  name: string;
+  code: string | null;
+  contact_person: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  product_count?: number;
+}
+
 export interface VariantUnit {
   id: string;
   unit_name: string;
@@ -47,6 +63,9 @@ export interface Product {
   category_id?: string | null;
   category_name?: string | null;
   brand?: string | null;
+  supplier_id?: string | null;
+  supplier_name?: string | null;
+  supplier_code?: string | null;
   description?: string | null;
   min_stock_alert: number | string;
   is_active: boolean;
@@ -81,6 +100,8 @@ export interface DashboardSummary {
   total_products: number;
   total_variants: number;
   total_categories: number;
+  total_brands?: number;
+  total_suppliers?: number;
   low_stock_count: number;
   out_of_stock_count: number;
   recent_movements: StockMovement[];

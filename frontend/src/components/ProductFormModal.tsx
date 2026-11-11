@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Category, Brand } from '../types';
+import { Category, Brand, Supplier } from '../types';
 import { api } from '../services/api';
-import { X, Plus, Trash2, CheckCircle2, Layers, Package, Tag, Sparkles, FolderPlus, Award } from 'lucide-react';
+import { X, Plus, Trash2, CheckCircle2, Layers, Package, Tag, Sparkles, FolderPlus, Award, Truck } from 'lucide-react';
 
 interface ProductFormModalProps {
   isOpen: boolean;
@@ -27,11 +27,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [barcode, setBarcode] = useState<string>('');
   const [categoryId, setCategoryId] = useState<string>('');
   const [brandId, setBrandId] = useState<string>('');
+  const [supplierId, setSupplierId] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [minStockAlert, setMinStockAlert] = useState<number>(5);
 
-  // Master Brands List
+  // Master Brands & Suppliers List
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   // Local Categories List (allows immediate addition without full page reload)
   const [localCategories, setLocalCategories] = useState<Category[]>(categories);
@@ -47,10 +49,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [quickBrandName, setQuickBrandName] = useState<string>('');
   const [isSubmittingQuickBrand, setIsSubmittingQuickBrand] = useState<boolean>(false);
 
-  // Load brands on modal open
+  // Load brands and suppliers on modal open
   useEffect(() => {
     if (isOpen) {
       api.getBrands().then((data) => setBrands(data)).catch((err) => console.error(err));
+      api.getSuppliers({ isActive: true }).then((data) => setSuppliers(data)).catch((err) => console.error(err));
       setLocalCategories(categories);
     }
   }, [isOpen, categories]);
@@ -292,6 +295,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         barcode: barcode.trim() || undefined,
         category_id: categoryId || null,
         brand_id: brandId || null,
+        supplier_id: supplierId || null,
         description: description.trim() || undefined,
         min_stock_alert: Number(minStockAlert) || 5,
         has_variants: hasVariants,
@@ -557,6 +561,25 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Supplier Field */}
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Mitra Supplier / Pemasok (Opsional):
+                </label>
+                <select
+                  value={supplierId}
+                  onChange={(e) => setSupplierId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                >
+                  <option value="">-- Tanpa Supplier Terpilih (Bisa Diatur Nanti) --</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} {s.code ? `(${s.code})` : ''} {s.city ? `• ${s.city}` : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
