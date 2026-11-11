@@ -32,6 +32,16 @@ router.post('/suppliers', SupplierController.create);
 router.put('/suppliers/:id', SupplierController.update);
 router.delete('/suppliers/:id', SupplierController.delete);
 
+// Supplier Sales (Tim Sales per Supplier)
+router.get('/suppliers/:supplierId/sales', SupplierController.listSales);
+router.post('/suppliers/:supplierId/sales', SupplierController.createSales);
+router.get('/sales/:id', SupplierController.getSalesById);
+router.put('/sales/:id', SupplierController.updateSales);
+router.put('/suppliers/:supplierId/sales/:id', SupplierController.updateSales);
+router.patch('/sales/:id/toggle', SupplierController.toggleSalesStatus);
+router.delete('/sales/:id', SupplierController.deleteSales);
+router.delete('/suppliers/:supplierId/sales/:id', SupplierController.deleteSales);
+
 // Products
 router.get('/products', ProductController.list);
 router.get('/products/:id', ProductController.getById);

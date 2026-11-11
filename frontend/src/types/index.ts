@@ -18,6 +18,24 @@ export interface Brand {
   product_count?: number;
 }
 
+export interface SalesPhone {
+  number: string;
+  label?: string; // e.g. "WhatsApp", "HP Utama", "Telepon Kantor", "HP Pribadi"
+  is_primary?: boolean;
+}
+
+export interface SupplierSales {
+  id: string;
+  supplier_id: string;
+  name: string;
+  email?: string | null;
+  is_active: boolean;
+  phones: SalesPhone[];
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Supplier {
   id: string;
   name: string;
@@ -32,6 +50,9 @@ export interface Supplier {
   created_at: string;
   updated_at: string;
   product_count?: number;
+  sales?: SupplierSales[];
+  sales_count?: number;
+  active_sales_count?: number;
 }
 
 export interface VariantUnit {
@@ -102,6 +123,8 @@ export interface DashboardSummary {
   total_categories: number;
   total_brands?: number;
   total_suppliers?: number;
+  total_sales?: number;
+  active_sales?: number;
   low_stock_count: number;
   out_of_stock_count: number;
   recent_movements: StockMovement[];

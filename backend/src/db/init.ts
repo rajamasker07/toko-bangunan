@@ -103,6 +103,23 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_suppliers_code ON suppliers(code);
     `);
 
+    // 2c. Supplier Sales Table (Sales per Supplier, Multiple Phone Numbers, Active Status)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS supplier_sales (
+        id UUID PRIMARY KEY,
+        supplier_id UUID NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+        name VARCHAR(150) NOT NULL,
+        email VARCHAR(100),
+        is_active BOOLEAN DEFAULT TRUE NOT NULL,
+        phones JSONB DEFAULT '[]'::jsonb NOT NULL,
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_supplier_sales_supplier ON supplier_sales(supplier_id);
+      CREATE INDEX IF NOT EXISTS idx_supplier_sales_active ON supplier_sales(is_active);
+    `);
+
     // 3. Products Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS products (
@@ -241,6 +258,103 @@ export async function initializeDatabase() {
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
           [generateUUIDv7(), s.name, s.code, s.contact_person, s.phone, s.email, s.address, s.city, s.notes]
         );
+      }
+    }
+
+    // 6b. Data Awal Sales Tim Supplier jika tabel supplier_sales masih kosong
+    const salesCount = await client.query('SELECT COUNT(*)::int AS count FROM supplier_sales');
+    if (salesCount.rows[0].count === 0) {
+      console.log('🌱 Menyiapkan data awal sales supplier...');
+      const existingSuppliers = await client.query('SELECT id, code FROM suppliers');
+      const supplierMap = new Map<string, string>();
+      for (const row of existingSuppliers.rows as Array<{ id: string; code: string }>) {
+        if (row.code) supplierMap.set(row.code, row.id);
+      }
+
+      const seedSalesList = [
+        {
+          code: 'SUP-INDO',
+          name: 'Agus Pratama',
+          email: 'agus.pratama@indocement.co.id',
+          is_active: true,
+          phones: [
+            { number: '0812-1111-2222', label: 'WhatsApp', is_primary: true },
+            { number: '0815-9999-0000', label: 'Telepon Kantor' },
+          ],
+          notes: 'Sales Lapangan - Semen Portland & TR-10 Mortar Area Barat',
+        },
+        {
+          code: 'SUP-INDO',
+          name: 'Siti Rahmawati',
+          email: 'siti.rahma@indocement.co.id',
+          is_active: true,
+          phones: [
+            { number: '0813-4444-5555', label: 'WhatsApp', is_primary: true },
+          ],
+          notes: 'Sales Counter & Order Hotline Proyek',
+        },
+        {
+          code: 'SUP-AVIA',
+          name: 'Rian Hidayat',
+          email: 'rian.h@avianbrands.com',
+          is_active: true,
+          phones: [
+            { number: '0812-9876-5432', label: 'WhatsApp', is_primary: true },
+            { number: '0878-1234-5678', label: 'HP Pribadi' },
+          ],
+          notes: 'Sales Eksekutif Cat Tembok & Waterproofing No Drop',
+        },
+        {
+          code: 'SUP-AVIA',
+          name: 'Doni Prasetyo',
+          email: 'doni.p@avianbrands.com',
+          is_active: false,
+          phones: [
+            { number: '0811-0000-1111', label: 'HP Kantor Lama' },
+          ],
+          notes: 'Nonaktif - Telah mutasi ke cabang lain',
+        },
+        {
+          code: 'SUP-RUCI',
+          name: 'Eko Wicaksono',
+          email: 'eko.w@rucika.co.id',
+          is_active: true,
+          phones: [
+            { number: '0811-2233-4455', label: 'WhatsApp', is_primary: true },
+            { number: '021-8989-1122', label: 'Kantor Jababeka' },
+          ],
+          notes: 'Sales Spesialis Pipa PVC, Fitting & Talang Air',
+        },
+        {
+          code: 'SUP-BAJA',
+          name: 'Bambang Sudiro',
+          email: 'bambang.bajasakti@gmail.com',
+          is_active: true,
+          phones: [
+            { number: '0818-3333-2222', label: 'WhatsApp', is_primary: true },
+            { number: '0812-5555-6666', label: 'Nomor Alternatif' },
+          ],
+          notes: 'Penanggung Jawab Order Besi Beton Ulir, Wiremesh & Kanal C',
+        },
+      ];
+
+      for (const item of seedSalesList) {
+        const suppId = supplierMap.get(item.code);
+        if (suppId) {
+          await client.query(
+            `INSERT INTO supplier_sales (id, supplier_id, name, email, is_active, phones, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+              generateUUIDv7(),
+              suppId,
+              item.name,
+              item.email,
+              item.is_active,
+              JSON.stringify(item.phones),
+              item.notes,
+            ]
+          );
+        }
       }
     }
 

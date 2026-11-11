@@ -4,6 +4,40 @@ import { generateUUIDv7 } from '../utils/uuid.js';
 
 type Queryable = Pool | PoolClient;
 
+export interface SalesPhone {
+  number: string;
+  label?: string; // e.g. "WhatsApp", "HP Utama", "Telepon Kantor", "HP Pribadi"
+  is_primary?: boolean;
+}
+
+export interface SupplierSales {
+  id: string;
+  supplier_id: string;
+  name: string;
+  email: string | null;
+  is_active: boolean;
+  phones: SalesPhone[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateSupplierSalesInput {
+  name: string;
+  email?: string | null;
+  is_active?: boolean;
+  phones?: Array<SalesPhone | string>;
+  notes?: string | null;
+}
+
+export interface UpdateSupplierSalesInput {
+  name?: string;
+  email?: string | null;
+  is_active?: boolean;
+  phones?: Array<SalesPhone | string>;
+  notes?: string | null;
+}
+
 export interface Supplier {
   id: string;
   name: string;
@@ -18,6 +52,9 @@ export interface Supplier {
   created_at: string;
   updated_at: string;
   product_count?: number;
+  sales?: SupplierSales[];
+  sales_count?: number;
+  active_sales_count?: number;
 }
 
 export interface CreateSupplierInput {
@@ -44,9 +81,37 @@ export interface UpdateSupplierInput {
   is_active?: boolean;
 }
 
+function normalizePhones(phones?: Array<SalesPhone | string>): SalesPhone[] {
+  if (!Array.isArray(phones)) return [];
+  const result: SalesPhone[] = [];
+  for (let idx = 0; idx < phones.length; idx++) {
+    const p = phones[idx];
+    if (typeof p === 'string') {
+      const trimmed = p.trim();
+      if (trimmed) {
+        result.push({
+          number: trimmed,
+          label: idx === 0 ? 'Utama' : 'Alternatif',
+          is_primary: idx === 0,
+        });
+      }
+    } else if (typeof p === 'object' && p !== null) {
+      const num = String(p.number || '').trim();
+      if (num) {
+        result.push({
+          number: num,
+          label: p.label?.trim() || (idx === 0 ? 'Utama' : 'Alternatif'),
+          is_primary: Boolean(p.is_primary ?? idx === 0),
+        });
+      }
+    }
+  }
+  return result;
+}
+
 export class SupplierService {
   /**
-   * List all suppliers with product count
+   * List all suppliers with product count and sales array
    */
   static async getAll(filters?: { search?: string; isActive?: boolean }): Promise<Supplier[]> {
     const params: any[] = [];
@@ -54,12 +119,22 @@ export class SupplierService {
 
     if (filters?.search) {
       params.push(`%${filters.search.toLowerCase()}%`);
+      const pIdx = params.length;
       conditions.push(`(
-        LOWER(s.name) LIKE $${params.length} OR
-        LOWER(COALESCE(s.code, '')) LIKE $${params.length} OR
-        LOWER(COALESCE(s.contact_person, '')) LIKE $${params.length} OR
-        LOWER(COALESCE(s.phone, '')) LIKE $${params.length} OR
-        LOWER(COALESCE(s.city, '')) LIKE $${params.length}
+        LOWER(s.name) LIKE $${pIdx} OR
+        LOWER(COALESCE(s.code, '')) LIKE $${pIdx} OR
+        LOWER(COALESCE(s.contact_person, '')) LIKE $${pIdx} OR
+        LOWER(COALESCE(s.phone, '')) LIKE $${pIdx} OR
+        LOWER(COALESCE(s.city, '')) LIKE $${pIdx} OR
+        EXISTS (
+          SELECT 1 FROM supplier_sales ss 
+          WHERE ss.supplier_id = s.id 
+            AND (
+              LOWER(ss.name) LIKE $${pIdx} OR
+              ss.phones::text LIKE $${pIdx} OR
+              LOWER(COALESCE(ss.email, '')) LIKE $${pIdx}
+            )
+        )
       )`);
     }
 
@@ -73,7 +148,27 @@ export class SupplierService {
     const sql = `
       SELECT 
         s.*,
-        COUNT(p.id)::int AS product_count
+        COUNT(DISTINCT p.id)::int AS product_count,
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', ss.id,
+                'supplier_id', ss.supplier_id,
+                'name', ss.name,
+                'email', ss.email,
+                'is_active', ss.is_active,
+                'phones', ss.phones,
+                'notes', ss.notes,
+                'created_at', ss.created_at,
+                'updated_at', ss.updated_at
+              ) ORDER BY ss.is_active DESC, ss.name ASC
+            )
+            FROM supplier_sales ss
+            WHERE ss.supplier_id = s.id
+          ),
+          '[]'::json
+        ) AS sales
       FROM suppliers s
       LEFT JOIN products p ON p.supplier_id = s.id
       ${whereClause}
@@ -82,7 +177,12 @@ export class SupplierService {
     `;
 
     const res = await query(sql, params);
-    return res.rows;
+    return res.rows.map((row) => ({
+      ...row,
+      sales: row.sales || [],
+      sales_count: (row.sales || []).length,
+      active_sales_count: (row.sales || []).filter((s: SupplierSales) => s.is_active).length,
+    }));
   }
 
   /**
@@ -92,14 +192,42 @@ export class SupplierService {
     const res = await query(
       `SELECT 
         s.*,
-        COUNT(p.id)::int AS product_count
+        COUNT(DISTINCT p.id)::int AS product_count,
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', ss.id,
+                'supplier_id', ss.supplier_id,
+                'name', ss.name,
+                'email', ss.email,
+                'is_active', ss.is_active,
+                'phones', ss.phones,
+                'notes', ss.notes,
+                'created_at', ss.created_at,
+                'updated_at', ss.updated_at
+              ) ORDER BY ss.is_active DESC, ss.name ASC
+            )
+            FROM supplier_sales ss
+            WHERE ss.supplier_id = s.id
+          ),
+          '[]'::json
+        ) AS sales
        FROM suppliers s
        LEFT JOIN products p ON p.supplier_id = s.id
        WHERE s.id = $1
        GROUP BY s.id`,
       [id]
     );
-    return res.rows[0] || null;
+
+    if (!res.rows[0]) return null;
+    const row = res.rows[0];
+    return {
+      ...row,
+      sales: row.sales || [],
+      sales_count: (row.sales || []).length,
+      active_sales_count: (row.sales || []).filter((s: SupplierSales) => s.is_active).length,
+    };
   }
 
   /**
@@ -151,7 +279,12 @@ export class SupplierService {
       ]
     );
 
-    return res.rows[0];
+    return {
+      ...res.rows[0],
+      sales: [],
+      sales_count: 0,
+      active_sales_count: 0,
+    };
   }
 
   /**
@@ -198,7 +331,8 @@ export class SupplierService {
       [name, code, contactPerson, phone, email, address, city, notes, isActive, id]
     );
 
-    return res.rows[0] || null;
+    if (!res.rows[0]) return null;
+    return this.getById(id);
   }
 
   /**
@@ -206,6 +340,130 @@ export class SupplierService {
    */
   static async delete(id: string): Promise<Supplier | null> {
     const res = await query('DELETE FROM suppliers WHERE id = $1 RETURNING *', [id]);
+    return res.rows[0] || null;
+  }
+
+  // ==========================================
+  // SALES REPRESENTATIVES MANAGEMENT METHODS
+  // ==========================================
+
+  /**
+   * List all sales for a supplier
+   */
+  static async getSalesBySupplier(supplierId: string, isActive?: boolean): Promise<SupplierSales[]> {
+    const params: any[] = [supplierId];
+    let sql = `SELECT * FROM supplier_sales WHERE supplier_id = $1`;
+
+    if (isActive !== undefined) {
+      params.push(isActive);
+      sql += ` AND is_active = $2`;
+    }
+
+    sql += ` ORDER BY is_active DESC, name ASC`;
+    const res = await query(sql, params);
+    return res.rows;
+  }
+
+  /**
+   * Get single sales by ID
+   */
+  static async getSalesById(salesId: string): Promise<SupplierSales | null> {
+    const res = await query(`SELECT * FROM supplier_sales WHERE id = $1`, [salesId]);
+    return res.rows[0] || null;
+  }
+
+  /**
+   * Create new sales representative for a supplier
+   */
+  static async createSales(supplierId: string, input: CreateSupplierSalesInput): Promise<SupplierSales> {
+    // Verify supplier exists
+    const supp = await query(`SELECT id, name FROM suppliers WHERE id = $1`, [supplierId]);
+    if (supp.rows.length === 0) {
+      throw new Error('Supplier tidak ditemukan');
+    }
+
+    const name = input.name?.trim();
+    if (!name) {
+      throw new Error('Nama sales wajib diisi');
+    }
+
+    const phones = normalizePhones(input.phones);
+    const id = generateUUIDv7();
+    const isActive = input.is_active !== undefined ? input.is_active : true;
+
+    const res = await query(
+      `INSERT INTO supplier_sales (
+        id, supplier_id, name, email, is_active, phones, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *`,
+      [
+        id,
+        supplierId,
+        name,
+        input.email?.trim() || null,
+        isActive,
+        JSON.stringify(phones),
+        input.notes?.trim() || null,
+      ]
+    );
+
+    return res.rows[0];
+  }
+
+  /**
+   * Update sales representative
+   */
+  static async updateSales(salesId: string, input: UpdateSupplierSalesInput): Promise<SupplierSales | null> {
+    const current = await this.getSalesById(salesId);
+    if (!current) return null;
+
+    const name = input.name !== undefined ? input.name.trim() : current.name;
+    if (!name) {
+      throw new Error('Nama sales wajib diisi');
+    }
+
+    const email = input.email !== undefined ? (input.email?.trim() || null) : current.email;
+    const isActive = input.is_active !== undefined ? input.is_active : current.is_active;
+    const phones = input.phones !== undefined ? normalizePhones(input.phones) : current.phones;
+    const notes = input.notes !== undefined ? (input.notes?.trim() || null) : current.notes;
+
+    const res = await query(
+      `UPDATE supplier_sales SET
+        name = $1,
+        email = $2,
+        is_active = $3,
+        phones = $4,
+        notes = $5,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = $6
+       RETURNING *`,
+      [name, email, isActive, JSON.stringify(phones), notes, salesId]
+    );
+
+    return res.rows[0] || null;
+  }
+
+  /**
+   * Toggle active/inactive status of a sales representative
+   */
+  static async toggleSalesStatus(salesId: string): Promise<SupplierSales | null> {
+    const res = await query(
+      `UPDATE supplier_sales SET
+        is_active = NOT is_active,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [salesId]
+    );
+
+    return res.rows[0] || null;
+  }
+
+  /**
+   * Delete sales representative
+   */
+  static async deleteSales(salesId: string): Promise<SupplierSales | null> {
+    const res = await query(`DELETE FROM supplier_sales WHERE id = $1 RETURNING *`, [salesId]);
     return res.rows[0] || null;
   }
 }

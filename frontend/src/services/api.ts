@@ -1,4 +1,4 @@
-import { Category, Brand, Supplier, Product, StockMovement, DashboardSummary } from '../types';
+import { Category, Brand, Supplier, SupplierSales, Product, StockMovement, DashboardSummary } from '../types';
 
 const BASE_URL = '/api';
 
@@ -78,6 +78,30 @@ export const api = {
     }),
   deleteSupplier: (id: string) =>
     fetchJson<void>(`/suppliers/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Supplier Sales (Tim Sales per Supplier)
+  getSupplierSales: (supplierId: string, isActive?: boolean) => {
+    const query = isActive !== undefined ? `?isActive=${isActive}` : '';
+    return fetchJson<SupplierSales[]>(`/suppliers/${supplierId}/sales${query}`);
+  },
+  createSupplierSales: (supplierId: string, data: Partial<SupplierSales>) =>
+    fetchJson<SupplierSales>(`/suppliers/${supplierId}/sales`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateSupplierSales: (id: string, data: Partial<SupplierSales>) =>
+    fetchJson<SupplierSales>(`/sales/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  toggleSupplierSalesStatus: (id: string) =>
+    fetchJson<SupplierSales>(`/sales/${id}/toggle`, {
+      method: 'PATCH',
+    }),
+  deleteSupplierSales: (id: string) =>
+    fetchJson<void>(`/sales/${id}`, {
       method: 'DELETE',
     }),
 

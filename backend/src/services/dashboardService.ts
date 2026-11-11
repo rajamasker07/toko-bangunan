@@ -7,6 +7,12 @@ export class DashboardService {
     const categoriesRes = await query('SELECT COUNT(*) as count FROM categories');
     const brandsRes = await query('SELECT COUNT(*) as count FROM brands');
     const suppliersRes = await query('SELECT COUNT(*) as count FROM suppliers');
+    const salesRes = await query(`
+      SELECT 
+        COUNT(*)::int AS total,
+        COUNT(CASE WHEN is_active THEN 1 END)::int AS active
+      FROM supplier_sales
+    `);
     
     const lowStockRes = await query(`
       SELECT COUNT(*) as count 
@@ -57,6 +63,8 @@ export class DashboardService {
       total_categories: parseInt(categoriesRes.rows[0].count, 10),
       total_brands: parseInt(brandsRes.rows[0].count, 10),
       total_suppliers: parseInt(suppliersRes.rows[0].count, 10),
+      total_sales: parseInt(salesRes.rows[0]?.total || 0, 10),
+      active_sales: parseInt(salesRes.rows[0]?.active || 0, 10),
       low_stock_count: parseInt(lowStockRes.rows[0].count, 10),
       out_of_stock_count: parseInt(outOfStockRes.rows[0].count, 10),
       recent_movements: recentMovementsRes.rows,
