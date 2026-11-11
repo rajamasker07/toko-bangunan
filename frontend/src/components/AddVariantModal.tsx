@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { api } from '../services/api';
-import { X, Plus, Trash2, CheckCircle2, Layers } from 'lucide-react';
+import { NumericInput } from './common/NumericInput';
+import { X, Plus, Trash2, CheckCircle2, Layers, Boxes, AlertTriangle, ArrowLeftRight, Banknote, Coins } from 'lucide-react';
 
 interface AddVariantModalProps {
   isOpen: boolean;
@@ -183,13 +184,16 @@ export const AddVariantModal: React.FC<AddVariantModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Stok Awal Fisik:
               </label>
-              <input
-                type="number"
-                step="any"
-                min="0"
+              <NumericInput
+                size="sm"
                 value={initialStock}
-                onChange={(e) => setInitialStock(Number(e.target.value))}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white font-bold"
+                onChange={setInitialStock}
+                allowDecimals={true}
+                maxDecimals={2}
+                prefixIcon={Boxes}
+                suffixText="Unit"
+                placeholder="0"
+                inputClassName="font-bold"
               />
             </div>
 
@@ -197,13 +201,14 @@ export const AddVariantModal: React.FC<AddVariantModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Batas Minimal Alert:
               </label>
-              <input
-                type="number"
-                step="any"
-                min="1"
+              <NumericInput
+                size="sm"
                 value={minStock}
-                onChange={(e) => setMinStock(Number(e.target.value))}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+                onChange={setMinStock}
+                min={1}
+                prefixIcon={AlertTriangle}
+                suffixText="Unit"
+                placeholder="5"
               />
             </div>
           </div>
@@ -233,30 +238,36 @@ export const AddVariantModal: React.FC<AddVariantModalProps> = ({
                     placeholder="Satuan (Pcs/Dus)"
                     className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800"
                   />
-                  <input
-                    type="number"
-                    step="any"
+                  <NumericInput
+                    size="sm"
                     value={u.conversion_factor}
-                    onChange={(e) => handleUnitChange(idx, 'conversion_factor', Number(e.target.value))}
+                    onChange={(val) => handleUnitChange(idx, 'conversion_factor', val)}
+                    allowDecimals={true}
+                    maxDecimals={2}
+                    prefixIcon={ArrowLeftRight}
                     disabled={u.is_base_unit}
                     placeholder="Konversi"
-                    className={`px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs ${
-                      u.is_base_unit ? 'bg-slate-100 text-slate-400' : 'bg-white dark:bg-slate-800'
-                    }`}
                   />
-                  <input
-                    type="number"
+                  <NumericInput
+                    size="sm"
                     value={u.sell_price}
-                    onChange={(e) => handleUnitChange(idx, 'sell_price', Number(e.target.value))}
+                    onChange={(val) => handleUnitChange(idx, 'sell_price', val)}
+                    allowDecimals={true}
+                    maxDecimals={2}
+                    prefixIcon={Banknote}
+                    prefixText="Rp"
                     placeholder="Harga Jual"
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 font-bold"
+                    inputClassName="font-bold"
                   />
-                  <input
-                    type="number"
+                  <NumericInput
+                    size="sm"
                     value={u.buy_price}
-                    onChange={(e) => handleUnitChange(idx, 'buy_price', Number(e.target.value))}
+                    onChange={(val) => handleUnitChange(idx, 'buy_price', val)}
+                    allowDecimals={true}
+                    maxDecimals={2}
+                    prefixIcon={Coins}
+                    prefixText="Rp"
                     placeholder="Harga Beli"
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800"
                   />
                   <div>
                     {u.is_base_unit ? (

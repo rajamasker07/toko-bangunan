@@ -6,11 +6,16 @@ import { StockController } from '../controllers/stockController.js';
 import { DashboardController } from '../controllers/dashboardController.js';
 import { BrandController } from '../controllers/brandController.js';
 import { SupplierController } from '../controllers/supplierController.js';
+import { UnitController } from '../controllers/unitController.js';
 
 const router = Router();
 
 // Dashboard summary
 router.get('/dashboard/summary', DashboardController.summary);
+
+// Master Units (Satuan Barang, anti-duplikat & searchable)
+router.get('/units', UnitController.list);
+router.post('/units', UnitController.create);
 
 // Categories
 router.get('/categories', CategoryController.list);

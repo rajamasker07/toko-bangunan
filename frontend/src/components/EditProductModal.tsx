@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Product, Category, Brand, Supplier } from '../types';
 import { api } from '../services/api';
-import { X, CheckCircle2, Package, FolderPlus, Award, Truck } from 'lucide-react';
+import { NumericInput } from './common/NumericInput';
+import { X, CheckCircle2, Package, FolderPlus, Award, Truck, AlertTriangle } from 'lucide-react';
 
 interface EditProductModalProps {
   isOpen: boolean;
@@ -406,12 +407,13 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
               Batas Peringatan Stok Minimal:
             </label>
-            <input
-              type="number"
-              min="1"
+            <NumericInput
               value={minStockAlert}
-              onChange={(e) => setMinStockAlert(Number(e.target.value))}
-              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+              onChange={setMinStockAlert}
+              min={1}
+              prefixIcon={AlertTriangle}
+              suffixText="Unit"
+              placeholder="5"
             />
           </div>
 

@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import { Category } from '../types';
-import { MasterDataNav, MasterDataTab } from './MasterDataNav';
 import { 
   FolderTree, 
   Plus, 
@@ -10,27 +9,24 @@ import {
   CheckCircle2, 
   X,
   Search,
-  GitFork
+  GitFork,
+  RefreshCw
 } from 'lucide-react';
 
 interface CategoryManagementViewProps {
-  categories: Category[];
-  categoriesTree: Category[];
-  brandCount?: number;
-  supplierCount?: number;
+  categories?: Category[];
+  categoriesTree?: Category[];
+  loading?: boolean;
   onRefresh: () => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
-  onNavigateTab: (tab: MasterDataTab) => void;
 }
 
 export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
-  categories,
-  categoriesTree,
-  brandCount = 0,
-  supplierCount = 0,
+  categories = [],
+  categoriesTree = [],
+  loading = false,
   onRefresh,
   showToast,
-  onNavigateTab,
 }) => {
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -230,34 +226,37 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Master Data Sub-Nav Header */}
-      <MasterDataNav
-        activeTab="categories"
-        onSelectTab={onNavigateTab}
-        categoryCount={totalCategories}
-        brandCount={brandCount}
-        supplierCount={supplierCount}
-      />
-
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
             <FolderTree className="w-5 h-5 text-amber-500" />
-            <span>Struktur Kategori Bertingkat</span>
+            <span>Kategori Bertingkat</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Hierarki tak terbatas: Induk Kategori → Sub-Kategori → Sub-Sub-Kategori untuk pengelompokan material
           </p>
         </div>
 
-        <button
-          onClick={() => openCreateModal()}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tambah Kategori Utama</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              disabled={loading}
+              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-xs disabled:opacity-50"
+              title="Segarkan Kategori"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-500' : ''}`} />
+            </button>
+          )}
+          <button
+            onClick={() => openCreateModal()}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Kategori Utama</span>
+          </button>
+        </div>
       </div>
 
       {/* Metrics Row */}
@@ -317,7 +316,14 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
 
       {/* Tree Visualization */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-3">
-        {displayTree.length === 0 ? (
+        {loading && categories.length === 0 ? (
+          <div className="py-14 text-center text-slate-400 text-xs space-y-2">
+            <RefreshCw className="w-7 h-7 mx-auto text-amber-500 animate-spin" />
+            <p className="font-semibold text-slate-600 dark:text-slate-400">
+              Memuat struktur kategori...
+            </p>
+          </div>
+        ) : displayTree.length === 0 ? (
           <div className="py-12 text-center text-slate-400 text-xs space-y-1">
             <FolderTree className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600" />
             <p className="font-semibold text-slate-600 dark:text-slate-400">

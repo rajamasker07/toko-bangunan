@@ -1,4 +1,4 @@
-import { Category, Brand, Supplier, SupplierSales, Product, StockMovement, DashboardSummary } from '../types';
+import { Category, Brand, Supplier, SupplierSales, Product, StockMovement, DashboardSummary, UnitMaster } from '../types';
 
 const BASE_URL = '/api';
 
@@ -22,6 +22,14 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 export const api = {
   // Dashboard
   getDashboardSummary: () => fetchJson<DashboardSummary>('/dashboard/summary'),
+
+  // Master Units (Satuan Bahan Bangunan)
+  getUnits: () => fetchJson<UnitMaster[]>('/units'),
+  createUnit: (data: { name: string; description?: string }) =>
+    fetchJson<{ unit: UnitMaster; created: boolean }>('/units', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
   // Categories
   getCategories: (asTree = false) => fetchJson<Category[]>(`/categories?tree=${asTree}`),

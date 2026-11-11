@@ -1,7 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { Category, Brand, Supplier } from '../types';
+import { Category, Brand, Supplier, UnitMaster } from '../types';
 import { api } from '../services/api';
-import { X, Plus, Trash2, CheckCircle2, Layers, Package, Tag, Sparkles, FolderPlus, Award, Truck } from 'lucide-react';
+import { NumericInput, formatIdNumber } from './common/NumericInput';
+import { ProfitBadge } from './common/ProfitBadge';
+import { UnitSelect } from './common/UnitSelect';
+import { 
+  X, 
+  Plus, 
+  Trash2, 
+  CheckCircle2, 
+  Layers, 
+  Package, 
+  Tag, 
+  Sparkles, 
+  FolderPlus, 
+  Award, 
+  Truck,
+  Banknote,
+  Coins,
+  Boxes,
+  Scale,
+  ArrowLeftRight,
+  AlertTriangle,
+  BadgePercent,
+  TrendingUp,
+  TrendingDown,
+  Minus
+} from 'lucide-react';
 
 interface ProductFormModalProps {
   isOpen: boolean;
@@ -49,14 +74,56 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [quickBrandName, setQuickBrandName] = useState<string>('');
   const [isSubmittingQuickBrand, setIsSubmittingQuickBrand] = useState<boolean>(false);
 
-  // Load brands and suppliers on modal open
+  // Master Units List & Shortcut Quick Add Unit
+  const [unitsList, setUnitsList] = useState<UnitMaster[]>([]);
+  const [showQuickUnit, setShowQuickUnit] = useState<boolean>(false);
+  const [quickUnitName, setQuickUnitName] = useState<string>('');
+  const [quickUnitDesc, setQuickUnitDesc] = useState<string>('');
+  const [isSubmittingQuickUnit, setIsSubmittingQuickUnit] = useState<boolean>(false);
+
+  // Load brands, suppliers, and units on modal open
   useEffect(() => {
     if (isOpen) {
       api.getBrands().then((data) => setBrands(data)).catch((err) => console.error(err));
       api.getSuppliers({ isActive: true }).then((data) => setSuppliers(data)).catch((err) => console.error(err));
+      api.getUnits().then((data) => setUnitsList(data)).catch((err) => console.error(err));
       setLocalCategories(categories);
     }
   }, [isOpen, categories]);
+
+  // Handle Quick Add Unit (Satuan Bahan Bangunan)
+  const handleQuickAddUnit = async (nameToAdd?: string, descToAdd?: string): Promise<void> => {
+    const targetName = (nameToAdd || quickUnitName).trim();
+    if (!targetName) {
+      showToast('Nama satuan wajib diisi', 'error');
+      return;
+    }
+    try {
+      setIsSubmittingQuickUnit(true);
+      const res = await api.createUnit({
+        name: targetName,
+        description: descToAdd || quickUnitDesc.trim() || undefined,
+      });
+
+      // Refresh units list
+      const updatedUnits = await api.getUnits();
+      setUnitsList(updatedUnits);
+
+      setQuickUnitName('');
+      setQuickUnitDesc('');
+      setShowQuickUnit(false);
+
+      if (res.created) {
+        showToast(`Satuan "${res.unit.name}" berhasil ditambahkan ke daftar master`, 'success');
+      } else {
+        showToast(`Satuan "${res.unit.name}" sudah ada dalam daftar`, 'info');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Gagal menambahkan satuan baru', 'error');
+    } finally {
+      setIsSubmittingQuickUnit(false);
+    }
+  };
 
   // Handle Quick Add Category
   const handleQuickAddCategory = async (e: React.FormEvent) => {
@@ -131,6 +198,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
   // Additional units for simple product
   const [simpleAdditionalUnits, setSimpleAdditionalUnits] = useState<Array<{
+    id: string;
     unit_name: string;
     conversion_factor: number;
     sell_price: number;
@@ -139,12 +207,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
   // Multi-variant Form States
   const [variantsList, setVariantsList] = useState<Array<{
+    id: string;
     variant_name: string;
     sku: string;
     barcode: string;
     initial_stock: number;
     min_stock: number;
     units: Array<{
+      id: string;
       unit_name: string;
       conversion_factor: number;
       is_base_unit: boolean;
@@ -154,6 +224,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     }>;
   }>>([
     {
+      id: 'var-init-1',
       variant_name: '',
       sku: '',
       barcode: '',
@@ -161,6 +232,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       min_stock: 5,
       units: [
         {
+          id: 'unit-init-1',
           unit_name: 'Pcs',
           conversion_factor: 1,
           is_base_unit: true,
@@ -195,11 +267,18 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     return options;
   };
 
+  // Helper generator for unique keys
+  const createUniqueId = (prefix: string) =>
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
   // Variant handlers
   const handleAddVariant = () => {
+    const newVariantId = createUniqueId('var');
+    const newUnitId = createUniqueId('unit');
     setVariantsList((prev) => [
       ...prev,
       {
+        id: newVariantId,
         variant_name: '',
         sku: '',
         barcode: '',
@@ -207,6 +286,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         min_stock: 5,
         units: [
           {
+            id: newUnitId,
             unit_name: 'Pcs',
             conversion_factor: 1,
             is_base_unit: true,
@@ -218,65 +298,91 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     ]);
   };
 
-  const handleRemoveVariant = (index: number) => {
+  const handleRemoveVariant = (variantId: string) => {
     if (variantsList.length <= 1) {
       showToast('Minimal harus ada 1 varian jika menggunakan multi-varian', 'error');
       return;
     }
-    setVariantsList((prev) => prev.filter((_, i) => i !== index));
+    setVariantsList((prev) => prev.filter((v) => v.id !== variantId));
   };
 
-  const handleVariantChange = (index: number, field: string, value: any) => {
-    setVariantsList((prev) => {
-      const copy = [...prev];
-      copy[index] = { ...copy[index], [field]: value };
-      return copy;
-    });
+  const handleVariantChange = (variantId: string, field: string, value: any) => {
+    setVariantsList((prev) =>
+      prev.map((variant) => (variant.id === variantId ? { ...variant, [field]: value } : variant))
+    );
   };
 
-  const handleAddUnitToVariant = (variantIdx: number) => {
-    setVariantsList((prev) => {
-      const copy = [...prev];
-      copy[variantIdx].units.push({
-        unit_name: 'Dus',
-        conversion_factor: 10,
-        is_base_unit: false,
-        buy_price: 0,
-        sell_price: 0,
-      });
-      return copy;
-    });
+  const handleAddUnitToVariant = (variantId: string) => {
+    const newUnitId = createUniqueId('unit');
+    setVariantsList((prev) =>
+      prev.map((variant) => {
+        if (variant.id !== variantId) return variant;
+        return {
+          ...variant,
+          units: [
+            ...variant.units,
+            {
+              id: newUnitId,
+              unit_name: 'Dus',
+              conversion_factor: 10,
+              is_base_unit: false,
+              buy_price: 0,
+              sell_price: 0,
+            },
+          ],
+        };
+      })
+    );
   };
 
-  const handleRemoveUnitFromVariant = (variantIdx: number, unitIdx: number) => {
-    setVariantsList((prev) => {
-      const copy = [...prev];
-      if (copy[variantIdx].units[unitIdx].is_base_unit) {
-        showToast('Satuan dasar utama tidak boleh dihapus!', 'error');
-        return copy;
-      }
-      copy[variantIdx].units = copy[variantIdx].units.filter((_, i) => i !== unitIdx);
-      return copy;
-    });
+  const handleRemoveUnitFromVariant = (variantId: string, unitId: string) => {
+    setVariantsList((prev) =>
+      prev.map((variant) => {
+        if (variant.id !== variantId) return variant;
+        const targetUnit = variant.units.find((u) => u.id === unitId);
+        if (targetUnit?.is_base_unit) {
+          showToast('Satuan dasar utama tidak boleh dihapus!', 'error');
+          return variant;
+        }
+        return {
+          ...variant,
+          units: variant.units.filter((u) => u.id !== unitId),
+        };
+      })
+    );
   };
 
-  const handleUnitChange = (variantIdx: number, unitIdx: number, field: string, value: any) => {
-    setVariantsList((prev) => {
-      const copy = [...prev];
-      copy[variantIdx].units[unitIdx] = {
-        ...copy[variantIdx].units[unitIdx],
-        [field]: value,
-      };
-      return copy;
-    });
+  const handleUnitChange = (variantId: string, unitId: string, field: string, value: any) => {
+    setVariantsList((prev) =>
+      prev.map((variant) => {
+        if (variant.id !== variantId) return variant;
+        return {
+          ...variant,
+          units: variant.units.map((unit) =>
+            unit.id === unitId ? { ...unit, [field]: value } : unit
+          ),
+        };
+      })
+    );
   };
 
   // Additional units for simple product
   const handleAddSimpleUnit = () => {
+    const newUnitId = createUniqueId('simple-unit');
     setSimpleAdditionalUnits((prev) => [
       ...prev,
-      { unit_name: 'Dus', conversion_factor: 10, buy_price: 0, sell_price: 0 },
+      { id: newUnitId, unit_name: 'Dus', conversion_factor: 10, buy_price: 0, sell_price: 0 },
     ]);
+  };
+
+  const handleUpdateSimpleUnit = (unitId: string, field: string, value: any) => {
+    setSimpleAdditionalUnits((prev) =>
+      prev.map((u) => (u.id === unitId ? { ...u, [field]: value } : u))
+    );
+  };
+
+  const handleRemoveSimpleUnit = (unitId: string) => {
+    setSimpleAdditionalUnits((prev) => prev.filter((u) => u.id !== unitId));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -312,14 +418,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             sell_price: Number(sellPrice) || 0,
             wholesale_price: wholesalePrice ? Number(wholesalePrice) : null,
           },
-          ...simpleAdditionalUnits.map((u) => ({
-            unit_name: u.unit_name,
-            conversion_factor: Number(u.conversion_factor) || 1,
-            is_base_unit: false,
-            buy_price: Number(u.buy_price) || 0,
-            sell_price: Number(u.sell_price) || 0,
-            wholesale_price: null,
-          })),
+          ...simpleAdditionalUnits.map((u) => {
+            const effectiveBuy = Number(u.buy_price) || ((Number(buyPrice) || 0) * (Number(u.conversion_factor) || 1));
+            return {
+              unit_name: u.unit_name,
+              conversion_factor: Number(u.conversion_factor) || 1,
+              is_base_unit: false,
+              buy_price: effectiveBuy,
+              sell_price: Number(u.sell_price) || 0,
+              wholesale_price: null,
+            };
+          }),
         ];
 
         payload = {
@@ -342,21 +451,31 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
         payload = {
           ...payload,
-          variants: variantsList.map((v) => ({
-            variant_name: v.variant_name.trim(),
-            sku: v.sku.trim() || undefined,
-            barcode: v.barcode.trim() || undefined,
-            initial_stock: Number(v.initial_stock) || 0,
-            min_stock: Number(v.min_stock) || 5,
-            units: v.units.map((u) => ({
-              unit_name: u.unit_name,
-              conversion_factor: Number(u.conversion_factor) || 1,
-              is_base_unit: Boolean(u.is_base_unit),
-              buy_price: Number(u.buy_price) || 0,
-              sell_price: Number(u.sell_price) || 0,
-              wholesale_price: u.wholesale_price ? Number(u.wholesale_price) : null,
-            })),
-          })),
+          variants: variantsList.map((v) => {
+            const baseUnit = v.units.find((x) => x.is_base_unit);
+            return {
+              variant_name: v.variant_name.trim(),
+              sku: v.sku.trim() || undefined,
+              barcode: v.barcode.trim() || undefined,
+              initial_stock: Number(v.initial_stock) || 0,
+              min_stock: Number(v.min_stock) || 5,
+              units: v.units.map((u) => {
+                const effectiveBuy = Number(u.buy_price) || (
+                  !u.is_base_unit && baseUnit && baseUnit.buy_price > 0
+                    ? Number(baseUnit.buy_price) * (Number(u.conversion_factor) || 1)
+                    : 0
+                );
+                return {
+                  unit_name: u.unit_name,
+                  conversion_factor: Number(u.conversion_factor) || 1,
+                  is_base_unit: Boolean(u.is_base_unit),
+                  buy_price: effectiveBuy,
+                  sell_price: Number(u.sell_price) || 0,
+                  wholesale_price: u.wholesale_price ? Number(u.wholesale_price) : null,
+                };
+              }),
+            };
+          }),
         };
       }
 
@@ -599,12 +718,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Batas Peringatan Stok Minimal:
                 </label>
-                <input
-                  type="number"
-                  min="1"
+                <NumericInput
                   value={minStockAlert}
-                  onChange={(e) => setMinStockAlert(Number(e.target.value))}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  onChange={setMinStockAlert}
+                  min={1}
+                  prefixIcon={AlertTriangle}
+                  suffixText="Unit"
+                  placeholder="5"
                 />
               </div>
 
@@ -674,145 +794,265 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               </h4>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* 1. Satuan Dasar (Stock Unit) dengan Searchable Select & Shortcut Baru */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Satuan Dasar (Stock Unit):
-                  </label>
-                  <select
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Satuan Dasar (Stock Unit):
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickUnit((prev) => !prev)}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
+                    >
+                      <Scale className="w-3.5 h-3.5" />
+                      <span>{showQuickUnit ? 'Tutup' : '+ Satuan Baru'}</span>
+                    </button>
+                  </div>
+                  <UnitSelect
                     value={baseUnitName}
-                    onChange={(e) => setBaseUnitName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
-                  >
-                    <option value="Sak">Sak (Semen / Mortar)</option>
-                    <option value="Dus">Dus (Keramik / Granite)</option>
-                    <option value="Batang">Batang (Pipa / Besi)</option>
-                    <option value="Pail / Galon">Pail / Galon (Cat)</option>
-                    <option value="Pcs">Pcs / Buah</option>
-                    <option value="Meter">Meter (Kabel / Selang)</option>
-                    <option value="Roll">Roll (Kawat / Talang)</option>
-                    <option value="Kg">Kg (Paku / Pasir)</option>
-                    <option value="Lembar">Lembar (Triplek / GRC)</option>
-                  </select>
+                    onChange={setBaseUnitName}
+                    units={unitsList}
+                    onAddNewUnit={handleQuickAddUnit}
+                    placeholder="Pilih atau cari satuan..."
+                  />
+
+                  {/* Inline Quick Unit Form */}
+                  {showQuickUnit && (
+                    <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2 animate-in fade-in slide-in-from-top-1">
+                      <div>
+                        <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
+                          Tambah Satuan Baru ke Master:
+                        </p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                          Satuan ini akan otomatis tersedia di seluruh pilihan satuan toko.
+                        </p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <input
+                          type="text"
+                          value={quickUnitName}
+                          onChange={(e) => setQuickUnitName(e.target.value)}
+                          placeholder="Nama Satuan (misal: Kotak, Kranjang, Drum)"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                        />
+                        <input
+                          type="text"
+                          value={quickUnitDesc}
+                          onChange={(e) => setQuickUnitDesc(e.target.value)}
+                          placeholder="Deskripsi singkat / jenis bahan (Opsional)"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                        />
+                      </div>
+                      <div className="flex items-center justify-end gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowQuickUnit(false)}
+                          className="px-2.5 py-1 text-xs text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSubmittingQuickUnit || !quickUnitName.trim()}
+                          onClick={async () => {
+                            const newName = quickUnitName.trim();
+                            await handleQuickAddUnit();
+                            if (newName) setBaseUnitName(newName);
+                          }}
+                          className="px-3 py-1 text-xs font-semibold bg-amber-500 text-slate-900 rounded-md hover:bg-amber-400 disabled:opacity-50"
+                        >
+                          {isSubmittingQuickUnit ? 'Menyimpan...' : 'Simpan Satuan'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
+                {/* 2. Stok Awal Fisik */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Stok Awal Fisik:
                   </label>
-                  <input
-                    type="number"
-                    step="any"
-                    min="0"
+                  <NumericInput
                     value={initialStock}
-                    onChange={(e) => setInitialStock(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white font-medium"
+                    onChange={setInitialStock}
+                    allowDecimals={true}
+                    maxDecimals={2}
+                    prefixIcon={Boxes}
+                    suffixText={baseUnitName}
+                    placeholder="0"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Harga Jual Standar (Rp):
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={sellPrice}
-                    onChange={(e) => setSellPrice(Number(e.target.value))}
-                    placeholder="Contoh: 68000"
-                    required
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white font-bold"
-                  />
-                </div>
-
+                {/* 3. Harga Beli / Modal (Rp) -> Urut lebih dulu sebelum harga jual */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Harga Beli / Modal (Rp):
                   </label>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumericInput
                     value={buyPrice}
-                    onChange={(e) => setBuyPrice(Number(e.target.value))}
-                    placeholder="Contoh: 62000"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
+                    onChange={setBuyPrice}
+                    allowDecimals={true}
+                    maxDecimals={2}
+                    prefixIcon={Coins}
+                    prefixText="Rp"
+                    placeholder="Contoh: 62.000"
                   />
                 </div>
 
+                {/* 4. Harga Jual Standar (Rp) */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Harga Jual Standar (Rp):
+                  </label>
+                  <NumericInput
+                    value={sellPrice}
+                    onChange={setSellPrice}
+                    allowDecimals={true}
+                    maxDecimals={2}
+                    prefixIcon={Banknote}
+                    prefixText="Rp"
+                    placeholder="Contoh: 68.000"
+                    required
+                    inputClassName="font-bold"
+                  />
+                </div>
+
+                {/* 5. Harga Grosir / Proyek (Rp) */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Harga Grosir / Proyek (Rp):
                   </label>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumericInput
                     value={wholesalePrice}
-                    onChange={(e) => setWholesalePrice(e.target.value)}
-                    placeholder="Contoh: 65000"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
+                    onChange={(val) => setWholesalePrice(val > 0 ? String(val) : '')}
+                    allowDecimals={true}
+                    maxDecimals={2}
+                    prefixIcon={BadgePercent}
+                    prefixText="Rp"
+                    placeholder="Contoh: 65.000 (Opsional)"
                   />
                 </div>
+
+                {/* Ringkasan Keuntungan Produk Standar */}
+                {(buyPrice > 0 || sellPrice > 0) && (
+                  <div className="sm:col-span-2 md:col-span-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Keuntungan Standar ({baseUnitName}):
+                      </span>
+                      <ProfitBadge buyPrice={buyPrice} sellPrice={sellPrice} unitName={baseUnitName} />
+                    </div>
+                    {Number(wholesalePrice) > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                          Keuntungan Grosir:
+                        </span>
+                        <ProfitBadge buyPrice={buyPrice} sellPrice={Number(wholesalePrice)} unitName={baseUnitName} />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Extra multi-unit pricing for single variant */}
-              <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Satuan Harga Tambahan (Multi-Satuan e.g. Truk, Ikat, Dus):
-                  </span>
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-700/60">
+                <div className="flex items-center justify-between mb-2.5">
+                  <div>
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                      Satuan Harga Tambahan (Multi-Satuan e.g. Truk, Ikat, Dus):
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Tentukan harga jual untuk satuan kemasan yang lebih besar (Modal otomatis dihitung dari Modal Dasar × Isi).
+                    </span>
+                  </div>
                   <button
                     type="button"
                     onClick={handleAddSimpleUnit}
-                    className="flex items-center gap-1 text-xs font-semibold text-amber-600 hover:text-amber-700"
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 transition-colors"
                   >
                     <Plus className="w-3.5 h-3.5" /> Tambah Satuan Lain
                   </button>
                 </div>
 
-                {simpleAdditionalUnits.map((u, uIdx) => (
-                  <div key={uIdx} className="grid grid-cols-4 gap-2 items-center mb-2">
-                    <input
-                      type="text"
-                      placeholder="Nama Satuan (e.g. Truk)"
-                      value={u.unit_name}
-                      onChange={(e) => {
-                        const copy = [...simpleAdditionalUnits];
-                        copy[uIdx].unit_name = e.target.value;
-                        setSimpleAdditionalUnits(copy);
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800"
-                    />
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder="Konversi (Isi berapa sak/pcs)"
-                      value={u.conversion_factor}
-                      onChange={(e) => {
-                        const copy = [...simpleAdditionalUnits];
-                        copy[uIdx].conversion_factor = Number(e.target.value);
-                        setSimpleAdditionalUnits(copy);
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Harga Jual"
-                      value={u.sell_price}
-                      onChange={(e) => {
-                        const copy = [...simpleAdditionalUnits];
-                        copy[uIdx].sell_price = Number(e.target.value);
-                        setSimpleAdditionalUnits(copy);
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setSimpleAdditionalUnits(prev => prev.filter((_, i) => i !== uIdx))}
-                      className="p-1 text-rose-500 hover:text-rose-700 justify-self-center"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                {simpleAdditionalUnits.length > 0 && (
+                  <div className="hidden sm:grid grid-cols-12 gap-2 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1 mb-1.5">
+                    <div className="col-span-3">Nama Satuan</div>
+                    <div className="col-span-2">Isi ({baseUnitName})</div>
+                    <div className="col-span-3">Harga Jual</div>
+                    <div className="col-span-3">Keuntungan</div>
+                    <div className="col-span-1 text-center">Aksi</div>
                   </div>
-                ))}
+                )}
+
+                <div className="space-y-2">
+                  {simpleAdditionalUnits.map((u) => {
+                    const conversion = Number(u.conversion_factor) || 1;
+                    const autoModal = (Number(buyPrice) || 0) * conversion;
+
+                    return (
+                      <div
+                        key={u.id}
+                        className="grid grid-cols-12 gap-2 items-center bg-slate-50/70 dark:bg-slate-800/40 p-2.5 sm:p-2 rounded-xl border border-slate-200/60 dark:border-slate-700/40"
+                      >
+                        <div className="col-span-12 sm:col-span-3">
+                          <UnitSelect
+                            size="sm"
+                            value={u.unit_name}
+                            onChange={(val) => handleUpdateSimpleUnit(u.id, 'unit_name', val)}
+                            units={unitsList}
+                            onAddNewUnit={handleQuickAddUnit}
+                            placeholder="Pilih atau cari satuan..."
+                          />
+                        </div>
+                        <div className="col-span-6 sm:col-span-2">
+                          <NumericInput
+                            size="sm"
+                            allowDecimals={true}
+                            maxDecimals={2}
+                            prefixIcon={ArrowLeftRight}
+                            suffixText={`x ${baseUnitName}`}
+                            placeholder="Isi berapa"
+                            value={u.conversion_factor}
+                            onChange={(val) => handleUpdateSimpleUnit(u.id, 'conversion_factor', val)}
+                          />
+                        </div>
+                        <div className="col-span-6 sm:col-span-3">
+                          <NumericInput
+                            size="sm"
+                            allowDecimals={true}
+                            maxDecimals={2}
+                            prefixIcon={Banknote}
+                            prefixText="Rp"
+                            placeholder="Harga Jual"
+                            value={u.sell_price}
+                            onChange={(val) => handleUpdateSimpleUnit(u.id, 'sell_price', val)}
+                            inputClassName="font-bold"
+                          />
+                        </div>
+                        <div className="col-span-10 sm:col-span-3 flex items-center min-w-0">
+                          <ProfitBadge
+                            buyPrice={autoModal}
+                            sellPrice={u.sell_price}
+                            compact={true}
+                            unitName={u.unit_name || 'Unit'}
+                          />
+                        </div>
+                        <div className="col-span-2 sm:col-span-1 flex items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSimpleUnit(u.id)}
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors"
+                            title="Hapus Satuan"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
@@ -837,7 +1077,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               <div className="space-y-4">
                 {variantsList.map((variant, vIdx) => (
                   <div
-                    key={vIdx}
+                    key={variant.id}
                     className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 space-y-3"
                   >
                     <div className="flex items-center justify-between">
@@ -848,7 +1088,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                       {variantsList.length > 1 && (
                         <button
                           type="button"
-                          onClick={() => handleRemoveVariant(vIdx)}
+                          onClick={() => handleRemoveVariant(variant.id)}
                           className="text-xs text-rose-500 hover:text-rose-700 flex items-center gap-1"
                         >
                           <Trash2 className="w-3.5 h-3.5" /> Hapus Varian
@@ -864,7 +1104,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                         <input
                           type="text"
                           value={variant.variant_name}
-                          onChange={(e) => handleVariantChange(vIdx, 'variant_name', e.target.value)}
+                          onChange={(e) => handleVariantChange(variant.id, 'variant_name', e.target.value)}
                           placeholder="Contoh: 1/2 inch AW, Putih Salju 5kg, Ulir 10mm"
                           required
                           className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800"
@@ -878,7 +1118,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                         <input
                           type="text"
                           value={variant.sku}
-                          onChange={(e) => handleVariantChange(vIdx, 'sku', e.target.value)}
+                          onChange={(e) => handleVariantChange(variant.id, 'sku', e.target.value)}
                           placeholder="Auto-generate jika kosong"
                           className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800"
                         />
@@ -888,85 +1128,196 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                         <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
                           Stok Awal Fisik:
                         </label>
-                        <input
-                          type="number"
-                          step="any"
-                          min="0"
+                        <NumericInput
+                          size="sm"
                           value={variant.initial_stock}
-                          onChange={(e) => handleVariantChange(vIdx, 'initial_stock', Number(e.target.value))}
-                          className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 font-medium"
+                          onChange={(val) => handleVariantChange(variant.id, 'initial_stock', val)}
+                          allowDecimals={true}
+                          maxDecimals={2}
+                          prefixIcon={Boxes}
+                          suffixText={variant.units[0]?.unit_name || 'Unit'}
+                          placeholder="0"
                         />
                       </div>
                     </div>
 
                     {/* Units inside this variant */}
-                    <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                          Satuan Harga Varian:
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleAddUnitToVariant(vIdx)}
-                          className="text-[11px] font-semibold text-amber-600 hover:text-amber-700"
-                        >
-                          + Tambah Satuan
-                        </button>
-                      </div>
+                    <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-3">
+                      {/* Satuan Dasar Pokok Varian */}
+                      {(() => {
+                        const baseUnit = variant.units.find((x) => x.is_base_unit) || variant.units[0];
+                        const additionalUnits = variant.units.filter((x) => !x.is_base_unit);
 
-                      <div className="space-y-1.5">
-                        {variant.units.map((u, uIdx) => (
-                          <div key={uIdx} className="grid grid-cols-5 gap-2 items-center">
-                            <input
-                              type="text"
-                              value={u.unit_name}
-                              onChange={(e) => handleUnitChange(vIdx, uIdx, 'unit_name', e.target.value)}
-                              placeholder="Nama Satuan (Pcs/Dus/Sak)"
-                              className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800"
-                            />
-                            <input
-                              type="number"
-                              step="any"
-                              value={u.conversion_factor}
-                              onChange={(e) => handleUnitChange(vIdx, uIdx, 'conversion_factor', Number(e.target.value))}
-                              placeholder="Konversi"
-                              disabled={u.is_base_unit}
-                              className={`px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs ${
-                                u.is_base_unit ? 'bg-slate-100 dark:bg-slate-800/80 text-slate-500' : 'bg-white dark:bg-slate-800'
-                              }`}
-                            />
-                            <input
-                              type="number"
-                              value={u.sell_price}
-                              onChange={(e) => handleUnitChange(vIdx, uIdx, 'sell_price', Number(e.target.value))}
-                              placeholder="Harga Jual (Rp)"
-                              className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 font-bold"
-                            />
-                            <input
-                              type="number"
-                              value={u.buy_price}
-                              onChange={(e) => handleUnitChange(vIdx, uIdx, 'buy_price', Number(e.target.value))}
-                              placeholder="Harga Beli (Rp)"
-                              className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800"
-                            />
-                            <div>
-                              {u.is_base_unit ? (
-                                <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 rounded">
-                                  Dasar
-                                </span>
-                              ) : (
+                        return (
+                          <>
+                            {baseUnit && (
+                              <div className="p-3 rounded-xl bg-amber-500/5 dark:bg-amber-950/20 border border-amber-500/20 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-[10px] font-extrabold uppercase">
+                                      Satuan Dasar
+                                    </span>
+                                    <span>({baseUnit.unit_name || 'Satuan Pokok'})</span>
+                                  </span>
+                                  <div className="min-w-0">
+                                    <ProfitBadge
+                                      buyPrice={baseUnit.buy_price}
+                                      sellPrice={baseUnit.sell_price}
+                                      compact={true}
+                                      unitName={baseUnit.unit_name}
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                  <div>
+                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                                      Nama Satuan Dasar:
+                                    </label>
+                                    <UnitSelect
+                                      size="sm"
+                                      value={baseUnit.unit_name}
+                                      onChange={(val) => handleUnitChange(variant.id, baseUnit.id, 'unit_name', val)}
+                                      units={unitsList}
+                                      onAddNewUnit={handleQuickAddUnit}
+                                      placeholder="Pilih satuan..."
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                                      Harga Beli / Modal (Rp):
+                                    </label>
+                                    <NumericInput
+                                      size="sm"
+                                      value={baseUnit.buy_price}
+                                      onChange={(val) => handleUnitChange(variant.id, baseUnit.id, 'buy_price', val)}
+                                      allowDecimals={true}
+                                      maxDecimals={2}
+                                      prefixIcon={Coins}
+                                      prefixText="Rp"
+                                      placeholder="Modal Dasar"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                                      Harga Jual Standar (Rp):
+                                    </label>
+                                    <NumericInput
+                                      size="sm"
+                                      value={baseUnit.sell_price}
+                                      onChange={(val) => handleUnitChange(variant.id, baseUnit.id, 'sell_price', val)}
+                                      allowDecimals={true}
+                                      maxDecimals={2}
+                                      prefixIcon={Banknote}
+                                      prefixText="Rp"
+                                      placeholder="Harga Jual"
+                                      inputClassName="font-bold"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Multi-Satuan Tambahan (Tanpa Input Modal Berulang) */}
+                            <div className="pt-1">
+                              <div className="flex items-center justify-between mb-2">
+                                <div>
+                                  <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                                    Satuan Tambahan (Multi-Satuan e.g. Dus, Truk, Ikat):
+                                  </span>
+                                  <span className="text-[10px] text-slate-400">
+                                    Harga modal otomatis dihitung dari (Modal Dasar × Isi Konversi).
+                                  </span>
+                                </div>
                                 <button
                                   type="button"
-                                  onClick={() => handleRemoveUnitFromVariant(vIdx, uIdx)}
-                                  className="text-rose-500 hover:text-rose-700 p-1"
+                                  onClick={() => handleAddUnitToVariant(variant.id)}
+                                  className="text-[11px] font-semibold text-amber-600 hover:text-amber-700 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 transition-colors"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Plus className="w-3.5 h-3.5" /> Tambah Satuan
                                 </button>
+                              </div>
+
+                              {additionalUnits.length > 0 && (
+                                <div className="hidden sm:grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1 mb-1.5">
+                                  <div className="col-span-3">Nama Satuan</div>
+                                  <div className="col-span-2">Isi ({baseUnit?.unit_name || 'Dasar'})</div>
+                                  <div className="col-span-3">Harga Jual</div>
+                                  <div className="col-span-3">Keuntungan</div>
+                                  <div className="col-span-1 text-center">Aksi</div>
+                                </div>
                               )}
+
+                              <div className="space-y-1.5">
+                                {additionalUnits.map((u) => {
+                                  const autoModal = (Number(baseUnit?.buy_price) || 0) * (Number(u.conversion_factor) || 1);
+
+                                  return (
+                                    <div
+                                      key={u.id}
+                                      className="grid grid-cols-12 gap-2 items-center bg-white dark:bg-slate-800/80 p-2 sm:p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700/60"
+                                    >
+                                      <div className="col-span-12 sm:col-span-3">
+                                        <UnitSelect
+                                          size="sm"
+                                          value={u.unit_name}
+                                          onChange={(val) => handleUnitChange(variant.id, u.id, 'unit_name', val)}
+                                          units={unitsList}
+                                          onAddNewUnit={handleQuickAddUnit}
+                                          placeholder="Pilih satuan..."
+                                        />
+                                      </div>
+                                      <div className="col-span-6 sm:col-span-2">
+                                        <NumericInput
+                                          size="sm"
+                                          value={u.conversion_factor}
+                                          onChange={(val) => handleUnitChange(variant.id, u.id, 'conversion_factor', val)}
+                                          allowDecimals={true}
+                                          maxDecimals={2}
+                                          prefixIcon={ArrowLeftRight}
+                                          suffixText={`x ${baseUnit?.unit_name || 'Unit'}`}
+                                          placeholder="Isi berapa"
+                                        />
+                                      </div>
+                                      <div className="col-span-6 sm:col-span-3">
+                                        <NumericInput
+                                          size="sm"
+                                          value={u.sell_price}
+                                          onChange={(val) => handleUnitChange(variant.id, u.id, 'sell_price', val)}
+                                          allowDecimals={true}
+                                          maxDecimals={2}
+                                          prefixIcon={Banknote}
+                                          prefixText="Rp"
+                                          placeholder="Harga Jual"
+                                          inputClassName="font-bold"
+                                        />
+                                      </div>
+                                      <div className="col-span-10 sm:col-span-3 flex items-center min-w-0">
+                                        <ProfitBadge
+                                          buyPrice={autoModal}
+                                          sellPrice={u.sell_price}
+                                          compact={true}
+                                          unitName={u.unit_name || 'Unit'}
+                                        />
+                                      </div>
+                                      <div className="col-span-2 sm:col-span-1 flex items-center justify-center">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveUnitFromVariant(variant.id, u.id)}
+                                          className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors"
+                                          title="Hapus Satuan"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))}

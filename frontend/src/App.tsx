@@ -23,13 +23,23 @@ export const App: React.FC = () => {
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+
+  // Independent Data States
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState<boolean>(true);
+
   const [products, setProducts] = useState<Product[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState<boolean>(false);
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoriesTree, setCategoriesTree] = useState<Category[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState<boolean>(false);
+
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [loadingBrands, setLoadingBrands] = useState<boolean>(false);
+
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loadingSuppliers, setLoadingSuppliers] = useState<boolean>(false);
 
   // Navigation drill-down state for "Data Produk"
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -71,7 +81,6 @@ export const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
-        // Prevent default if not typing in input/textarea
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
         if (tag !== 'input' && tag !== 'textarea') {
           e.preventDefault();
@@ -83,24 +92,77 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [toggleSidebar]);
 
-  const loadData = useCallback(async () => {
+  // =========================================================================
+  // FOCUSED ON-DEMAND DATA LOADERS (Prevents production freezing and bloat)
+  // =========================================================================
+
+  const loadSummary = useCallback(async () => {
     try {
-      setLoading(true);
-      const [sumData, prodData, catFlat, catTree, brandData, supplierData] = await Promise.all([
-        api.getDashboardSummary(),
-        api.getProducts(),
+      setLoadingSummary(true);
+      const sumData = await api.getDashboardSummary();
+      setSummary(sumData);
+    } catch (err: any) {
+      console.error('Failed to load dashboard summary:', err);
+    } finally {
+      setLoadingSummary(false);
+    }
+  }, []);
+
+  const loadCategories = useCallback(async () => {
+    try {
+      setLoadingCategories(true);
+      const [catFlat, catTree] = await Promise.all([
         api.getCategories(false),
         api.getCategories(true),
-        api.getBrands(),
-        api.getSuppliers(),
       ]);
-
-      setSummary(sumData);
-      setProducts(prodData);
       setCategories(catFlat);
       setCategoriesTree(catTree);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || 'Gagal memuat data kategori', 'error');
+    } finally {
+      setLoadingCategories(false);
+    }
+  }, [showToast]);
+
+  const loadBrands = useCallback(async () => {
+    try {
+      setLoadingBrands(true);
+      const brandData = await api.getBrands();
       setBrands(brandData);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || 'Gagal memuat data merek', 'error');
+    } finally {
+      setLoadingBrands(false);
+    }
+  }, [showToast]);
+
+  const loadSuppliers = useCallback(async () => {
+    try {
+      setLoadingSuppliers(true);
+      const supplierData = await api.getSuppliers();
       setSuppliers(supplierData);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || 'Gagal memuat data supplier', 'error');
+    } finally {
+      setLoadingSuppliers(false);
+    }
+  }, [showToast]);
+
+  const loadProducts = useCallback(async () => {
+    try {
+      setLoadingProducts(true);
+      const [prodData, catFlat, brandData] = await Promise.all([
+        api.getProducts(),
+        categories.length === 0 ? api.getCategories(false) : Promise.resolve(categories),
+        brands.length === 0 ? api.getBrands() : Promise.resolve(brands),
+      ]);
+
+      setProducts(prodData);
+      if (categories.length === 0) setCategories(catFlat);
+      if (brands.length === 0) setBrands(brandData);
 
       // Keep selected product & variant in sync if currently viewing them
       setSelectedProduct((prevProd) => {
@@ -108,7 +170,6 @@ export const App: React.FC = () => {
         const fresh = prodData.find((p) => p.id === prevProd.id);
         if (!fresh) return null;
 
-        // Also sync selected variant if open
         setSelectedVariant((prevVar) => {
           if (!prevVar) return null;
           return fresh.variants?.find((v) => v.id === prevVar.id) || null;
@@ -118,18 +179,37 @@ export const App: React.FC = () => {
       });
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || 'Gagal memuat data dari server', 'error');
+      showToast(err.message || 'Gagal memuat produk dari server', 'error');
     } finally {
-      setLoading(false);
+      setLoadingProducts(false);
     }
-  }, [showToast]);
+  }, [categories, brands, showToast]);
 
+  // Initial load: summary only (lightweight boot)
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadSummary();
+  }, [loadSummary]);
+
+  // Tab switch listener: lazy load data for the active page
+  useEffect(() => {
+    if (activeTab === 'dashboard') {
+      loadSummary();
+    } else if (activeTab === 'products') {
+      loadProducts();
+    } else if (activeTab === 'categories') {
+      loadCategories();
+    } else if (activeTab === 'brands') {
+      loadBrands();
+    } else if (activeTab === 'suppliers') {
+      loadSuppliers();
+    }
+  }, [activeTab]);
 
   // Handle open adjust stock modal
   const handleOpenAdjust = (variantId?: string) => {
+    if (products.length === 0) {
+      loadProducts();
+    }
     setAdjustVariantId(variantId);
     setIsAdjustOpen(true);
   };
@@ -145,7 +225,6 @@ export const App: React.FC = () => {
   // Handle tab change from sidebar
   const handleTabChange = (tab: ActiveTab) => {
     if (tab === 'products' && activeTab === 'products') {
-      // If already on products tab and user clicks sidebar, reset to list
       setSelectedProduct(null);
       setSelectedVariant(null);
     }
@@ -163,7 +242,8 @@ export const App: React.FC = () => {
       showToast(`Produk "${name}" berhasil dihapus`, 'success');
       setSelectedProduct(null);
       setSelectedVariant(null);
-      loadData();
+      loadProducts();
+      loadSummary();
     } catch (err: any) {
       showToast(err.message || 'Gagal menghapus produk', 'error');
     }
@@ -171,6 +251,9 @@ export const App: React.FC = () => {
 
   // Handle open edit product
   const handleOpenEditProduct = (prod: Product) => {
+    if (categoriesTree.length === 0) {
+      loadCategories();
+    }
     setEditingProduct(prod);
     setIsEditProductOpen(true);
   };
@@ -182,8 +265,15 @@ export const App: React.FC = () => {
     setIsEditVariantOpen(true);
   };
 
+  const handleOpenCreateProduct = () => {
+    if (categoriesTree.length === 0) {
+      loadCategories();
+    }
+    setIsCreateOpen(true);
+  };
+
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
+    <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors overflow-hidden">
       {/* Top Navbar */}
       <Navbar
         lowStockCount={summary?.low_stock_count || 0}
@@ -192,7 +282,7 @@ export const App: React.FC = () => {
         onToggleSidebar={toggleSidebar}
       />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Sidebar */}
         <Sidebar
           activeTab={activeTab}
@@ -203,12 +293,12 @@ export const App: React.FC = () => {
         />
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 min-h-0">
           {activeTab === 'dashboard' && (
             <DashboardView
               summary={summary}
-              loading={loading}
-              onOpenCreateProduct={() => setIsCreateOpen(true)}
+              loading={loadingSummary}
+              onOpenCreateProduct={handleOpenCreateProduct}
               onOpenStockAdjust={handleOpenAdjust}
               onNavigateToProducts={handleNavigateToProducts}
               onNavigateToMovements={() => setActiveTab('movements')}
@@ -229,7 +319,10 @@ export const App: React.FC = () => {
                   onOpenAdjust={handleOpenAdjust}
                   showToast={showToast}
                   onEditVariant={(v) => handleOpenEditVariant(v, selectedProduct.name)}
-                  onRefresh={loadData}
+                  onRefresh={() => {
+                    loadProducts();
+                    loadSummary();
+                  }}
                 />
               ) : selectedProduct ? (
                 <ProductDetailView
@@ -254,9 +347,9 @@ export const App: React.FC = () => {
                   products={products}
                   categories={categories}
                   brands={brands}
-                  loading={loading}
-                  onRefresh={loadData}
-                  onOpenCreate={() => setIsCreateOpen(true)}
+                  loading={loadingProducts}
+                  onRefresh={loadProducts}
+                  onOpenCreate={handleOpenCreateProduct}
                   onOpenDetail={(p) => {
                     setSelectedProduct(p);
                     setSelectedVariant(null);
@@ -289,44 +382,39 @@ export const App: React.FC = () => {
                 </button>
               </div>
 
-              {/* Also show movements table beneath for instant reference */}
+              {/* Stock movements table beneath for reference */}
               <StockMovementsView />
             </div>
           )}
 
           {activeTab === 'movements' && <StockMovementsView />}
 
+          {/* 3 Dedicated Standalone Pages for Master Data */}
           {activeTab === 'categories' && (
             <CategoryManagementView
               categories={categories}
               categoriesTree={categoriesTree}
-              brandCount={brands.length}
-              supplierCount={suppliers.length}
-              onRefresh={loadData}
+              loading={loadingCategories}
+              onRefresh={loadCategories}
               showToast={showToast}
-              onNavigateTab={(tab) => setActiveTab(tab)}
             />
           )}
 
           {activeTab === 'brands' && (
             <BrandManagementView
               brands={brands}
-              categoryCount={categories.length}
-              supplierCount={suppliers.length}
-              onRefresh={loadData}
+              loading={loadingBrands}
+              onRefresh={loadBrands}
               showToast={showToast}
-              onNavigateTab={(tab) => setActiveTab(tab)}
             />
           )}
 
           {activeTab === 'suppliers' && (
             <SupplierManagementView
               suppliers={suppliers}
-              categoryCount={categories.length}
-              brandCount={brands.length}
-              onRefresh={loadData}
+              loading={loadingSuppliers}
+              onRefresh={loadSuppliers}
               showToast={showToast}
-              onNavigateTab={(tab) => setActiveTab(tab)}
             />
           )}
 
@@ -339,7 +427,10 @@ export const App: React.FC = () => {
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         categories={categoriesTree}
-        onSuccess={loadData}
+        onSuccess={() => {
+          loadProducts();
+          loadSummary();
+        }}
         showToast={showToast}
       />
 
@@ -351,7 +442,10 @@ export const App: React.FC = () => {
         }}
         products={products}
         initialVariantId={adjustVariantId}
-        onSuccess={loadData}
+        onSuccess={() => {
+          loadProducts();
+          loadSummary();
+        }}
         showToast={showToast}
       />
 
@@ -360,7 +454,10 @@ export const App: React.FC = () => {
         onClose={() => setIsAddVariantOpen(false)}
         productId={addVariantProductId}
         productName={addVariantProductName}
-        onSuccess={loadData}
+        onSuccess={() => {
+          loadProducts();
+          loadSummary();
+        }}
         showToast={showToast}
       />
 
@@ -372,7 +469,10 @@ export const App: React.FC = () => {
         }}
         product={editingProduct}
         categories={categoriesTree}
-        onSuccess={loadData}
+        onSuccess={() => {
+          loadProducts();
+          loadSummary();
+        }}
         showToast={showToast}
       />
 
@@ -384,7 +484,10 @@ export const App: React.FC = () => {
         }}
         variant={editingVariant}
         productName={editingVariantProductName}
-        onSuccess={loadData}
+        onSuccess={() => {
+          loadProducts();
+          loadSummary();
+        }}
         showToast={showToast}
       />
     </div>

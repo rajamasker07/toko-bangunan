@@ -358,6 +358,69 @@ export async function initializeDatabase() {
       }
     }
 
+    // 7. Master Units Table (Satuan Barang)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS units (
+        id UUID PRIMARY KEY,
+        name VARCHAR(50) NOT NULL,
+        name_key VARCHAR(50) UNIQUE NOT NULL,
+        description VARCHAR(255),
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_units_name_key ON units(name_key);
+    `);
+
+    // Inisialisasi daftar satuan default toko bangunan jika masih kosong
+    const unitCountRes = await client.query('SELECT COUNT(*)::int AS count FROM units');
+    if (unitCountRes.rows[0].count === 0) {
+      console.log('🌱 Menyiapkan master data satuan bahan bangunan...');
+      const defaultUnits = [
+        { name: 'Sak', description: 'Semen, Mortar, Pasir Silika' },
+        { name: 'Dus', description: 'Keramik, Granite, Baut/Mur' },
+        { name: 'Batang', description: 'Pipa PVC, Besi Beton, Hollow, Baja Ringan' },
+        { name: 'Pail', description: 'Cat Tembok Besar 20-25kg, Waterproofing' },
+        { name: 'Galon', description: 'Cat Tembok Sedang 4-5kg' },
+        { name: 'Pcs', description: 'Buah / Satuan Terkecil / Keran / Stop Kontak' },
+        { name: 'Meter', description: 'Kabel Listrik, Selang Air, Tali Tambang' },
+        { name: 'Roll', description: 'Kawat Harmonika, Karpet Talang, Wiremesh' },
+        { name: 'Kg', description: 'Paku Kayu/Baja, Pasir Ecer, Kawat Bendrat' },
+        { name: 'Lembar', description: 'Triplek, GRC Board, Seng, Spandek' },
+        { name: 'Truk', description: 'Pasir Cor, Batu Split, Bata Ringan 1 Dump Truk' },
+        { name: 'Pick Up', description: 'Pasir, Bata Merah 1 Mobil Pick Up' },
+        { name: 'Ikat', description: 'Besi Beton, Kayu Kaso, Reng' },
+        { name: 'Bungkus', description: 'Fisher, Skrup Gypsum, Paku Payung' },
+        { name: 'Kaleng', description: 'Cat Semprot, Thinner, Lem Fox' },
+        { name: 'Koli', description: 'Paket / Dus Besar Grosir' },
+        { name: 'Botol', description: 'Sealant Silicone, Lem Botol' },
+        { name: 'Set', description: 'Kunci Pintu, Engsel, Alat Pertukangan' },
+        { name: 'Kotak', description: 'Kemasan Box Kecil' },
+        { name: 'Papan', description: 'Kayu Papan Kamper/Meranti' },
+      ];
+
+      for (const u of defaultUnits) {
+        const key = u.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        await client.query(
+          `INSERT INTO units (id, name, name_key, description, is_active)
+           VALUES ($1, $2, $3, $4, TRUE)
+           ON CONFLICT (name_key) DO NOTHING`,
+          [generateUUIDv7(), u.name, key, u.description]
+        );
+      }
+
+      // Migrasi satuan lama yang pernah dipakai di variant_units
+      await client.query(`
+        INSERT INTO units (id, name, name_key, description, is_active)
+        SELECT gen_random_uuid(), TRIM(vu.unit_name), LOWER(REGEXP_REPLACE(TRIM(vu.unit_name), '[^a-zA-Z0-9]', '', 'g')), 'Satuan dari produk', TRUE
+        FROM variant_units vu
+        WHERE vu.unit_name IS NOT NULL AND TRIM(vu.unit_name) <> ''
+          AND LOWER(REGEXP_REPLACE(TRIM(vu.unit_name), '[^a-zA-Z0-9]', '', 'g')) NOT IN (SELECT name_key FROM units)
+        GROUP BY TRIM(vu.unit_name)
+        ON CONFLICT (name_key) DO NOTHING;
+      `);
+    }
+
     await client.query('COMMIT');
     console.log('✅ Toko Bangunan database schema created successfully!');
   } catch (error) {

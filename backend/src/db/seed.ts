@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
+import { brandKey, normalizeBrandName } from '../utils/brand.js';
 
 export async function seedDatabase() {
   const client = await pool.connect();
@@ -77,11 +78,27 @@ export async function seedDatabase() {
         }>;
       }>;
     }) => {
+      let brandId: string | null = null;
+      if (p.brand && p.brand.trim()) {
+        const bName = normalizeBrandName(p.brand);
+        const bKey = brandKey(bName);
+        const existing = await client.query('SELECT id FROM brands WHERE name_key = $1', [bKey]);
+        if (existing.rows.length > 0) {
+          brandId = existing.rows[0].id;
+        } else {
+          brandId = generateUUIDv7();
+          await client.query(
+            'INSERT INTO brands (id, name, name_key) VALUES ($1, $2, $3)',
+            [brandId, bName, bKey]
+          );
+        }
+      }
+
       const productId = generateUUIDv7();
       await client.query(`
-        INSERT INTO products (id, name, sku, barcode, category_id, brand, description, min_stock_alert, has_variants)
+        INSERT INTO products (id, name, sku, barcode, category_id, brand_id, description, min_stock_alert, has_variants)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
-      `, [productId, p.name, p.sku, p.barcode || null, p.categoryId, p.brand, p.description, p.minStockAlert, p.hasVariants]);
+      `, [productId, p.name, p.sku, p.barcode || null, p.categoryId, brandId, p.description, p.minStockAlert, p.hasVariants]);
 
       for (const v of p.variants) {
         const variantId = generateUUIDv7();

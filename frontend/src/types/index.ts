@@ -18,6 +18,16 @@ export interface Brand {
   product_count?: number;
 }
 
+export interface UnitMaster {
+  id: string;
+  name: string;
+  name_key: string;
+  description?: string | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface SalesPhone {
   number: string;
   label?: string; // e.g. "WhatsApp", "HP Utama", "Telepon Kantor", "HP Pribadi"

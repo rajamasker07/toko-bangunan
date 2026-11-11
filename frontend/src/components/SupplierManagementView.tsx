@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Supplier, SupplierSales, SalesPhone } from '../types';
 import { api } from '../services/api';
-import { MasterDataNav, MasterDataTab } from './MasterDataNav';
+import { Pagination } from './common/Pagination';
 import { 
   Truck, 
   Plus, 
@@ -24,16 +24,15 @@ import {
   Star,
   Building2,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  RefreshCw
 } from 'lucide-react';
 
 interface SupplierManagementViewProps {
-  suppliers: Supplier[];
-  categoryCount?: number;
-  brandCount?: number;
+  suppliers?: Supplier[];
+  loading?: boolean;
   onRefresh: () => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
-  onNavigateTab: (tab: MasterDataTab) => void;
 }
 
 const PHONE_LABEL_PRESETS = [
@@ -46,16 +45,16 @@ const PHONE_LABEL_PRESETS = [
 ];
 
 export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
-  suppliers,
-  categoryCount = 0,
-  brandCount = 0,
+  suppliers = [],
+  loading = false,
   onRefresh,
   showToast,
-  onNavigateTab,
 }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [salesFilter, setSalesFilter] = useState<'all' | 'has_sales' | 'no_sales'>('all');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   // Supplier Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -145,6 +144,17 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
       return true;
     });
   }, [suppliers, search, statusFilter, salesFilter]);
+
+  // Reset page when filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, statusFilter, salesFilter]);
+
+  // Paginated suppliers for lightweight rendering
+  const paginatedSuppliers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredSuppliers.slice(start, start + pageSize);
+  }, [filteredSuppliers, currentPage, pageSize]);
 
   // Supplier modal handlers
   const openCreateModal = () => {
@@ -401,34 +411,37 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Master Data Sub-Nav Header */}
-      <MasterDataNav
-        activeTab="suppliers"
-        onSelectTab={onNavigateTab}
-        categoryCount={categoryCount}
-        brandCount={brandCount}
-        supplierCount={totalSuppliers}
-      />
-
       {/* View Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
             <Truck className="w-5 h-5 text-amber-500" />
-            <span>Pengelolaan Master Supplier & Tim Sales</span>
+            <span>Master Supplier & Tim Sales</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Daftar distributor resmi material bangunan lengkap beserta tim sales, nomor kontak berganda & status aktifnya
           </p>
         </div>
 
-        <button
-          onClick={openCreateModal}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tambah Supplier Baru</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              disabled={loading}
+              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-xs disabled:opacity-50"
+              title="Segarkan Data Supplier"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-500' : ''}`} />
+            </button>
+          )}
+          <button
+            onClick={openCreateModal}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Supplier Baru</span>
+          </button>
+        </div>
       </div>
 
       {/* Metrics Row (4 Cards) */}
@@ -561,7 +574,14 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
       </div>
 
       {/* Suppliers Grid Cards */}
-      {filteredSuppliers.length === 0 ? (
+      {loading && suppliers.length === 0 ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-14 text-center space-y-3">
+          <RefreshCw className="w-8 h-8 text-amber-500 animate-spin mx-auto" />
+          <p className="font-semibold text-slate-700 dark:text-slate-300 text-xs">
+            Memuat data supplier & tim sales...
+          </p>
+        </div>
+      ) : filteredSuppliers.length === 0 ? (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center space-y-3">
           <Truck className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto" />
           <h3 className="font-bold text-slate-800 dark:text-slate-200">
@@ -578,8 +598,9 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {filteredSuppliers.map((s) => {
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {paginatedSuppliers.map((s) => {
             const isCollapsed = Boolean(collapsedSales[s.id]);
             const salesList = s.sales || [];
             const salesCount = salesList.length;
@@ -932,6 +953,17 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
               </div>
             );
           })}
+          </div>
+
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filteredSuppliers.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[6, 10, 20, 50]}
+            className="rounded-2xl border border-slate-200 dark:border-slate-800"
+          />
         </div>
       )}
 
