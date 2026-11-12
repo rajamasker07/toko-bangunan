@@ -760,14 +760,27 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     setSimpleAdditionalUnits((prev) => prev.filter((u) => u.id !== unitId));
   };
 
-  // Keyboard navigation helper for Enter key within form fields
+  // Keyboard navigation helper: Shift+Enter to advance steps (plain Enter will NOT advance steps)
   const handleFormKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
-    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
-      e.preventDefault();
-      if (currentStep === 1) {
-        if (validateStep1()) goToStep(2);
-      } else if (currentStep === 2) {
-        if (validateStep2()) goToStep(3);
+    // Shift+Enter to advance to the next step
+    if (e.shiftKey && e.key === 'Enter') {
+      if ((e.target as HTMLElement).tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        if (currentStep === 1) {
+          if (validateStep1()) goToStep(2);
+        } else if (currentStep === 2) {
+          if (validateStep2()) goToStep(3);
+        }
+      }
+      return;
+    }
+
+    // Normal Enter: do NOT advance steps, and prevent premature submit on step 1 & 2
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      if ((e.target as HTMLElement).tagName !== 'TEXTAREA') {
+        if (currentStep < 3) {
+          e.preventDefault();
+        }
       }
     }
   };
@@ -915,9 +928,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 <h2 className="text-base font-bold text-slate-900 dark:text-white">
                   Tambah Produk Bahan Bangunan Baru
                 </h2>
-                <span className="hidden md:inline-flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 font-mono">
-                  <kbd className="bg-white dark:bg-slate-700 px-1 py-0.2 rounded shadow-2xs font-bold text-slate-700 dark:text-slate-200">Ctrl+Enter</kbd>
-                  <span>simpan</span>
+                <span className="hidden md:inline-flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 font-mono">
+                  <span className="flex items-center gap-1">
+                    <kbd className="bg-white dark:bg-slate-700 px-1 py-0.2 rounded shadow-2xs font-bold text-slate-700 dark:text-slate-200">Shift+Enter</kbd>
+                    <span>lanjut</span>
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-600">•</span>
+                  <span className="flex items-center gap-1">
+                    <kbd className="bg-white dark:bg-slate-700 px-1 py-0.2 rounded shadow-2xs font-bold text-slate-700 dark:text-slate-200">Ctrl+Enter</kbd>
+                    <span>simpan</span>
+                  </span>
                 </span>
               </div>
               <p className="text-xs text-slate-500">
@@ -2180,6 +2200,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all cursor-pointer"
                 >
                   <span>Lanjut: Satuan & Harga</span>
+                  <kbd className="hidden sm:inline-block text-[10px] font-mono bg-amber-700/60 text-amber-100 px-1.5 py-0.5 rounded border border-amber-500/30">
+                    Shift+Enter
+                  </kbd>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               )}
@@ -2207,6 +2230,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all cursor-pointer"
                   >
                     <span>Lanjut: Dimensi & Logistik</span>
+                    <kbd className="hidden sm:inline-block text-[10px] font-mono bg-amber-700/60 text-amber-100 px-1.5 py-0.5 rounded border border-amber-500/30">
+                      Shift+Enter
+                    </kbd>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </>
