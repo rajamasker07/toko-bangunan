@@ -134,6 +134,21 @@ export class VariantService {
   }
 
   /**
+   * Toggle variant sale status (is_active: masih dijual vs sudah tidak dijual)
+   */
+  static async toggleVariantStatus(variantId: string) {
+    const res = await query(
+      `UPDATE product_variants 
+       SET is_active = NOT is_active, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $1 
+       RETURNING *`,
+      [variantId]
+    );
+    if (!res.rows[0]) throw new Error('Varian tidak ditemukan');
+    return res.rows[0];
+  }
+
+  /**
    * Add unit price to variant
    */
   static async addUnit(variantId: string, unit: {

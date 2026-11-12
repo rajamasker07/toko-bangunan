@@ -52,11 +52,13 @@ router.get('/products', ProductController.list);
 router.get('/products/:id', ProductController.getById);
 router.post('/products', ProductController.create);
 router.put('/products/:id', ProductController.update);
+router.patch('/products/:id/toggle-status', ProductController.toggleStatus);
 router.delete('/products/:id', ProductController.delete);
 
 // Product Variants
 router.post('/products/:productId/variants', VariantController.addVariant);
 router.put('/variants/:id', VariantController.updateVariant);
+router.patch('/variants/:id/toggle-status', VariantController.toggleStatus);
 router.delete('/variants/:id', VariantController.deleteVariant);
 
 // Variant Units (Satuan Harga bertingkat)

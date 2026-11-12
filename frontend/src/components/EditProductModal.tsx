@@ -29,6 +29,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   const [supplierId, setSupplierId] = useState('');
   const [description, setDescription] = useState('');
   const [minStockAlert, setMinStockAlert] = useState<number>(5);
+  const [isActive, setIsActive] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Brands & Suppliers list
@@ -58,6 +59,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       setSupplierId(product.supplier_id || '');
       setDescription(product.description || '');
       setMinStockAlert(Number(product.min_stock_alert) || 5);
+      setIsActive(product.is_active !== false);
       setLocalCategories(categories);
 
       // Load brands and suppliers
@@ -173,6 +175,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
         supplier_id: supplierId || null,
         description: description.trim() || null,
         min_stock_alert: Number(minStockAlert) || 5,
+        is_active: isActive,
       });
 
       showToast(`Produk "${name}" berhasil diperbarui`, 'success');
@@ -213,6 +216,46 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4">
+          {/* Status Penjualan Produk Card */}
+          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                  Status Penjualan Master Produk
+                </span>
+                <span className="text-[11px] text-slate-500 block">
+                  Tentukan apakah produk ini aktif dipasarkan atau sudah dihentikan / diskontinu
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsActive(!isActive)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  isActive ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    isActive ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            <div className="flex items-center gap-2 pt-1 text-xs font-semibold">
+              {isActive ? (
+                <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  Masih Dijual (Aktif di Kasir & Katalog)
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+                  <span className="w-2 h-2 rounded-full bg-rose-500" />
+                  Sudah Tidak Dijual (Disembunyikan dari Kasir)
+                </span>
+              )}
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
               Nama Produk <span className="text-rose-500">*</span>:

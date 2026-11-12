@@ -20,7 +20,8 @@ import {
   Calendar,
   User,
   Barcode,
-  Edit2
+  Edit2,
+  Power
 } from 'lucide-react';
 
 interface VariantDetailViewProps {
@@ -31,6 +32,7 @@ interface VariantDetailViewProps {
   onOpenAdjust: (variantId: string) => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
   onEditVariant?: (variant: ProductVariant) => void;
+  onToggleVariantStatus?: (variantId: string) => void;
   onRefresh?: () => void;
 }
 
@@ -42,6 +44,7 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
   onOpenAdjust,
   showToast,
   onEditVariant,
+  onToggleVariantStatus,
   onRefresh,
 }) => {
   // Movements log state with paging
@@ -203,6 +206,17 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
 
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
+                {variant.is_active === false ? (
+                  <span className="flex items-center gap-1.5 text-xs font-bold px-3 py-0.5 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-300 dark:border-rose-900/60">
+                    <span className="w-2 h-2 rounded-full bg-rose-500" />
+                    Status Varian: Sudah Tidak Dijual
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-xs font-bold px-3 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-900/60">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Status Varian: Masih Dijual
+                  </span>
+                )}
                 <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
                   {product.name}
                 </span>
@@ -240,7 +254,7 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-4 self-start lg:self-center">
+          <div className="flex items-center gap-3 self-start lg:self-center flex-wrap">
             {/* Stock Metric Badge */}
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 text-right min-w-[140px]">
               <span className="text-[11px] text-slate-400 block font-medium">Stok Fisik Saat Ini</span>
@@ -251,6 +265,37 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                 Batas Min: {formatStock(variant.min_stock)}
               </span>
             </div>
+
+            {/* Toggle Status Button */}
+            <button
+              type="button"
+              onClick={async () => {
+                if (onToggleVariantStatus) {
+                  onToggleVariantStatus(variant.id);
+                } else {
+                  try {
+                    const res = await api.toggleVariantStatus(variant.id);
+                    showToast(res.message || 'Status varian berhasil diubah', 'success');
+                    if (onRefresh) onRefresh();
+                  } catch (err: any) {
+                    showToast(err.message || 'Gagal mengubah status varian', 'error');
+                  }
+                }
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs transition-all shrink-0 border ${
+                variant.is_active !== false
+                  ? 'border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
+                  : 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+              }`}
+              title={
+                variant.is_active !== false
+                  ? 'Hentikan penjualan varian ini'
+                  : 'Aktifkan kembali penjualan varian ini'
+              }
+            >
+              <Power className="w-4 h-4" />
+              <span>{variant.is_active !== false ? 'Hentikan Penjualan Varian' : 'Jual Kembali Varian'}</span>
+            </button>
 
             {onEditVariant && (
               <button
@@ -273,6 +318,33 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Warning banner if Parent Product is Inactive */}
+        {product.is_active === false && (
+          <div className="mt-4 flex items-start gap-3 p-3.5 rounded-xl bg-amber-500/10 border border-amber-300 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 text-xs">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <strong>Perhatian: Produk Induk ({product.name}) Sedang Tidak Dijual.</strong>
+              <p className="mt-0.5 text-amber-700 dark:text-amber-400">
+                Meskipun status varian ini aktif, produk induk harus diaktifkan kembali agar varian ini dapat muncul pada transaksi kasir.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Warning banner if Variant is Inactive */}
+        {variant.is_active === false && (
+          <div className="mt-4 flex items-start gap-3 p-3.5 rounded-xl bg-rose-500/10 border border-rose-300 dark:border-rose-900/50 text-rose-800 dark:text-rose-300 text-xs">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <strong>Varian ini Berstatus Sudah Tidak Dijual (Nonaktif).</strong>
+              <p className="mt-0.5 text-rose-700 dark:text-rose-400">
+                Varian ini tidak akan muncul pada menu kasir atau transaksi penjualan baru.
+                Klik tombol "Jual Kembali Varian" jika ingin mengaktifkannya kembali.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Section: Multi-Satuan Harga (Satuan Bertingkat) */}

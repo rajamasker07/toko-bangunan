@@ -24,6 +24,7 @@ export const EditVariantModal: React.FC<EditVariantModalProps> = ({
   const [sku, setSku] = useState('');
   const [barcode, setBarcode] = useState('');
   const [minStock, setMinStock] = useState<number>(5);
+  const [isActive, setIsActive] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -32,6 +33,7 @@ export const EditVariantModal: React.FC<EditVariantModalProps> = ({
       setSku(variant.sku || '');
       setBarcode(variant.barcode || '');
       setMinStock(Number(variant.min_stock) || 5);
+      setIsActive(variant.is_active !== false);
     }
   }, [isOpen, variant]);
 
@@ -55,6 +57,7 @@ export const EditVariantModal: React.FC<EditVariantModalProps> = ({
         sku: sku.trim(),
         barcode: barcode.trim() || null,
         min_stock: Number(minStock) || 5,
+        is_active: isActive,
       });
 
       showToast(`Varian "${variantName}" berhasil diperbarui`, 'success');
@@ -95,6 +98,46 @@ export const EditVariantModal: React.FC<EditVariantModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="space-y-3.5">
+          {/* Status Penjualan Varian Card */}
+          <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                  Status Penjualan Varian
+                </span>
+                <span className="text-[11px] text-slate-500 block">
+                  Hentikan penjualan spesifik varian ini tanpa memengaruhi varian lain
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsActive(!isActive)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  isActive ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    isActive ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            <div className="flex items-center gap-2 pt-1 text-xs font-semibold">
+              {isActive ? (
+                <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  Masih Dijual (Aktif di Kasir)
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+                  <span className="w-2 h-2 rounded-full bg-rose-500" />
+                  Sudah Tidak Dijual (Disembunyikan dari Kasir)
+                </span>
+              )}
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
               Nama Varian (Spesifikasi / Ukuran / Warna) <span className="text-rose-500">*</span>:

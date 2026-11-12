@@ -249,6 +249,30 @@ export const App: React.FC = () => {
     }
   };
 
+  // Handle toggle product sale status (Masih Dijual vs Sudah Tidak Dijual)
+  const handleToggleProductStatus = async (prod: Product) => {
+    try {
+      const res = await api.toggleProductStatus(prod.id);
+      showToast(res.message || 'Status produk berhasil diperbarui', 'success');
+      await loadProducts();
+      await loadSummary();
+    } catch (err: any) {
+      showToast(err.message || 'Gagal mengubah status produk', 'error');
+    }
+  };
+
+  // Handle toggle variant sale status (Masih Dijual vs Sudah Tidak Dijual)
+  const handleToggleVariantStatus = async (variantId: string) => {
+    try {
+      const res = await api.toggleVariantStatus(variantId);
+      showToast(res.message || 'Status varian berhasil diperbarui', 'success');
+      await loadProducts();
+      await loadSummary();
+    } catch (err: any) {
+      showToast(err.message || 'Gagal mengubah status varian', 'error');
+    }
+  };
+
   // Handle open edit product
   const handleOpenEditProduct = (prod: Product) => {
     if (categoriesTree.length === 0) {
@@ -319,6 +343,7 @@ export const App: React.FC = () => {
                   onOpenAdjust={handleOpenAdjust}
                   showToast={showToast}
                   onEditVariant={(v) => handleOpenEditVariant(v, selectedProduct.name)}
+                  onToggleVariantStatus={handleToggleVariantStatus}
                   onRefresh={() => {
                     loadProducts();
                     loadSummary();
@@ -341,6 +366,8 @@ export const App: React.FC = () => {
                   onDeleteProduct={handleDeleteProduct}
                   onEditProduct={handleOpenEditProduct}
                   onEditVariant={(v) => handleOpenEditVariant(v, selectedProduct.name)}
+                  onToggleProductStatus={handleToggleProductStatus}
+                  onToggleVariantStatus={handleToggleVariantStatus}
                 />
               ) : (
                 <ProductListView
@@ -357,6 +384,7 @@ export const App: React.FC = () => {
                   onOpenAdjust={handleOpenAdjust}
                   onDeleteProduct={handleDeleteProduct}
                   onEditProduct={handleOpenEditProduct}
+                  onToggleProductStatus={handleToggleProductStatus}
                   initialStockFilter={productStockFilter}
                 />
               )}

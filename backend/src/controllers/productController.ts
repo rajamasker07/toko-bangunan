@@ -8,7 +8,8 @@ export class ProductController {
       const categoryId = req.query.categoryId as string;
       const brand = req.query.brand as string;
       const stockStatus = req.query.stockStatus as any;
-      const products = await ProductService.getProducts({ search, categoryId, brand, stockStatus });
+      const saleStatus = req.query.saleStatus as any;
+      const products = await ProductService.getProducts({ search, categoryId, brand, stockStatus, saleStatus });
       res.json({ success: true, data: products });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
@@ -56,6 +57,20 @@ export class ProductController {
       const id = String(req.params.id);
       await ProductService.deleteProduct(id);
       res.json({ success: true, message: 'Produk berhasil dihapus' });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  static async toggleStatus(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const product = await ProductService.toggleProductStatus(id);
+      res.json({
+        success: true,
+        data: product,
+        message: `Status produk berhasil diubah menjadi ${product.is_active ? 'Masih Dijual' : 'Sudah Tidak Dijual'}`,
+      });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }

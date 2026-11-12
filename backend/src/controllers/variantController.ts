@@ -36,6 +36,20 @@ export class VariantController {
     }
   }
 
+  static async toggleStatus(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const variant = await VariantService.toggleVariantStatus(id);
+      res.json({
+        success: true,
+        data: variant,
+        message: `Status varian berhasil diubah menjadi ${variant.is_active ? 'Masih Dijual' : 'Sudah Tidak Dijual'}`,
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
   static async addUnit(req: Request, res: Response) {
     try {
       const variantId = String(req.params.variantId);

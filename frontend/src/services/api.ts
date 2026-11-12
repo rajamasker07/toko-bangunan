@@ -114,12 +114,13 @@ export const api = {
     }),
 
   // Products
-  getProducts: (filters?: { search?: string; categoryId?: string; brand?: string; stockStatus?: string }) => {
+  getProducts: (filters?: { search?: string; categoryId?: string; brand?: string; stockStatus?: string; saleStatus?: string }) => {
     const params = new URLSearchParams();
     if (filters?.search) params.append('search', filters.search);
     if (filters?.categoryId) params.append('categoryId', filters.categoryId);
     if (filters?.brand) params.append('brand', filters.brand);
     if (filters?.stockStatus && filters.stockStatus !== 'all') params.append('stockStatus', filters.stockStatus);
+    if (filters?.saleStatus && filters.saleStatus !== 'all') params.append('saleStatus', filters.saleStatus);
     const queryStr = params.toString() ? `?${params.toString()}` : '';
     return fetchJson<Product[]>(`/products${queryStr}`);
   },
@@ -133,6 +134,10 @@ export const api = {
     fetchJson<Product>(`/products/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    }),
+  toggleProductStatus: (id: string) =>
+    fetchJson<{ success: boolean; data: Product; message: string }>(`/products/${id}/toggle-status`, {
+      method: 'PATCH',
     }),
   deleteProduct: (id: string) =>
     fetchJson<void>(`/products/${id}`, {
@@ -149,6 +154,10 @@ export const api = {
     fetchJson<any>(`/variants/${variantId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    }),
+  toggleVariantStatus: (variantId: string) =>
+    fetchJson<{ success: boolean; data: any; message: string }>(`/variants/${variantId}/toggle-status`, {
+      method: 'PATCH',
     }),
   deleteVariant: (variantId: string) =>
     fetchJson<void>(`/variants/${variantId}`, {

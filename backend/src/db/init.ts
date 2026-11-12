@@ -138,6 +138,7 @@ export async function initializeDatabase() {
       );
       CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
       CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
+      CREATE INDEX IF NOT EXISTS idx_products_active ON products(is_active);
     `);
 
     // 3b. Migrasi skema lama: kolom teks `products.brand` -> relasi `products.brand_id`
@@ -186,6 +187,7 @@ export async function initializeDatabase() {
       );
       CREATE INDEX IF NOT EXISTS idx_product_variants_product ON product_variants(product_id);
       CREATE INDEX IF NOT EXISTS idx_product_variants_sku ON product_variants(sku);
+      CREATE INDEX IF NOT EXISTS idx_product_variants_active ON product_variants(is_active);
     `);
 
     // 4. Variant Units (Satuan Harga bertingkat / multi-unit)

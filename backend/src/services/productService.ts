@@ -62,6 +62,7 @@ export class ProductService {
     categoryId?: string;
     brand?: string;
     stockStatus?: 'all' | 'low' | 'out' | 'normal';
+    saleStatus?: 'all' | 'active' | 'inactive';
     limit?: number;
     offset?: number;
   }) {
@@ -102,6 +103,14 @@ export class ProductService {
       conditions.push(`LOWER(b.name) = $${params.length}`);
     }
 
+    if (filters?.saleStatus && filters.saleStatus !== 'all') {
+      if (filters.saleStatus === 'active') {
+        conditions.push(`p.is_active = TRUE`);
+      } else if (filters.saleStatus === 'inactive') {
+        conditions.push(`p.is_active = FALSE`);
+      }
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const sql = `
@@ -121,8 +130,10 @@ export class ProductService {
               'id', pv2.id,
               'variant_name', pv2.variant_name,
               'sku', pv2.sku,
+              'barcode', pv2.barcode,
               'current_stock', pv2.current_stock,
               'min_stock', pv2.min_stock,
+              'is_active', pv2.is_active,
               'units', (
                 SELECT json_agg(
                   json_build_object(
@@ -512,5 +523,20 @@ export class ProductService {
   static async deleteProduct(id: string) {
     const res = await query('DELETE FROM products WHERE id = $1 RETURNING *', [id]);
     return res.rows[0];
+  }
+
+  /**
+   * Toggle product sale status (is_active: masih dijual vs sudah tidak dijual)
+   */
+  static async toggleProductStatus(id: string) {
+    const res = await query(
+      `UPDATE products 
+       SET is_active = NOT is_active, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $1 
+       RETURNING *`,
+      [id]
+    );
+    if (!res.rows[0]) throw new Error('Produk tidak ditemukan');
+    return this.getProductById(id);
   }
 }

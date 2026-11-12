@@ -15,7 +15,8 @@ import {
   Trash2,
   Package,
   ChevronRight,
-  Edit2
+  Edit2,
+  Power
 } from 'lucide-react';
 
 interface ProductListViewProps {
@@ -29,6 +30,7 @@ interface ProductListViewProps {
   onOpenAdjust: (variantId: string) => void;
   onEditProduct?: (product: Product) => void;
   onDeleteProduct: (id: string, name: string) => void;
+  onToggleProductStatus?: (product: Product) => void;
   initialStockFilter?: string;
 }
 
@@ -43,12 +45,14 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   onOpenAdjust,
   onEditProduct,
   onDeleteProduct,
+  onToggleProductStatus,
   initialStockFilter = 'all',
 }) => {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [stockFilter, setStockFilter] = useState(initialStockFilter);
+  const [saleFilter, setSaleFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
   // Extract unique brands list
   const brandList = useMemo(() => {
@@ -71,7 +75,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   // Reset to page 1 whenever filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, selectedCategory, selectedBrand, stockFilter]);
+  }, [search, selectedCategory, selectedBrand, stockFilter, saleFilter]);
 
   // Filter products client-side for ultra-responsive instant UX
   const filteredProducts = products.filter((p) => {
@@ -102,7 +106,14 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
       matchStock = !p.has_low_stock && Number(p.total_stock) > 0;
     }
 
-    return matchSearch && matchCategory && matchBrand && matchStock;
+    let matchSale = true;
+    if (saleFilter === 'active') {
+      matchSale = p.is_active !== false;
+    } else if (saleFilter === 'inactive') {
+      matchSale = p.is_active === false;
+    }
+
+    return matchSearch && matchCategory && matchBrand && matchStock && matchSale;
   });
 
   // Paginated slice
@@ -217,10 +228,69 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           </div>
         </div>
 
-        {/* Quick status pills for Stock */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-100 dark:border-slate-800 text-xs">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-slate-400 font-semibold text-[11px] mr-1">Filter Cepat Stok:</span>
+        {/* Quick status pills for Sale Status & Stock */}
+        <div className="space-y-2 pt-2.5 border-t border-slate-100 dark:border-slate-800 text-xs">
+          {/* Sale Status (Tingkat Produk) */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-slate-400 font-semibold text-[11px] mr-1">Status Penjualan:</span>
+              <button
+                type="button"
+                onClick={() => setSaleFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                  saleFilter === 'all'
+                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
+              >
+                Semua Status ({products.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSaleFilter('active')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1 ${
+                  saleFilter === 'active'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                <span>Masih Dijual ({products.filter((p) => p.is_active !== false).length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSaleFilter('inactive')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1 ${
+                  saleFilter === 'inactive'
+                    ? 'bg-rose-600 text-white shadow-sm'
+                    : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block"></span>
+                <span>Sudah Tidak Dijual ({products.filter((p) => p.is_active === false).length})</span>
+              </button>
+            </div>
+
+            {(search || selectedCategory || selectedBrand || stockFilter !== 'all' || saleFilter !== 'all') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setSelectedCategory('');
+                  setSelectedBrand('');
+                  setStockFilter('all');
+                  setSaleFilter('all');
+                }}
+                className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline font-semibold"
+              >
+                Reset Semua Filter
+              </button>
+            )}
+          </div>
+
+          {/* Stock Condition */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-dashed border-slate-100 dark:border-slate-800/60">
+            <span className="text-slate-400 font-semibold text-[11px] mr-1">Kondisi Stok:</span>
             <button
               type="button"
               onClick={() => setStockFilter('all')}
@@ -269,21 +339,6 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
               <span>Stok Aman ({products.filter((p) => !p.has_low_stock && Number(p.total_stock) > 0).length})</span>
             </button>
           </div>
-
-          {(search || selectedCategory || selectedBrand || stockFilter !== 'all') && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearch('');
-                setSelectedCategory('');
-                setSelectedBrand('');
-                setStockFilter('all');
-              }}
-              className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline font-semibold"
-            >
-              Reset Semua Filter
-            </button>
-          )}
         </div>
       </div>
 
@@ -349,18 +404,35 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                   return (
                     <tr
                       key={product.id}
-                      className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
+                      className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors ${
+                        product.is_active === false ? 'bg-rose-500/[0.02] dark:bg-rose-950/[0.05]' : ''
+                      }`}
                     >
                       <td className="py-3.5 px-4">
-                        <button
-                          type="button"
-                          onClick={() => onOpenDetail(product)}
-                          className="font-bold text-slate-900 dark:text-white text-sm hover:text-amber-600 dark:hover:text-amber-400 transition-colors text-left flex items-center gap-1.5 group/name"
-                          title="Klik untuk melihat detail & varian produk ini"
-                        >
-                          <span>{product.name}</span>
-                          <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover/name:opacity-100 transition-opacity text-amber-500 shrink-0" />
-                        </button>
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <button
+                            type="button"
+                            onClick={() => onOpenDetail(product)}
+                            className="font-bold text-slate-900 dark:text-white text-sm hover:text-amber-600 dark:hover:text-amber-400 transition-colors text-left flex items-center gap-1.5 group/name"
+                            title="Klik untuk melihat detail & varian produk ini"
+                          >
+                            <span>{product.name}</span>
+                            <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover/name:opacity-100 transition-opacity text-amber-500 shrink-0" />
+                          </button>
+
+                          {product.is_active === false ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-500/10 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40 px-2 py-0.5 rounded-full">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                              Sudah Tidak Dijual
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40 px-2 py-0.5 rounded-full">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              Masih Dijual
+                            </span>
+                          )}
+                        </div>
+
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="font-mono text-[10px] text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
                             {product.sku}
@@ -392,6 +464,17 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                         <div className="text-[11px] text-slate-400 mt-0.5">
                           {primaryUnit?.unit_name ? `Satuan: ${primaryUnit.unit_name}` : ''}
                         </div>
+                        {(() => {
+                          const inactiveVars = product.variants?.filter((v) => v.is_active === false).length || 0;
+                          if (inactiveVars > 0) {
+                            return (
+                              <div className="inline-flex items-center gap-1 mt-1 text-[10px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded">
+                                {inactiveVars} varian tidak dijual
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
                       </td>
 
                       <td className="py-3.5 px-4">
@@ -436,6 +519,25 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {onToggleProductStatus && (
+                            <button
+                              type="button"
+                              onClick={() => onToggleProductStatus(product)}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                product.is_active !== false
+                                  ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                                  : 'text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                              }`}
+                              title={
+                                product.is_active !== false
+                                  ? 'Status: Masih Dijual (Klik untuk hentikan penjualan)'
+                                  : 'Status: Sudah Tidak Dijual (Klik untuk aktifkan kembali)'
+                              }
+                            >
+                              <Power className="w-4 h-4" />
+                            </button>
+                          )}
+
                           <button
                             onClick={() => onOpenDetail(product)}
                             className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
