@@ -30,6 +30,8 @@ type NavItem =
   | { type: 'option'; option: SearchableOption; id: string }
   | { type: 'addNew'; query: string; id: string };
 
+const MAX_OPTIONS_DISPLAY = 50;
+
 export const SearchableSelect: React.FC<SearchableSelectProps> = ({
   value,
   onChange,
@@ -58,6 +60,25 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
 
   const isClosingRef = useRef<boolean>(false);
   const isMouseDownRef = useRef<boolean>(false);
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  // Safe timeout helper to avoid memory leaks on unmount
+  const safeTimeout = (callback: () => void, ms: number) => {
+    const timer = setTimeout(() => {
+      timersRef.current.delete(timer);
+      callback();
+    }, ms);
+    timersRef.current.add(timer);
+    return timer;
+  };
+
+  // Clear all pending timeouts on component unmount
+  useEffect(() => {
+    return () => {
+      timersRef.current.forEach((t) => clearTimeout(t));
+      timersRef.current.clear();
+    };
+  }, []);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -68,12 +89,11 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
     };
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
-      // Ensure search input gets focused immediately when opened
-      const timer = setTimeout(() => {
+      // Focus search input immediately on open
+      safeTimeout(() => {
         searchInputRef.current?.focus();
       }, 20);
       return () => {
-        clearTimeout(timer);
         document.removeEventListener('mousedown', handleClickOutside);
       };
     }
@@ -87,7 +107,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
     if (isOpen) {
       isClosingRef.current = true;
       setIsOpen(false);
-      setTimeout(() => {
+      safeTimeout(() => {
         isClosingRef.current = false;
       }, 200);
     } else {
@@ -101,7 +121,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
     if (disabled || isClosingRef.current || isMouseDownRef.current) return;
     setSearchQuery('');
     setIsOpen(true);
-    setTimeout(() => {
+    safeTimeout(() => {
       searchInputRef.current?.focus();
     }, 15);
   };
@@ -113,7 +133,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
       e.preventDefault();
       setSearchQuery('');
       setIsOpen(true);
-      setTimeout(() => {
+      safeTimeout(() => {
         searchInputRef.current?.focus();
       }, 15);
     } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -121,7 +141,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
       e.preventDefault();
       setSearchQuery(e.key);
       setIsOpen(true);
-      setTimeout(() => {
+      safeTimeout(() => {
         searchInputRef.current?.focus();
       }, 15);
     }
@@ -150,20 +170,25 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
     return safeOptions.some((opt) => (opt.label || '').trim().toLowerCase() === q);
   }, [safeOptions, searchQuery]);
 
+  // Bounded list to protect browser memory and prevent freeze when data scales to thousands
+  const visibleOptions = useMemo(() => {
+    return filteredOptions.slice(0, MAX_OPTIONS_DISPLAY);
+  }, [filteredOptions]);
+
   // List of all items currently navigable via ArrowUp/ArrowDown & Enter
   const navigableItems = useMemo<NavItem[]>(() => {
     const items: NavItem[] = [];
     if (allowClear && !searchQuery.trim()) {
       items.push({ type: 'clear', id: '__clear__' });
     }
-    for (const opt of filteredOptions) {
+    for (const opt of visibleOptions) {
       items.push({ type: 'option', option: opt, id: opt.value });
     }
     if (onAddNew && !exactMatchExists && searchQuery.trim()) {
       items.push({ type: 'addNew', query: searchQuery.trim(), id: '__add_new__' });
     }
     return items;
-  }, [allowClear, searchQuery, filteredOptions, onAddNew, exactMatchExists]);
+  }, [allowClear, searchQuery, visibleOptions, onAddNew, exactMatchExists]);
 
   // Synchronize highlightedIndex when navigable items or search query change
   useEffect(() => {
@@ -181,6 +206,11 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
     }
   }, [searchQuery, isOpen, value, navigableItems.length]);
 
+  // Clean up detached itemRefs to prevent memory leaks
+  useEffect(() => {
+    itemRefs.current = itemRefs.current.slice(0, navigableItems.length);
+  }, [navigableItems.length]);
+
   // Scroll highlighted item into view automatically
   useEffect(() => {
     if (isOpen && highlightedIndex >= 0 && itemRefs.current[highlightedIndex]) {
@@ -195,7 +225,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
     isClosingRef.current = true;
     setIsOpen(false);
     triggerRef.current?.focus();
-    setTimeout(() => {
+    safeTimeout(() => {
       isClosingRef.current = false;
     }, 200);
   };
@@ -209,7 +239,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
       isClosingRef.current = true;
       setIsOpen(false);
       triggerRef.current?.focus();
-      setTimeout(() => {
+      safeTimeout(() => {
         isClosingRef.current = false;
       }, 200);
     } catch (err) {
@@ -250,7 +280,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
       isClosingRef.current = true;
       setIsOpen(false);
       triggerRef.current?.focus();
-      setTimeout(() => {
+      safeTimeout(() => {
         isClosingRef.current = false;
       }, 200);
     } else if (e.key === 'Tab') {
@@ -263,7 +293,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
       }
       // Allow browser native Tab to smoothly move to next/prev form element
       isClosingRef.current = true;
-      setTimeout(() => {
+      safeTimeout(() => {
         setIsOpen(false);
         isClosingRef.current = false;
       }, 50);
@@ -300,7 +330,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
         onFocus={handleTriggerFocus}
         onMouseDown={() => {
           isMouseDownRef.current = true;
-          setTimeout(() => {
+          safeTimeout(() => {
             isMouseDownRef.current = false;
           }, 200);
         }}
@@ -378,8 +408,8 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
               </button>
             )}
 
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt, optIdx) => {
+            {visibleOptions.length > 0 ? (
+              visibleOptions.map((opt, optIdx) => {
                 const isSelected = value === opt.value;
                 const navIdx = (allowClear && !searchQuery.trim() ? 1 : 0) + optIdx;
                 const isHighlighted = highlightedIndex === navIdx;
@@ -426,6 +456,13 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
               </div>
             )}
           </div>
+
+          {/* Performance notice if results exceed display limit */}
+          {filteredOptions.length > MAX_OPTIONS_DISPLAY && (
+            <div className="px-3 py-1.5 text-[11px] font-medium text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/60 text-center border-t border-slate-100 dark:border-slate-800">
+              Menampilkan {MAX_OPTIONS_DISPLAY} dari {filteredOptions.length} hasil. Ketik kata kunci untuk mempersempit.
+            </div>
+          )}
 
           {/* Shortcut Tambah Baru Langsung dari Pencarian */}
           {onAddNew && !exactMatchExists && searchQuery.trim() && (

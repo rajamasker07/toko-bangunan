@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Category, Brand, Supplier, UnitMaster } from '../types';
 import { api } from '../services/api';
 import { NumericInput, formatIdNumber } from './common/NumericInput';
@@ -44,6 +44,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   onSuccess,
   showToast,
 }) => {
+  const formRef = useRef<HTMLFormElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
   const [hasVariants, setHasVariants] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
@@ -154,16 +157,87 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     setQuickUnitDesc('');
   };
 
-  // Reset form whenever modal is opened
+  // Check if user has entered unsaved changes
+  const isFormDirty = () => {
+    return (
+      name.trim() !== '' ||
+      sku.trim() !== '' ||
+      barcode.trim() !== '' ||
+      description.trim() !== '' ||
+      categoryId !== '' ||
+      brandId !== '' ||
+      supplierId !== '' ||
+      buyPrice > 0 ||
+      sellPrice > 0 ||
+      initialStock > 0 ||
+      simpleAdditionalUnits.length > 0 ||
+      hasVariants
+    );
+  };
+
+  const handleRequestClose = () => {
+    if (isFormDirty()) {
+      const confirmClose = window.confirm(
+        'Ada data produk yang belum disimpan. Yakin ingin menutup formulir tambah produk?'
+      );
+      if (!confirmClose) return;
+    }
+    onClose();
+  };
+
+  // Preload master data safely and auto-focus first input on open
   useEffect(() => {
+    let isMounted = true;
     if (isOpen) {
       resetForm();
-      api.getBrands().then((data) => setBrands(data)).catch((err) => console.error(err));
-      api.getSuppliers({ isActive: true }).then((data) => setSuppliers(data)).catch((err) => console.error(err));
-      api.getUnits().then((data) => setUnitsList(data)).catch((err) => console.error(err));
+
+      // Auto-focus Nama Produk so user can type immediately
+      setTimeout(() => {
+        if (isMounted) {
+          nameInputRef.current?.focus();
+        }
+      }, 50);
+
+      // Concurrent fetch with memory-leak protection
+      Promise.all([
+        api.getBrands(),
+        api.getSuppliers({ isActive: true }),
+        api.getUnits(),
+      ])
+        .then(([brandData, suppData, unitData]) => {
+          if (!isMounted) return;
+          setBrands(brandData);
+          setSuppliers(suppData);
+          setUnitsList(unitData);
+        })
+        .catch((err) => {
+          if (!isMounted) return;
+          console.error('Failed to preload master data:', err);
+        });
+
       setLocalCategories(categories);
     }
+    return () => {
+      isMounted = false;
+    };
   }, [isOpen, categories]);
+
+  // Global keyboard shortcut: Ctrl+Enter or Cmd+Enter to quickly submit product from anywhere
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (!isSubmitting) {
+          formRef.current?.requestSubmit();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isOpen, isSubmitting]);
 
   // Handle Quick Add Unit (Satuan Bahan Bangunan)
   const handleQuickAddUnit = async (nameToAdd?: string, descToAdd?: string): Promise<void> => {
@@ -316,30 +390,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       ],
     },
   ]);
-
-  // Flatten categories with visual indent for subcategories
-  const renderCategoryOptions = () => {
-    const options: React.ReactNode[] = [];
-
-    const traverse = (cats: Category[], level = 0) => {
-      if (!Array.isArray(cats)) return;
-      for (const cat of cats) {
-        if (!cat || !cat.id) continue;
-        const prefix = '\u00A0\u00A0\u00A0\u00A0'.repeat(level) + (level > 0 ? '↳ ' : '');
-        options.push(
-          <option key={cat.id} value={cat.id}>
-            {prefix}{cat.name}
-          </option>
-        );
-        if (cat.children && Array.isArray(cat.children) && cat.children.length > 0) {
-          traverse(cat.children, level + 1);
-        }
-      }
-    };
-
-    traverse(localCategories);
-    return options;
-  };
 
   // Build searchable category options with hierarchical indentation
   const categoryOptions = React.useMemo(() => {
@@ -707,7 +757,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          handleRequestClose();
+        }
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in"
+    >
       <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[92vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
@@ -716,24 +773,31 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               <Package className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                Tambah Produk Bahan Bangunan Baru
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Tambah Produk Bahan Bangunan Baru
+                </h2>
+                <span className="hidden md:inline-flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 font-mono">
+                  <kbd className="bg-white dark:bg-slate-700 px-1 py-0.2 rounded shadow-2xs font-bold text-slate-700 dark:text-slate-200">Ctrl+Enter</kbd>
+                  <span>simpan</span>
+                </span>
+              </div>
               <p className="text-xs text-slate-500">
                 Otomatis menghasilkan ID UUIDv7 dan 1 varian default jika tanpa varian
               </p>
             </div>
           </div>
           <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+            onClick={handleRequestClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+            title="Tutup (Esc)"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6">
+        <form ref={formRef} onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6">
           {/* Section 1: Basic Information */}
           <div className="space-y-4">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
@@ -746,6 +810,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   Nama Produk <span className="text-rose-500">*</span>:
                 </label>
                 <input
+                  ref={nameInputRef}
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -799,10 +864,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     <select
                       value={quickCatParentId}
                       onChange={(e) => setQuickCatParentId(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                     >
                       <option value="">Sebagai Kategori Utama (Tanpa Induk)</option>
-                      {renderCategoryOptions()}
+                      {categoryOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {'\u00A0\u00A0'.repeat(opt.level || 0)}{opt.level ? '↳ ' : ''}{opt.label}
+                        </option>
+                      ))}
                     </select>
                     <div className="flex items-center justify-end gap-1.5 pt-1">
                       <button
@@ -1610,7 +1679,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleRequestClose}
               disabled={isSubmitting}
               className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
@@ -1619,7 +1688,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 disabled:opacity-50 transition-all"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 disabled:opacity-50 transition-all cursor-pointer"
             >
               {isSubmitting ? (
                 <>
@@ -1630,6 +1699,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 <>
                   <CheckCircle2 className="w-4 h-4" />
                   <span>Simpan Produk</span>
+                  <kbd className="hidden sm:inline-block text-[10px] font-mono bg-amber-700/60 text-amber-100 px-1.5 py-0.5 rounded border border-amber-500/30">
+                    Ctrl+Enter
+                  </kbd>
                 </>
               )}
             </button>
