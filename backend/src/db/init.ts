@@ -410,15 +410,22 @@ export async function initializeDatabase() {
       }
 
       // Migrasi satuan lama yang pernah dipakai di variant_units
-      await client.query(`
-        INSERT INTO units (id, name, name_key, description, is_active)
-        SELECT gen_random_uuid(), TRIM(vu.unit_name), LOWER(REGEXP_REPLACE(TRIM(vu.unit_name), '[^a-zA-Z0-9]', '', 'g')), 'Satuan dari produk', TRUE
+      const legacyUnitsRes = await client.query(`
+        SELECT DISTINCT TRIM(vu.unit_name) as unit_name
         FROM variant_units vu
         WHERE vu.unit_name IS NOT NULL AND TRIM(vu.unit_name) <> ''
           AND LOWER(REGEXP_REPLACE(TRIM(vu.unit_name), '[^a-zA-Z0-9]', '', 'g')) NOT IN (SELECT name_key FROM units)
-        GROUP BY TRIM(vu.unit_name)
-        ON CONFLICT (name_key) DO NOTHING;
       `);
+
+      for (const row of legacyUnitsRes.rows as Array<{ unit_name: string }>) {
+        const key = row.unit_name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        await client.query(
+          `INSERT INTO units (id, name, name_key, description, is_active)
+           VALUES ($1, $2, $3, 'Satuan dari produk', TRUE)
+           ON CONFLICT (name_key) DO NOTHING`,
+          [generateUUIDv7(), row.unit_name.trim(), key]
+        );
+      }
     }
 
     await client.query('COMMIT');

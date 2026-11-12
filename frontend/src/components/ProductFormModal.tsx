@@ -244,8 +244,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     },
   ]);
 
-  if (!isOpen) return null;
-
   // Flatten categories with visual indent for subcategories
   const renderCategoryOptions = () => {
     const options: React.ReactNode[] = [];
@@ -567,6 +565,8 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
