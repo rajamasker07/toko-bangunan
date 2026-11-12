@@ -19,6 +19,7 @@ interface StockAdjustmentViewProps {
   onRefresh: () => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
   initialVariantId?: string;
+  initialTab?: 'form' | 'history';
 }
 
 export const StockAdjustmentView: React.FC<StockAdjustmentViewProps> = ({
@@ -26,9 +27,17 @@ export const StockAdjustmentView: React.FC<StockAdjustmentViewProps> = ({
   onRefresh,
   showToast,
   initialVariantId,
+  initialTab = 'form',
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'form' | 'history'>('form');
+  const [activeSubTab, setActiveSubTab] = useState<'form' | 'history'>(initialTab);
   const [refreshMovementsTrigger, setRefreshMovementsTrigger] = useState<number>(0);
+
+  // Sync activeSubTab if initialTab changes
+  React.useEffect(() => {
+    if (initialTab) {
+      setActiveSubTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Compute quick summary stats
   const totalVariants = products.reduce((acc, p) => acc + (p.variants?.length || 1), 0);

@@ -3,7 +3,6 @@ import {
   LayoutDashboard, 
   Package, 
   SlidersHorizontal, 
-  History, 
   FolderTree, 
   BookOpen,
   Sparkles,
@@ -35,7 +34,7 @@ interface NavSection {
   items: NavItem[];
 }
 
-export type ActiveTab = 'dashboard' | 'products' | 'adjust' | 'movements' | 'categories' | 'brands' | 'suppliers' | 'docs';
+export type ActiveTab = 'dashboard' | 'products' | 'adjust' | 'categories' | 'brands' | 'suppliers' | 'docs';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -75,12 +74,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           id: 'adjust',
           label: 'Penyesuaian Stok',
           icon: SlidersHorizontal,
-          badge: null,
-        },
-        {
-          id: 'movements',
-          label: 'Riwayat Log Mutasi',
-          icon: History,
           badge: null,
         },
       ],

@@ -13,7 +13,6 @@ import { EditProductModal } from './components/EditProductModal';
 import { EditVariantModal } from './components/EditVariantModal';
 import { StockAdjustmentModal } from './components/StockAdjustmentModal';
 import { StockAdjustmentView } from './components/StockAdjustmentView';
-import { StockMovementsView } from './components/StockMovementsView';
 import { CategoryManagementView } from './components/CategoryManagementView';
 import { BrandManagementView } from './components/BrandManagementView';
 import { SupplierManagementView } from './components/SupplierManagementView';
@@ -50,6 +49,7 @@ export const App: React.FC = () => {
   const [isCreateOpen, setIsCreateOpen] = useState<boolean>(false);
   const [isAdjustOpen, setIsAdjustOpen] = useState<boolean>(false);
   const [adjustVariantId, setAdjustVariantId] = useState<string | undefined>(undefined);
+  const [adjustInitialTab, setAdjustInitialTab] = useState<'form' | 'history'>('form');
   const [productStockFilter, setProductStockFilter] = useState<string>('all');
 
   // Add Variant Modal state
@@ -232,6 +232,9 @@ export const App: React.FC = () => {
       setSelectedProduct(null);
       setSelectedVariant(null);
     }
+    if (tab === 'adjust') {
+      setAdjustInitialTab('form');
+    }
     setActiveTab(tab);
   };
 
@@ -329,7 +332,10 @@ export const App: React.FC = () => {
               onOpenCreateProduct={handleOpenCreateProduct}
               onOpenStockAdjust={handleOpenAdjust}
               onNavigateToProducts={handleNavigateToProducts}
-              onNavigateToMovements={() => setActiveTab('movements')}
+              onNavigateToMovements={() => {
+                setAdjustInitialTab('history');
+                setActiveTab('adjust');
+              }}
             />
           )}
 
@@ -404,10 +410,9 @@ export const App: React.FC = () => {
               }}
               showToast={showToast}
               initialVariantId={adjustVariantId}
+              initialTab={adjustInitialTab}
             />
           )}
-
-          {activeTab === 'movements' && <StockMovementsView />}
 
           {/* 3 Dedicated Standalone Pages for Master Data */}
           {activeTab === 'categories' && (
