@@ -12,6 +12,7 @@ import { ProductFormModal } from './components/ProductFormModal';
 import { EditProductModal } from './components/EditProductModal';
 import { EditVariantModal } from './components/EditVariantModal';
 import { StockAdjustmentModal } from './components/StockAdjustmentModal';
+import { StockAdjustmentView } from './components/StockAdjustmentView';
 import { StockMovementsView } from './components/StockMovementsView';
 import { CategoryManagementView } from './components/CategoryManagementView';
 import { BrandManagementView } from './components/BrandManagementView';
@@ -198,6 +199,9 @@ export const App: React.FC = () => {
       loadProducts();
     } else if (activeTab === 'categories') {
       loadCategories();
+    } else if (activeTab === 'adjust') {
+      loadProducts();
+      loadSummary();
     } else if (activeTab === 'brands') {
       loadBrands();
     } else if (activeTab === 'suppliers') {
@@ -392,27 +396,15 @@ export const App: React.FC = () => {
           )}
 
           {activeTab === 'adjust' && (
-            <div className="space-y-6">
-              <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                    Pusat Penyesuaian & Opname Stok
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Gunakan modal cepat di bawah untuk mencatat stok fisik, barang masuk dari supplier, atau barang pecah/cacat.
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleOpenAdjust()}
-                  className="px-5 py-2.5 rounded-xl font-bold text-xs bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20"
-                >
-                  Buka Formulir Penyesuaian
-                </button>
-              </div>
-
-              {/* Stock movements table beneath for reference */}
-              <StockMovementsView />
-            </div>
+            <StockAdjustmentView
+              products={products}
+              onRefresh={() => {
+                loadProducts();
+                loadSummary();
+              }}
+              showToast={showToast}
+              initialVariantId={adjustVariantId}
+            />
           )}
 
           {activeTab === 'movements' && <StockMovementsView />}
