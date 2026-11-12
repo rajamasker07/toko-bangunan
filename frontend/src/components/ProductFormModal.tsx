@@ -75,6 +75,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [quickBrandName, setQuickBrandName] = useState<string>('');
   const [isSubmittingQuickBrand, setIsSubmittingQuickBrand] = useState<boolean>(false);
 
+  // Shortcut: Quick Add Supplier State
+  const [showQuickSupplier, setShowQuickSupplier] = useState<boolean>(false);
+  const [quickSupplierName, setQuickSupplierName] = useState<string>('');
+  const [quickSupplierContact, setQuickSupplierContact] = useState<string>('');
+  const [quickSupplierPhone, setQuickSupplierPhone] = useState<string>('');
+  const [quickSupplierCity, setQuickSupplierCity] = useState<string>('');
+  const [isSubmittingQuickSupplier, setIsSubmittingQuickSupplier] = useState<boolean>(false);
+
   // Master Units List & Shortcut Quick Add Unit
   const [unitsList, setUnitsList] = useState<UnitMaster[]>([]);
   const [showQuickUnit, setShowQuickUnit] = useState<boolean>(false);
@@ -82,9 +90,74 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [quickUnitDesc, setQuickUnitDesc] = useState<string>('');
   const [isSubmittingQuickUnit, setIsSubmittingQuickUnit] = useState<boolean>(false);
 
-  // Load brands, suppliers, and units on modal open
+  // Helper generator for unique keys
+  const createUniqueId = (prefix: string) =>
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  const getDefaultVariantsList = () => [
+    {
+      id: createUniqueId('var'),
+      variant_name: '',
+      sku: '',
+      barcode: '',
+      initial_stock: 0,
+      min_stock: 5,
+      units: [
+        {
+          id: createUniqueId('unit'),
+          unit_name: 'Pcs',
+          conversion_factor: 1,
+          is_base_unit: true,
+          buy_price: 0,
+          sell_price: 0,
+        },
+      ],
+    },
+  ];
+
+  // Reset all form fields to default initial state
+  const resetForm = () => {
+    setHasVariants(false);
+    setName('');
+    setSku('');
+    setBarcode('');
+    setCategoryId('');
+    setBrandId('');
+    setSupplierId('');
+    setDescription('');
+    setMinStockAlert(5);
+
+    // Simple Product Form States
+    setInitialStock(0);
+    setBaseUnitName('Pcs');
+    setBuyPrice(0);
+    setSellPrice(0);
+    setWholesalePrice('');
+    setSimpleAdditionalUnits([]);
+
+    // Multi-variant Form States
+    setVariantsList(getDefaultVariantsList());
+
+    // Quick add popovers
+    setShowQuickCategory(false);
+    setQuickCatName('');
+    setQuickCatParentId('');
+    setShowQuickBrand(false);
+    setQuickBrandName('');
+    setShowQuickSupplier(false);
+    setQuickSupplierName('');
+    setQuickSupplierContact('');
+    setQuickSupplierPhone('');
+    setQuickSupplierCity('');
+    setShowQuickUnit(false);
+    setQuickUnitName('');
+    setQuickUnitDesc('');
+  };
+
+  // Reset form whenever modal is opened
   useEffect(() => {
     if (isOpen) {
+      resetForm();
       api.getBrands().then((data) => setBrands(data)).catch((err) => console.error(err));
       api.getSuppliers({ isActive: true }).then((data) => setSuppliers(data)).catch((err) => console.error(err));
       api.getUnits().then((data) => setUnitsList(data)).catch((err) => console.error(err));
@@ -316,6 +389,25 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     }
   };
 
+  // Build searchable supplier options
+  const supplierOptions = React.useMemo(() => {
+    if (!Array.isArray(suppliers)) return [];
+    return suppliers
+      .filter((s) => s && s.id)
+      .map((s) => {
+        const details = [
+          s.code ? `[${s.code}]` : '',
+          s.city || '',
+          s.phone || '',
+        ].filter(Boolean).join(' • ');
+        return {
+          value: s.id,
+          label: s.name || 'Tanpa Nama',
+          subtitle: details || undefined,
+        };
+      });
+  }, [suppliers]);
+
   // Handle direct quick-add brand from SearchableSelect inline search
   const handleDirectAddBrand = async (nameToAdd: string) => {
     try {
@@ -333,9 +425,54 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     }
   };
 
-  // Helper generator for unique keys
-  const createUniqueId = (prefix: string) =>
-    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  // Handle Quick Add Supplier via inline panel
+  const handleQuickAddSupplier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickSupplierName.trim()) {
+      showToast('Nama supplier wajib diisi', 'error');
+      return;
+    }
+    try {
+      setIsSubmittingQuickSupplier(true);
+      const newSupplier = await api.createSupplier({
+        name: quickSupplierName.trim(),
+        contact_person: quickSupplierContact.trim() || undefined,
+        phone: quickSupplierPhone.trim() || undefined,
+        city: quickSupplierCity.trim() || undefined,
+        is_active: true,
+      });
+
+      const updatedSuppliers = await api.getSuppliers({ isActive: true });
+      setSuppliers(updatedSuppliers);
+      setSupplierId(newSupplier.id);
+      setQuickSupplierName('');
+      setQuickSupplierContact('');
+      setQuickSupplierPhone('');
+      setQuickSupplierCity('');
+      setShowQuickSupplier(false);
+      showToast(`Supplier "${newSupplier.name}" berhasil ditambahkan & dipilih`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Gagal menambahkan supplier baru', 'error');
+    } finally {
+      setIsSubmittingQuickSupplier(false);
+    }
+  };
+
+  // Handle direct quick-add supplier from SearchableSelect inline search
+  const handleDirectAddSupplier = async (nameToAdd: string) => {
+    try {
+      const newSupplier = await api.createSupplier({
+        name: nameToAdd.trim(),
+        is_active: true,
+      });
+      const updatedSuppliers = await api.getSuppliers({ isActive: true });
+      setSuppliers(updatedSuppliers);
+      setSupplierId(newSupplier.id);
+      showToast(`Supplier "${newSupplier.name}" berhasil dibuat & dipilih`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Gagal menambahkan supplier baru', 'error');
+    }
+  };
 
   // Variant handlers
   const handleAddVariant = () => {
@@ -557,6 +694,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       }
 
       showToast('Produk dan varian baru berhasil ditambahkan!', 'success');
+      resetForm();
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -754,23 +892,94 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 )}
               </div>
 
-              {/* Supplier Field */}
+              {/* Supplier Field with SearchableSelect & Quick-Add Shortcut */}
               <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Mitra Supplier / Pemasok (Opsional):
-                </label>
-                <select
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Mitra Supplier / Pemasok (Opsional):
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickSupplier((prev) => !prev)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>{showQuickSupplier ? 'Tutup' : '+ Supplier Baru'}</span>
+                  </button>
+                </div>
+                <SearchableSelect
                   value={supplierId}
-                  onChange={(e) => setSupplierId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                >
-                  <option value="">-- Tanpa Supplier Terpilih (Bisa Diatur Nanti) --</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} {s.code ? `(${s.code})` : ''} {s.city ? `• ${s.city}` : ''}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setSupplierId}
+                  options={supplierOptions}
+                  placeholder="-- Pilih atau Cari Supplier (Opsional) --"
+                  searchPlaceholder="Ketik untuk mencari supplier (nama, kode, kota)..."
+                  icon={Truck}
+                  allowClear={true}
+                  clearLabel="-- Tanpa Supplier Terpilih (Bisa Diatur Nanti) --"
+                  onAddNew={handleDirectAddSupplier}
+                  addNewLabel={(q) => `+ Buat Supplier Baru "${q}"`}
+                />
+
+                {/* Inline Quick Supplier Form */}
+                {showQuickSupplier && (
+                  <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2 animate-in fade-in slide-in-from-top-1">
+                    <div>
+                      <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
+                        Tambah Supplier Baru Cepat:
+                      </p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Supplier ini otomatis aktif dan dapat langsung dipilih untuk produk ini.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={quickSupplierName}
+                        onChange={(e) => setQuickSupplierName(e.target.value)}
+                        placeholder="Nama Supplier / Toko *"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="text"
+                        value={quickSupplierContact}
+                        onChange={(e) => setQuickSupplierContact(e.target.value)}
+                        placeholder="Nama Kontak Person / Sales (Opsional)"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="text"
+                        value={quickSupplierPhone}
+                        onChange={(e) => setQuickSupplierPhone(e.target.value)}
+                        placeholder="Nomor Telepon / WA (Opsional)"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="text"
+                        value={quickSupplierCity}
+                        onChange={(e) => setQuickSupplierCity(e.target.value)}
+                        placeholder="Kota / Daerah (Opsional)"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div className="flex items-center justify-end gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickSupplier(false)}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleQuickAddSupplier}
+                        disabled={isSubmittingQuickSupplier}
+                        className="px-3 py-1 rounded-lg text-[11px] font-bold bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        {isSubmittingQuickSupplier ? 'Menyimpan...' : 'Simpan Supplier'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
