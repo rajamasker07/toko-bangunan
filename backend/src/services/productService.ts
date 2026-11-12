@@ -34,6 +34,13 @@ export interface CreateProductInput {
   description?: string;
   min_stock_alert?: number;
   has_variants?: boolean;
+  // Dimensi & spesifikasi fisik toko bangunan
+  weight?: number | null;
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
+  material?: string | null;
+  specifications?: string | null;
   // If simple product (has_variants = false)
   initial_stock?: number;
   min_stock?: number;
@@ -257,8 +264,9 @@ export class ProductService {
       // 1. Insert Product
       await client.query(
         `INSERT INTO products (
-          id, name, sku, barcode, category_id, brand_id, supplier_id, description, min_stock_alert, has_variants
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          id, name, sku, barcode, category_id, brand_id, supplier_id, description, min_stock_alert, has_variants,
+          weight, length, width, height, material, specifications
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
         [
           productId,
           data.name,
@@ -269,7 +277,13 @@ export class ProductService {
           data.supplier_id || null,
           data.description || null,
           data.min_stock_alert ?? 5,
-          hasVariants
+          hasVariants,
+          data.weight !== undefined && data.weight !== null ? Number(data.weight) : null,
+          data.length !== undefined && data.length !== null ? Number(data.length) : null,
+          data.width !== undefined && data.width !== null ? Number(data.width) : null,
+          data.height !== undefined && data.height !== null ? Number(data.height) : null,
+          data.material ? String(data.material).trim() : null,
+          data.specifications ? String(data.specifications).trim() : null,
         ]
       );
 
@@ -408,6 +422,12 @@ export class ProductService {
     description?: string;
     min_stock_alert?: number;
     is_active?: boolean;
+    weight?: number | null;
+    length?: number | null;
+    width?: number | null;
+    height?: number | null;
+    material?: string | null;
+    specifications?: string | null;
   }) {
     const fields: string[] = [];
     const values: any[] = [];
@@ -450,6 +470,30 @@ export class ProductService {
     if (data.is_active !== undefined) {
       values.push(data.is_active);
       fields.push(`is_active = $${values.length}`);
+    }
+    if (data.weight !== undefined) {
+      values.push(data.weight !== null ? Number(data.weight) : null);
+      fields.push(`weight = $${values.length}`);
+    }
+    if (data.length !== undefined) {
+      values.push(data.length !== null ? Number(data.length) : null);
+      fields.push(`length = $${values.length}`);
+    }
+    if (data.width !== undefined) {
+      values.push(data.width !== null ? Number(data.width) : null);
+      fields.push(`width = $${values.length}`);
+    }
+    if (data.height !== undefined) {
+      values.push(data.height !== null ? Number(data.height) : null);
+      fields.push(`height = $${values.length}`);
+    }
+    if (data.material !== undefined) {
+      values.push(data.material ? String(data.material).trim() : null);
+      fields.push(`material = $${values.length}`);
+    }
+    if (data.specifications !== undefined) {
+      values.push(data.specifications ? String(data.specifications).trim() : null);
+      fields.push(`specifications = $${values.length}`);
     }
 
     if (fields.length === 0) return this.getProductById(id);

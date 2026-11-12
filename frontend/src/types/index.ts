@@ -98,6 +98,12 @@ export interface Product {
   supplier_name?: string | null;
   supplier_code?: string | null;
   description?: string | null;
+  weight?: number | null;
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
+  material?: string | null;
+  specifications?: string | null;
   min_stock_alert: number | string;
   is_active: boolean;
   has_variants: boolean;

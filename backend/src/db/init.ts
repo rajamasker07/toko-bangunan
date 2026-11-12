@@ -150,6 +150,26 @@ export async function initializeDatabase() {
       await client.query('CREATE INDEX IF NOT EXISTS idx_products_supplier ON products(supplier_id);');
     }
 
+    // 3d. Kolom dimensi, berat, dan spesifikasi logistik toko bangunan
+    if (!(await columnExists(client, 'products', 'weight'))) {
+      await client.query('ALTER TABLE products ADD COLUMN weight NUMERIC(12, 3);');
+    }
+    if (!(await columnExists(client, 'products', 'length'))) {
+      await client.query('ALTER TABLE products ADD COLUMN length NUMERIC(12, 2);');
+    }
+    if (!(await columnExists(client, 'products', 'width'))) {
+      await client.query('ALTER TABLE products ADD COLUMN width NUMERIC(12, 2);');
+    }
+    if (!(await columnExists(client, 'products', 'height'))) {
+      await client.query('ALTER TABLE products ADD COLUMN height NUMERIC(12, 2);');
+    }
+    if (!(await columnExists(client, 'products', 'material'))) {
+      await client.query('ALTER TABLE products ADD COLUMN material VARCHAR(150);');
+    }
+    if (!(await columnExists(client, 'products', 'specifications'))) {
+      await client.query('ALTER TABLE products ADD COLUMN specifications TEXT;');
+    }
+
     // 3. Product Variants Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS product_variants (

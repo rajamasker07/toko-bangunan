@@ -26,7 +26,15 @@ import {
   BadgePercent,
   TrendingUp,
   TrendingDown,
-  Minus
+  Minus,
+  ArrowRight,
+  ArrowLeft,
+  Ruler,
+  FileText,
+  Check,
+  Info,
+  Box,
+  Barcode
 } from 'lucide-react';
 
 interface ProductFormModalProps {
@@ -50,7 +58,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [hasVariants, setHasVariants] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Common Product Info
+  // Multi-step Wizard Navigation State
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+
+  // Common Product Info (Tahap 1)
   const [name, setName] = useState<string>('');
   const [sku, setSku] = useState<string>('');
   const [barcode, setBarcode] = useState<string>('');
@@ -59,6 +70,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [supplierId, setSupplierId] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [minStockAlert, setMinStockAlert] = useState<number>(5);
+
+  // Physical Dimensions & Technical Specifications (Tahap 3)
+  const [weight, setWeight] = useState<string>('');
+  const [length, setLength] = useState<string>('');
+  const [width, setWidth] = useState<string>('');
+  const [height, setHeight] = useState<string>('');
+  const [material, setMaterial] = useState<string>('');
+  const [specifications, setSpecifications] = useState<string>('');
 
   // Master Brands & Suppliers List
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -120,6 +139,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
   // Reset all form fields to default initial state
   const resetForm = () => {
+    setCurrentStep(1);
     setHasVariants(false);
     setName('');
     setSku('');
@@ -140,6 +160,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
     // Multi-variant Form States
     setVariantsList(getDefaultVariantsList());
+
+    // Physical Dimensions & Specs (Tahap 3)
+    setWeight('');
+    setLength('');
+    setWidth('');
+    setHeight('');
+    setMaterial('');
+    setSpecifications('');
 
     // Quick add popovers
     setShowQuickCategory(false);
@@ -171,9 +199,87 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       sellPrice > 0 ||
       initialStock > 0 ||
       simpleAdditionalUnits.length > 0 ||
-      hasVariants
+      hasVariants ||
+      weight.trim() !== '' ||
+      length.trim() !== '' ||
+      width.trim() !== '' ||
+      height.trim() !== '' ||
+      material.trim() !== '' ||
+      specifications.trim() !== ''
     );
   };
+
+  // Multi-step validation handlers
+  const validateStep1 = (): boolean => {
+    if (!name.trim()) {
+      showToast('Nama produk wajib diisi!', 'error');
+      setCurrentStep(1);
+      setTimeout(() => nameInputRef.current?.focus(), 50);
+      return false;
+    }
+    if (!categoryId) {
+      showToast('Silakan pilih kategori produk terlebih dahulu!', 'error');
+      setCurrentStep(1);
+      return false;
+    }
+    return true;
+  };
+
+  const validateStep2 = (): boolean => {
+    if (hasVariants) {
+      if (!variantsList || variantsList.length === 0) {
+        showToast('Minimal harus ada 1 varian produk!', 'error');
+        setCurrentStep(2);
+        return false;
+      }
+      for (let i = 0; i < variantsList.length; i++) {
+        if (!variantsList[i].variant_name.trim()) {
+          showToast(`Nama varian ke-${i + 1} wajib diisi!`, 'error');
+          setCurrentStep(2);
+          return false;
+        }
+      }
+    } else {
+      if (!baseUnitName.trim()) {
+        showToast('Satuan dasar produk wajib diisi!', 'error');
+        setCurrentStep(2);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const goToStep = (target: 1 | 2 | 3) => {
+    if (target === currentStep) return;
+    if (target > currentStep) {
+      if (currentStep === 1 && !validateStep1()) return;
+      if (currentStep === 2 && !validateStep2()) return;
+      if (target === 3 && currentStep === 1) {
+        if (!validateStep1()) return;
+        if (!validateStep2()) {
+          setCurrentStep(2);
+          return;
+        }
+      }
+    }
+    setCurrentStep(target);
+  };
+
+  // Live cubic volume calculation for building materials
+  const volumeMetrics = React.useMemo(() => {
+    const l = parseFloat(length) || 0;
+    const w = parseFloat(width) || 0;
+    const h = parseFloat(height) || 0;
+    if (l <= 0 || w <= 0 || h <= 0) return null;
+    const cm3 = l * w * h;
+    const liter = cm3 / 1000;
+    const m3 = cm3 / 1000000;
+    return {
+      cm3: cm3.toLocaleString('id-ID'),
+      liter: liter < 0.01 ? liter.toFixed(3) : liter.toLocaleString('id-ID', { maximumFractionDigits: 2 }),
+      m3: m3 < 0.001 ? m3.toFixed(4) : m3.toLocaleString('id-ID', { maximumFractionDigits: 3 }),
+    };
+  }, [length, width, height]);
 
   const handleRequestClose = () => {
     if (isFormDirty()) {
@@ -458,6 +564,22 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       });
   }, [suppliers]);
 
+  // Lookups for Step 3 summary card
+  const selectedCategoryName = React.useMemo(() => {
+    const cat = categoryOptions.find((c) => c.value === categoryId);
+    return cat ? cat.label : 'Belum dipilih';
+  }, [categoryOptions, categoryId]);
+
+  const selectedBrandName = React.useMemo(() => {
+    const b = brands.find((x) => x.id === brandId);
+    return b ? b.name : 'Tanpa Merek';
+  }, [brands, brandId]);
+
+  const selectedSupplierName = React.useMemo(() => {
+    const s = suppliers.find((x) => x.id === supplierId);
+    return s ? s.name : 'Tanpa Pemasok';
+  }, [suppliers, supplierId]);
+
   // Handle direct quick-add brand from SearchableSelect inline search
   const handleDirectAddBrand = async (nameToAdd: string) => {
     try {
@@ -638,12 +760,22 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     setSimpleAdditionalUnits((prev) => prev.filter((u) => u.id !== unitId));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) {
-      showToast('Nama produk wajib diisi', 'error');
-      return;
+  // Keyboard navigation helper for Enter key within form fields
+  const handleFormKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      if (currentStep === 1) {
+        if (validateStep1()) goToStep(2);
+      } else if (currentStep === 2) {
+        if (validateStep2()) goToStep(3);
+      }
     }
+  };
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!validateStep1()) return;
+    if (!validateStep2()) return;
 
     try {
       setIsSubmitting(true);
@@ -658,6 +790,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         description: description.trim() || undefined,
         min_stock_alert: Number(minStockAlert) || 5,
         has_variants: hasVariants,
+        weight: weight ? Number(weight) : null,
+        length: length ? Number(length) : null,
+        width: width ? Number(width) : null,
+        height: height ? Number(height) : null,
+        material: material.trim() || undefined,
+        specifications: specifications.trim() || undefined,
       };
 
       if (!hasVariants) {
@@ -796,13 +934,121 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           </button>
         </div>
 
+        {/* Step Wizard Progress Bar */}
+        <div className="px-6 py-3 bg-slate-50/80 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between max-w-xl mx-auto">
+            {/* Step 1 */}
+            <button
+              type="button"
+              onClick={() => goToStep(1)}
+              className={`flex items-center gap-2 text-xs font-semibold transition-colors cursor-pointer ${
+                currentStep === 1
+                  ? 'text-amber-600 dark:text-amber-400 font-bold'
+                  : currentStep > 1
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-slate-400 dark:text-slate-500'
+              }`}
+            >
+              <div
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${
+                  currentStep === 1
+                    ? 'bg-amber-600 text-white ring-4 ring-amber-500/20 shadow-xs'
+                    : currentStep > 1
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                {currentStep > 1 ? <Check className="w-3.5 h-3.5 stroke-[2.5]" /> : '1'}
+              </div>
+              <span className="hidden sm:inline">1. Data Dasar</span>
+            </button>
+
+            <div
+              className={`flex-1 h-0.5 mx-2 sm:mx-3 rounded-full transition-colors ${
+                currentStep > 1 ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'
+              }`}
+            />
+
+            {/* Step 2 */}
+            <button
+              type="button"
+              onClick={() => goToStep(2)}
+              className={`flex items-center gap-2 text-xs font-semibold transition-colors cursor-pointer ${
+                currentStep === 2
+                  ? 'text-amber-600 dark:text-amber-400 font-bold'
+                  : currentStep > 2
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-slate-400 dark:text-slate-500'
+              }`}
+            >
+              <div
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${
+                  currentStep === 2
+                    ? 'bg-amber-600 text-white ring-4 ring-amber-500/20 shadow-xs'
+                    : currentStep > 2
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                {currentStep > 2 ? <Check className="w-3.5 h-3.5 stroke-[2.5]" /> : '2'}
+              </div>
+              <span className="hidden sm:inline">2. Satuan & Harga</span>
+            </button>
+
+            <div
+              className={`flex-1 h-0.5 mx-2 sm:mx-3 rounded-full transition-colors ${
+                currentStep > 2 ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'
+              }`}
+            />
+
+            {/* Step 3 */}
+            <button
+              type="button"
+              onClick={() => goToStep(3)}
+              className={`flex items-center gap-2 text-xs font-semibold transition-colors cursor-pointer ${
+                currentStep === 3
+                  ? 'text-amber-600 dark:text-amber-400 font-bold'
+                  : 'text-slate-400 dark:text-slate-500'
+              }`}
+            >
+              <div
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${
+                  currentStep === 3
+                    ? 'bg-amber-600 text-white ring-4 ring-amber-500/20 shadow-xs'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                3
+              </div>
+              <span className="hidden sm:inline">3. Dimensi & Logistik</span>
+            </button>
+          </div>
+        </div>
+
         {/* Form Body */}
-        <form ref={formRef} onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6">
-          {/* Section 1: Basic Information */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              1. Informasi Utama Produk
-            </h3>
+        <form
+          ref={formRef}
+          onSubmit={handleSubmit}
+          onKeyDown={handleFormKeyDown}
+          className="p-6 overflow-y-auto space-y-6"
+        >
+          {/* TAHAP 1: DATA DASAR PRODUK */}
+          {currentStep === 1 && (
+            <div className="space-y-5 animate-in fade-in">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                    <Package className="w-4 h-4" />
+                    <span>Tahap 1 dari 3: Identitas & Klasifikasi Produk</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Lengkapi identitas dasar barang agar mudah ditemukan saat transaksi kasir.
+                  </p>
+                </div>
+                <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                  Langkah 1/3
+                </span>
+              </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
@@ -1064,37 +1310,59 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 />
               </div>
 
+              {/* Barcode Master */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Batas Peringatan Stok Minimal:
+                  Barcode / Kode Scanner (Opsional):
                 </label>
-                <NumericInput
-                  value={minStockAlert}
-                  onChange={setMinStockAlert}
-                  min={1}
-                  prefixIcon={AlertTriangle}
-                  suffixText="Unit"
-                  placeholder="5"
-                />
+                <div className="relative">
+                  <Barcode className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={barcode}
+                    onChange={(e) => setBarcode(e.target.value)}
+                    placeholder="Scan atau ketik kode barcode..."
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
+                  />
+                </div>
               </div>
 
               <div className="sm:col-span-2">
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Deskripsi / Spesifikasi:
+                  Deskripsi / Catatan Tambahan (Opsional):
                 </label>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={2}
-                  placeholder="Keterangan dimensi, daya sebar, sertifikasi SNI, dll..."
+                  placeholder="Catatan tambahan mengenai produk, kegunaan, atau petunjuk penyimpanan..."
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
                 />
               </div>
             </div>
           </div>
+        )}
 
-          {/* Section 2: Mode Varian Selector */}
-          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-3">
+        {/* TAHAP 2: SATUAN, VARIAN, HARGA & STOK */}
+        {currentStep === 2 && (
+          <div className="space-y-6 animate-in fade-in">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                  <Coins className="w-4 h-4" />
+                  <span>Tahap 2 dari 3: Satuan, Varian, Harga & Stok</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Atur struktur varian, satuan bertingkat (Pcs/Dus/Ikat), harga beli modal, dan harga jual produk.
+                </p>
+              </div>
+              <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                Langkah 2/3
+              </span>
+            </div>
+
+            {/* Section 2: Mode Varian Selector */}
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-3">
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
@@ -1674,37 +1942,299 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               </div>
             </div>
           )}
+        </div>
+      )}
 
-          {/* Action Buttons */}
-          <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-200 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={handleRequestClose}
-              disabled={isSubmitting}
-              className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 disabled:opacity-50 transition-all cursor-pointer"
-            >
-              {isSubmitting ? (
+      {/* TAHAP 3: DIMENSI, BERAT & SPESIFIKASI LOGISTIK */}
+          {currentStep === 3 && (
+            <div className="space-y-6 animate-in fade-in">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                    <Ruler className="w-4 h-4" />
+                    <span>Tahap 3 dari 3: Dimensi Fisik, Berat & Spesifikasi Logistik</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Opsional. Sangat bermanfaat untuk perhitungan kapasitas armada angkut (truk, pick-up) dan spesifikasi bahan bangunan.
+                  </p>
+                </div>
+                <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                  Langkah 3/3
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Berat */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Berat per Unit Dasar:
+                  </label>
+                  <div className="relative">
+                    <Scale className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={weight}
+                      onChange={(e) => setWeight(e.target.value)}
+                      placeholder="Contoh: 40 (untuk Semen 40kg) atau 0.25"
+                      className="w-full pl-10 pr-12 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                    <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">
+                      kg
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Digunakan sistem POS untuk menghitung batas muatan tonase kendaraan pengiriman toko bangunan.
+                  </p>
+                </div>
+
+                {/* Material */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Material / Bahan Pembuat:
+                  </label>
+                  <input
+                    type="text"
+                    value={material}
+                    onChange={(e) => setMaterial(e.target.value)}
+                    placeholder="Contoh: Baja Ringan Zincalume, PVC AW, Semen Portland, Keramik"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Dimensi Fisik: P x L x T */}
+                <div className="sm:col-span-2 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Box className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Dimensi Ukuran Fisik (Panjang × Lebar × Tebal/Tinggi)
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-slate-400">Satuan Centimeter (cm)</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Panjang:
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={length}
+                          onChange={(e) => setLength(e.target.value)}
+                          placeholder="0"
+                          className="w-full pr-9 pl-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                        />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">cm</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Lebar:
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={width}
+                          onChange={(e) => setWidth(e.target.value)}
+                          placeholder="0"
+                          className="w-full pr-9 pl-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                        />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">cm</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Tinggi / Tebal:
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={height}
+                          onChange={(e) => setHeight(e.target.value)}
+                          placeholder="0"
+                          className="w-full pr-9 pl-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                        />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">cm</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Volume Metric Display */}
+                  {volumeMetrics ? (
+                    <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 text-xs text-amber-800 dark:text-amber-300">
+                      <Sparkles className="w-4 h-4 shrink-0 text-amber-600" />
+                      <span>
+                        <strong>Estimasi Kubikasi:</strong> {volumeMetrics.m3} m³ ({volumeMetrics.liter} Liter / {volumeMetrics.cm3} cm³)
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 italic">
+                      Ketik panjang, lebar, dan tinggi untuk menghitung otomatis volume kubikasi ruang angkut.
+                    </p>
+                  )}
+                </div>
+
+                {/* Spesifikasi Teknis / Standar Mutu */}
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Spesifikasi Teknis / Standar Mutu (SNI, Ketebalan, dsb.):
+                  </label>
+                  <textarea
+                    value={specifications}
+                    onChange={(e) => setSpecifications(e.target.value)}
+                    rows={2}
+                    placeholder="Contoh: Standar SNI 03-2847-2002, Toleransi tebal 0.75mm BMT, Kuat tekan mortar kelas K-300..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Ringkasan Cepat Produk (Review Card) */}
+                <div className="sm:col-span-2 p-4 rounded-2xl bg-gradient-to-br from-slate-50 to-amber-50/40 dark:from-slate-800/60 dark:to-slate-800/30 border border-slate-200 dark:border-slate-700/80 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                      <span className="text-xs font-bold text-slate-900 dark:text-white">
+                        Ringkasan Data Produk Baru
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                      Siap Disimpan
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                      <span className="text-[10px] text-slate-400 block font-medium">Nama Produk</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-100 truncate block">
+                        {name || '-'}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                      <span className="text-[10px] text-slate-400 block font-medium">Kategori & Merek</span>
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate block">
+                        {selectedCategoryName} • {selectedBrandName}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                      <span className="text-[10px] text-slate-400 block font-medium">Harga Jual Utama</span>
+                      <span className="font-bold text-emerald-600 dark:text-emerald-400 truncate block">
+                        {!hasVariants ? `Rp ${formatIdNumber(sellPrice)} / ${baseUnitName}` : `${variantsList.length} Varian`}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                      <span className="text-[10px] text-slate-400 block font-medium">Stok Awal</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200 truncate block">
+                        {!hasVariants ? `${initialStock} ${baseUnitName}` : `${variantsList.reduce((acc, v) => acc + (Number(v.initial_stock) || 0), 0)} Unit Total`}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Stepper Action Buttons */}
+          <div className="flex items-center justify-between gap-2.5 pt-4 border-t border-slate-200 dark:border-slate-800">
+            {/* Left Action */}
+            {currentStep === 1 ? (
+              <button
+                type="button"
+                onClick={handleRequestClose}
+                disabled={isSubmitting}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                Batal
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => goToStep((currentStep - 1) as 1 | 2)}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Kembali</span>
+              </button>
+            )}
+
+            {/* Right Actions */}
+            <div className="flex items-center gap-2">
+              {currentStep === 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (validateStep1()) goToStep(2);
+                  }}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all cursor-pointer"
+                >
+                  <span>Lanjut: Satuan & Harga</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
+
+              {currentStep === 2 && (
                 <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Menyimpan Produk...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Simpan Produk</span>
-                  <kbd className="hidden sm:inline-block text-[10px] font-mono bg-amber-700/60 text-amber-100 px-1.5 py-0.5 rounded border border-amber-500/30">
-                    Ctrl+Enter
-                  </kbd>
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit()}
+                    disabled={isSubmitting}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 transition-colors cursor-pointer"
+                    title="Simpan langsung tanpa mengisi dimensi/spesifikasi (Ctrl+Enter)"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Simpan Langsung</span>
+                    <kbd className="hidden sm:inline-block text-[10px] font-mono bg-white dark:bg-slate-800 px-1 py-0.5 rounded border border-amber-300 dark:border-amber-700">
+                      Ctrl+Enter
+                    </kbd>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (validateStep2()) goToStep(3);
+                    }}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all cursor-pointer"
+                  >
+                    <span>Lanjut: Dimensi & Logistik</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
                 </>
               )}
-            </button>
+
+              {currentStep === 3 && (
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 disabled:opacity-50 transition-all cursor-pointer"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Menyimpan Produk...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Simpan Produk</span>
+                      <kbd className="hidden sm:inline-block text-[10px] font-mono bg-amber-700/60 text-amber-100 px-1.5 py-0.5 rounded border border-amber-500/30">
+                        Ctrl+Enter
+                      </kbd>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </div>
