@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback, useDeferredVa
 import { Product, VariantUnit } from '../types';
 import { api } from '../services/api';
 import { formatStock } from '../utils/format';
+import { SearchableSelect, SearchableOption } from './common/SearchableSelect';
 import { 
   Search, 
   X, 
@@ -19,7 +20,8 @@ import {
   RotateCcw, 
   Barcode,
   ShieldCheck,
-  Boxes
+  Boxes,
+  Folder
 } from 'lucide-react';
 
 export interface FlattenedVariant {
@@ -287,6 +289,21 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
     }
     return Array.from(set).sort();
   }, [allVariants]);
+
+  // Options for SearchableSelect category filter with variant counts
+  const categoryOptions = useMemo<SearchableOption[]>(() => {
+    const counts = new Map<string, number>();
+    for (const v of allVariants) {
+      if (v.category_name) {
+        counts.set(v.category_name, (counts.get(v.category_name) || 0) + 1);
+      }
+    }
+    return categoryList.map((cat) => ({
+      value: cat,
+      label: cat,
+      subtitle: `${counts.get(cat) || 0} varian`,
+    }));
+  }, [categoryList, allVariants]);
 
   // If initialVariantId is passed, preselect it and optionally advance to Step 2
   useEffect(() => {
@@ -720,18 +737,22 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
               </div>
 
               {categoryList.length > 0 && (
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                >
-                  <option value="">Semua Kategori</option>
-                  {categoryList.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
+                <div className="w-full sm:w-56 shrink-0">
+                  <SearchableSelect
+                    value={selectedCategory}
+                    onChange={setSelectedCategory}
+                    options={categoryOptions}
+                    placeholder="Semua Kategori"
+                    searchPlaceholder="Cari kategori..."
+                    size="sm"
+                    allowClear={true}
+                    clearLabel="Semua Kategori"
+                    icon={Folder}
+                    iconColor="text-amber-500"
+                    align="right"
+                    className="w-full text-xs"
+                  />
+                </div>
               )}
             </div>
           </div>

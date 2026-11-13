@@ -23,6 +23,7 @@ export interface SearchableSelectProps {
   iconColor?: string;
   allowClear?: boolean;
   clearLabel?: string;
+  align?: 'left' | 'right';
 }
 
 type NavItem =
@@ -47,6 +48,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
   iconColor = 'text-amber-500',
   allowClear = false,
   clearLabel = '-- Kosongkan / Tanpa Pilihan --',
+  align = 'left',
 }) => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -366,7 +368,11 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
 
       {/* Dropdown Popover */}
       {isOpen && (
-        <div className="absolute z-50 left-0 right-0 mt-1 min-w-[240px] bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+        <div
+          className={`absolute z-50 mt-1 min-w-[240px] bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-100 ${
+            align === 'right' ? 'right-0 left-auto' : 'left-0 right-0'
+          }`}
+        >
           {/* Search Box */}
           <div className="p-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
             <div className="relative flex items-center">
