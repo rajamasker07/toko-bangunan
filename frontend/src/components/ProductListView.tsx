@@ -400,6 +400,17 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                   const primaryUnit = firstVariant?.units?.find((u) => u.is_base_unit) || firstVariant?.units?.[0];
                   const isLow = product.has_low_stock && Number(product.total_stock) > 0;
                   const isOut = Number(product.total_stock) <= 0;
+                  const reservedStock = Number(
+                    (product as any).total_reserved_stock ??
+                    (product as any).reserved_stock ??
+                    product.variants?.reduce((sum, v) => sum + Number((v as any).reserved_stock || 0), 0) ??
+                    0
+                  );
+                  const availableStock = Number(
+                    (product as any).total_available_stock ??
+                    (product as any).available_stock ??
+                    Math.max(0, Number(product.total_stock) - reservedStock)
+                  );
 
                   return (
                     <tr
@@ -497,7 +508,14 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                             </span>
                           )}
                         </div>
-                        <span className="text-[10px] text-slate-400">
+                        {reservedStock > 0 && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-300 dark:border-amber-800">
+                              Diamankan: {formatStock(reservedStock)} | Siap Jual: {formatStock(availableStock)}
+                            </span>
+                          </div>
+                        )}
+                        <span className="text-[10px] text-slate-400 block mt-0.5">
                           Min alert: {formatStock(product.min_stock_alert)}
                         </span>
                       </td>

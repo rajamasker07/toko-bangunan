@@ -121,6 +121,8 @@ export class ProductService {
         s.name as supplier_name,
         s.code as supplier_code,
         COALESCE(SUM(pv.current_stock), 0)::numeric as total_stock,
+        COALESCE(SUM(COALESCE(pv.reserved_stock, 0)), 0)::numeric as total_reserved_stock,
+        COALESCE(SUM(pv.current_stock - COALESCE(pv.reserved_stock, 0)), 0)::numeric as total_available_stock,
         COUNT(pv.id)::int as variant_count,
         BOOL_OR(pv.current_stock <= pv.min_stock) as has_low_stock,
         BOOL_OR(pv.current_stock = 0) as has_out_of_stock,
@@ -132,6 +134,8 @@ export class ProductService {
               'sku', pv2.sku,
               'barcode', pv2.barcode,
               'current_stock', pv2.current_stock,
+              'reserved_stock', COALESCE(pv2.reserved_stock, 0),
+              'available_stock', (pv2.current_stock - COALESCE(pv2.reserved_stock, 0)),
               'min_stock', pv2.min_stock,
               'is_active', pv2.is_active,
               'units', (
@@ -195,6 +199,8 @@ export class ProductService {
               'sku', pv.sku,
               'barcode', pv.barcode,
               'current_stock', pv.current_stock,
+              'reserved_stock', COALESCE(pv.reserved_stock, 0),
+              'available_stock', (pv.current_stock - COALESCE(pv.reserved_stock, 0)),
               'min_stock', pv.min_stock,
               'is_active', pv.is_active,
               'units', (

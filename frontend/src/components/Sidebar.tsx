@@ -13,7 +13,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Award,
-  Truck
+  Truck,
+  ShoppingBag
 } from 'lucide-react';
 
 /** Format angka badge: tampilkan "99+" jika melebihi 99 agar badge tetap ringkas */
@@ -34,12 +35,13 @@ interface NavSection {
   items: NavItem[];
 }
 
-export type ActiveTab = 'dashboard' | 'products' | 'adjust' | 'categories' | 'brands' | 'suppliers' | 'docs';
+export type ActiveTab = 'dashboard' | 'products' | 'adjust' | 'reservations' | 'categories' | 'brands' | 'suppliers' | 'docs';
 
 interface SidebarProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   lowStockCount?: number;
+  alertCount?: number;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -48,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTab, 
   setActiveTab, 
   lowStockCount = 0,
+  alertCount = 0,
   isCollapsed = false,
   onToggleCollapse,
 }) => {
@@ -75,6 +78,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: 'Penyesuaian Stok',
           icon: SlidersHorizontal,
           badge: null,
+        },
+        {
+          id: 'reservations',
+          label: 'Titip Ambil (Reservasi)',
+          icon: ShoppingBag,
+          badge: alertCount > 0 ? formatBadgeCount(alertCount) : null,
+          badgeIcon: AlertTriangle,
+          badgeTitle: `${alertCount} titipan butuh perhatian (jatuh tempo/lewat batas)`,
+          badgeColor: 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400',
         },
       ],
     },

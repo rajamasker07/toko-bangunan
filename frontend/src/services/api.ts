@@ -1,4 +1,15 @@
-import { Category, Brand, Supplier, SupplierSales, Product, StockMovement, DashboardSummary, UnitMaster } from '../types';
+import {
+  Category,
+  Brand,
+  Supplier,
+  SupplierSales,
+  Product,
+  StockMovement,
+  DashboardSummary,
+  UnitMaster,
+  StockReservation,
+  ReservationAlertSummary,
+} from '../types';
 
 const BASE_URL = '/api';
 
@@ -203,4 +214,88 @@ export const api = {
     const queryStr = params.toString() ? `?${params.toString()}` : '';
     return fetchJson<{ total: number; items: StockMovement[] }>(`/stock/movements${queryStr}`);
   },
+
+  // Stock Reservations (Titip Simpan Barang / Ambil Nanti)
+  getReservations: (params?: {
+    status?: string;
+    search?: string;
+    deadlineStatus?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.status && params.status !== 'ALL') query.append('status', params.status);
+    if (params?.search) query.append('search', params.search);
+    if (params?.deadlineStatus && params.deadlineStatus !== 'all') query.append('deadlineStatus', params.deadlineStatus);
+    if (params?.limit) query.append('limit', String(params.limit));
+    if (params?.offset !== undefined) query.append('offset', String(params.offset));
+    const queryStr = query.toString() ? `?${query.toString()}` : '';
+    return fetchJson<{ items: StockReservation[]; total: number }>(`/reservations${queryStr}`);
+  },
+
+  getReservationById: (id: string) => fetchJson<StockReservation>(`/reservations/${id}`),
+
+  getReservationAlerts: () => fetchJson<ReservationAlertSummary>('/reservations/alerts'),
+
+  createReservation: (data: {
+    customer_name: string;
+    customer_phone?: string;
+    customer_address?: string;
+    invoice_no?: string;
+    pickup_deadline: string;
+    notes?: string;
+    created_by?: string;
+    items: Array<{
+      variant_id: string;
+      unit_id?: string;
+      unit_name: string;
+      conversion_factor: number;
+      qty_ordered_unit: number;
+    }>;
+  }) =>
+    fetchJson<StockReservation>('/reservations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  pickupReservation: (
+    id: string,
+    data: {
+      receiver_name: string;
+      vehicle_plate?: string;
+      notes?: string;
+      handed_by?: string;
+      items: Array<{
+        item_id: string;
+        qty_picked_up: number;
+      }>;
+    }
+  ) =>
+    fetchJson<any>(`/reservations/${id}/pickup`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  extendReservationDeadline: (
+    id: string,
+    data: {
+      new_deadline: string;
+      notes?: string;
+    }
+  ) =>
+    fetchJson<any>(`/reservations/${id}/extend-deadline`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  cancelReservation: (
+    id: string,
+    data: {
+      reason: string;
+    }
+  ) =>
+    fetchJson<any>(`/reservations/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };

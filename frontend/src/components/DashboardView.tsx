@@ -18,19 +18,28 @@ import {
 interface DashboardViewProps {
   summary: DashboardSummary | null;
   loading: boolean;
+  reservationAlerts?: {
+    total_active?: number;
+    overdue_count?: number;
+    due_soon_count?: number;
+    total_items_held?: number;
+  } | null;
   onOpenCreateProduct: () => void;
   onOpenStockAdjust: (variantId?: string) => void;
   onNavigateToProducts: (filterStatus?: string) => void;
   onNavigateToMovements: () => void;
+  onNavigateToReservations?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   summary,
   loading,
+  reservationAlerts,
   onOpenCreateProduct,
   onOpenStockAdjust,
   onNavigateToProducts,
   onNavigateToMovements,
+  onNavigateToReservations,
 }) => {
   if (loading || !summary) {
     return (
@@ -109,6 +118,51 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Prominent Warning Widget for Overdue or Due Soon Reservations */}
+      {Boolean(
+        reservationAlerts &&
+          ((reservationAlerts.overdue_count && reservationAlerts.overdue_count > 0) ||
+            (reservationAlerts.due_soon_count && reservationAlerts.due_soon_count > 0))
+      ) && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-rose-500/15 via-amber-500/10 to-orange-500/15 border-2 border-rose-500/30 dark:border-rose-500/40 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in duration-300">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="p-2.5 rounded-xl bg-rose-500 text-white shadow-md shadow-rose-500/30 shrink-0">
+              <AlertTriangle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-sm sm:text-base">
+                  Peringatan Titip Ambil Barang (Reservasi)
+                </h3>
+                {(reservationAlerts?.overdue_count || 0) > 0 && (
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-sm">
+                    {reservationAlerts!.overdue_count} Lewat Batas Waktu
+                  </span>
+                )}
+                {(reservationAlerts?.due_soon_count || 0) > 0 && (
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-bold">
+                    {reservationAlerts!.due_soon_count} Jatuh Tempo (H-2)
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+                Barang pesanan pelanggan masih tertahan di gudang dan memakan alokasi stok. Segera ingatkan pelanggan via WhatsApp atau proses pengambilan barang.
+              </p>
+            </div>
+          </div>
+          {onNavigateToReservations && (
+            <button
+              type="button"
+              onClick={onNavigateToReservations}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/25 transition-all shrink-0 whitespace-nowrap"
+            >
+              <span>Kelola Titip Ambil</span>
+              <ArrowUpRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Metrics Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

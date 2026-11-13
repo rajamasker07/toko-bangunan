@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from './services/api';
-import { Product, ProductVariant, Category, Brand, Supplier, DashboardSummary } from './types';
+import { Product, ProductVariant, Category, Brand, Supplier, DashboardSummary, ReservationAlertSummary } from './types';
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
+import { StockReservationView } from './components/StockReservationView';
 import { ProductListView } from './components/ProductListView';
 import { ProductDetailView } from './components/ProductDetailView';
 import { VariantDetailView } from './components/VariantDetailView';
@@ -40,6 +41,9 @@ export const App: React.FC = () => {
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loadingSuppliers, setLoadingSuppliers] = useState<boolean>(false);
+
+  const [reservationAlerts, setReservationAlerts] = useState<ReservationAlertSummary | null>(null);
+  const [loadingAlerts, setLoadingAlerts] = useState<boolean>(false);
 
   // Navigation drill-down state for "Data Produk"
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -152,6 +156,18 @@ export const App: React.FC = () => {
     }
   }, [showToast]);
 
+  const loadReservationAlerts = useCallback(async () => {
+    try {
+      setLoadingAlerts(true);
+      const alertData = await api.getReservationAlerts();
+      setReservationAlerts(alertData);
+    } catch (err: any) {
+      console.error('Failed to load reservation alerts:', err);
+    } finally {
+      setLoadingAlerts(false);
+    }
+  }, []);
+
   const loadProducts = useCallback(async () => {
     try {
       setLoadingProducts(true);
@@ -186,15 +202,17 @@ export const App: React.FC = () => {
     }
   }, [categories, brands, showToast]);
 
-  // Initial load: summary only (lightweight boot)
+  // Initial load: summary & reservation alerts
   useEffect(() => {
     loadSummary();
-  }, [loadSummary]);
+    loadReservationAlerts();
+  }, [loadSummary, loadReservationAlerts]);
 
   // Tab switch listener: lazy load data for the active page
   useEffect(() => {
     if (activeTab === 'dashboard') {
       loadSummary();
+      loadReservationAlerts();
     } else if (activeTab === 'products') {
       loadProducts();
     } else if (activeTab === 'categories') {
@@ -206,8 +224,13 @@ export const App: React.FC = () => {
       loadBrands();
     } else if (activeTab === 'suppliers') {
       loadSuppliers();
+    } else if (activeTab === 'reservations') {
+      if (products.length === 0) {
+        loadProducts();
+      }
+      loadReservationAlerts();
     }
-  }, [activeTab]);
+  }, [activeTab, products.length, loadSummary, loadReservationAlerts, loadProducts, loadCategories, loadBrands, loadSuppliers]);
 
   // Handle open adjust stock modal
   const handleOpenAdjust = (variantId?: string) => {
@@ -319,6 +342,7 @@ export const App: React.FC = () => {
           activeTab={activeTab}
           setActiveTab={handleTabChange}
           lowStockCount={summary?.low_stock_count}
+          alertCount={(reservationAlerts?.overdue_count || 0) + (reservationAlerts?.due_soon_count || 0)}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={toggleSidebar}
         />
@@ -329,6 +353,8 @@ export const App: React.FC = () => {
             <DashboardView
               summary={summary}
               loading={loadingSummary}
+              reservationAlerts={reservationAlerts}
+              onNavigateToReservations={() => setActiveTab('reservations')}
               onOpenCreateProduct={handleOpenCreateProduct}
               onOpenStockAdjust={handleOpenAdjust}
               onNavigateToProducts={handleNavigateToProducts}
@@ -411,6 +437,18 @@ export const App: React.FC = () => {
               showToast={showToast}
               initialVariantId={adjustVariantId}
               initialTab={adjustInitialTab}
+            />
+          )}
+
+          {activeTab === 'reservations' && (
+            <StockReservationView
+              products={products}
+              showToast={showToast}
+              onRefreshGlobal={() => {
+                loadProducts();
+                loadSummary();
+                loadReservationAlerts();
+              }}
             />
           )}
 

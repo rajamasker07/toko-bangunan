@@ -7,6 +7,7 @@ import { DashboardController } from '../controllers/dashboardController.js';
 import { BrandController } from '../controllers/brandController.js';
 import { SupplierController } from '../controllers/supplierController.js';
 import { UnitController } from '../controllers/unitController.js';
+import { ReservationController } from '../controllers/reservationController.js';
 
 const router = Router();
 
@@ -69,5 +70,14 @@ router.delete('/units/:id', VariantController.deleteUnit);
 // Stock Adjustments & Movement Logs
 router.post('/stock/adjust', StockController.adjust);
 router.get('/stock/movements', StockController.movements);
+
+// Stock Reservations (Titip Barang & Alert Pengambilan Pelanggan)
+router.get('/reservations', ReservationController.list);
+router.get('/reservations/alerts', ReservationController.getAlertStats);
+router.get('/reservations/:id', ReservationController.getById);
+router.post('/reservations', ReservationController.create);
+router.post('/reservations/:id/pickup', ReservationController.pickup);
+router.patch('/reservations/:id/extend-deadline', ReservationController.extendDeadline);
+router.post('/reservations/:id/cancel', ReservationController.cancel);
 
 export default router;

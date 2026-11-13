@@ -8,7 +8,10 @@ export type StockActionType =
   | 'DAMAGED_EXPIRED'    // Barang rusak / pecah / cacat
   | 'RETURN_IN'          // Retur dari pelanggan
   | 'RETURN_OUT'         // Retur ke supplier
-  | 'MANUAL_ADJUSTMENT'; // Penyesuaian manual lainnya
+  | 'MANUAL_ADJUSTMENT'  // Penyesuaian manual lainnya
+  | 'RESERVATION_HOLD'   // Penahanan stok untuk reservasi titip barang
+  | 'RESERVATION_PICKUP' // Pengambilan stok barang titipan oleh pelanggan
+  | 'RESERVATION_RELEASE'; // Pelepasan penahanan stok karena reservasi batal
 
 export interface AdjustStockInput {
   variant_id: string;
