@@ -302,7 +302,23 @@ export class ReservationService {
           JOIN products p ON sri.product_id = p.id
           JOIN product_variants pv ON sri.variant_id = pv.id
           WHERE sri.reservation_id = r.id
-        ) as items
+        ) as items,
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', srp.id,
+              'reservation_id', srp.reservation_id,
+              'receiver_name', srp.receiver_name,
+              'vehicle_plate', srp.vehicle_plate,
+              'notes', srp.notes,
+              'handed_by', srp.handed_by,
+              'items', srp.items,
+              'picked_up_at', srp.picked_up_at
+            ) ORDER BY srp.picked_up_at DESC
+          )
+          FROM stock_reservation_pickups srp
+          WHERE srp.reservation_id = r.id
+        ) as pickups
       FROM stock_reservations r
       ${whereClause}
       ORDER BY 
