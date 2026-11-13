@@ -472,6 +472,9 @@ export async function initializeDatabase() {
         completed_at TIMESTAMPTZ,
         cancelled_at TIMESTAMPTZ,
         cancel_reason TEXT,
+        settlement_type VARCHAR(50),
+        settlement_notes TEXT,
+        closed_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
@@ -480,6 +483,17 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_stock_reservations_code ON stock_reservations(reservation_code);
       CREATE INDEX IF NOT EXISTS idx_stock_reservations_created ON stock_reservations(created_at DESC);
     `);
+
+    // 8a. Kolom settlement_type, settlement_notes, closed_at jika belum ada
+    if (!(await columnExists(client, 'stock_reservations', 'settlement_type'))) {
+      await client.query('ALTER TABLE stock_reservations ADD COLUMN settlement_type VARCHAR(50);');
+    }
+    if (!(await columnExists(client, 'stock_reservations', 'settlement_notes'))) {
+      await client.query('ALTER TABLE stock_reservations ADD COLUMN settlement_notes TEXT;');
+    }
+    if (!(await columnExists(client, 'stock_reservations', 'closed_at'))) {
+      await client.query('ALTER TABLE stock_reservations ADD COLUMN closed_at TIMESTAMPTZ;');
+    }
 
     // 8b. Stock Reservation Items (Rincian barang & unit yang ditahan)
     await client.query(`

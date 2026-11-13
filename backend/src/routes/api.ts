@@ -79,5 +79,6 @@ router.post('/reservations', ReservationController.create);
 router.post('/reservations/:id/pickup', ReservationController.pickup);
 router.patch('/reservations/:id/extend-deadline', ReservationController.extendDeadline);
 router.post('/reservations/:id/cancel', ReservationController.cancel);
+router.post('/reservations/:id/close-partial', ReservationController.closePartial);
 
 export default router;

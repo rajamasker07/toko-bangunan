@@ -37,6 +37,12 @@ export interface PickupReservationDto {
   items: PickupItemDto[];
 }
 
+export interface ClosePartialReservationDto {
+  settlement_type: 'REFUND' | 'EXCHANGE' | 'DEPOSIT' | 'OTHER';
+  reason: string;
+  closed_by?: string;
+}
+
 export interface ReservationFilterOptions {
   status?: string;
   search?: string;
@@ -455,8 +461,10 @@ export class ReservationService {
       }
 
       const reservation = resQuery.rows[0];
-      if (reservation.status === 'COMPLETED') {
-        throw new Error('Reservasi ini sudah selesai diambil sepenuhnya');
+      if (reservation.status === 'COMPLETED' || reservation.status === 'CLOSED_PARTIAL') {
+        throw new Error(
+          `Reservasi ini sudah ${reservation.status === 'CLOSED_PARTIAL' ? 'diselesaikan sebagian' : 'selesai diambil sepenuhnya'}`
+        );
       }
       if (reservation.status === 'CANCELLED') {
         throw new Error('Reservasi ini telah dibatalkan dan tidak dapat diambil');
@@ -630,7 +638,7 @@ export class ReservationService {
       throw new Error('Data reservasi tidak ditemukan');
     }
     const currentStatus = resCheck.rows[0].status;
-    if (currentStatus === 'COMPLETED' || currentStatus === 'CANCELLED') {
+    if (currentStatus === 'COMPLETED' || currentStatus === 'CLOSED_PARTIAL' || currentStatus === 'CANCELLED') {
       throw new Error(`Tidak dapat memperpanjang deadline reservasi yang berstatus ${currentStatus}`);
     }
 
@@ -692,8 +700,10 @@ export class ReservationService {
       if (reservation.status === 'CANCELLED') {
         throw new Error('Reservasi ini sudah dibatalkan sebelumnya');
       }
-      if (reservation.status === 'COMPLETED') {
-        throw new Error('Reservasi yang sudah selesai tidak dapat dibatalkan');
+      if (reservation.status === 'COMPLETED' || reservation.status === 'CLOSED_PARTIAL') {
+        throw new Error(
+          `Reservasi yang sudah ${reservation.status === 'CLOSED_PARTIAL' ? 'diselesaikan sebagian' : 'selesai'} tidak dapat dibatalkan`
+        );
       }
 
       const creator = cancelledBy || 'Admin';
@@ -750,6 +760,112 @@ export class ReservationService {
            updated_at = CURRENT_TIMESTAMP
          WHERE id = $2`,
         [cancelReason.trim(), id]
+      );
+
+      await client.query('COMMIT');
+      return await this.getReservationById(id);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Selesai Sebagian (CLOSED_PARTIAL) & Pelepasan Sisa Stok Reservasi
+   */
+  static async closePartialReservation(
+    id: string,
+    input: { settlement_type: 'REFUND' | 'EXCHANGE' | 'DEPOSIT' | 'OTHER'; reason: string; closed_by?: string }
+  ) {
+    const allowedSettlements = ['REFUND', 'EXCHANGE', 'DEPOSIT', 'OTHER'];
+    if (!input.settlement_type || !allowedSettlements.includes(input.settlement_type)) {
+      throw new Error('Tipe penyelesaian (settlement_type) harus salah satu dari: REFUND, EXCHANGE, DEPOSIT, OTHER');
+    }
+    if (!input.reason || !input.reason.trim()) {
+      throw new Error('Alasan penyelesaian sebagian (reason / settlement_notes) wajib diisi');
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Transaction with FOR UPDATE lock on reservation
+      const resQuery = await client.query(
+        'SELECT * FROM stock_reservations WHERE id = $1 FOR UPDATE',
+        [id]
+      );
+
+      if (resQuery.rows.length === 0) {
+        throw new Error('Data reservasi tidak ditemukan');
+      }
+
+      const reservation = resQuery.rows[0];
+
+      // 2. Validate status is in ('PARTIAL', 'PENDING')
+      if (!['PARTIAL', 'PENDING'].includes(reservation.status)) {
+        throw new Error(
+          `Reservasi dengan status ${reservation.status} tidak dapat diselesaikan sebagian (hanya berlaku untuk status PENDING atau PARTIAL)`
+        );
+      }
+
+      const closer = input.closed_by || 'Admin';
+
+      // 3. For each item where uncollectedBase = (qty_reserved_base - qty_picked_up_base) > 0
+      const itemsRes = await client.query(
+        `SELECT sri.*, pv.current_stock, pv.reserved_stock, p.name as product_name, pv.variant_name
+         FROM stock_reservation_items sri
+         JOIN products p ON sri.product_id = p.id
+         JOIN product_variants pv ON sri.variant_id = pv.id
+         WHERE sri.reservation_id = $1`,
+        [id]
+      );
+
+      for (const item of itemsRes.rows) {
+        const uncollectedBase = Number(item.qty_reserved_base) - Number(item.qty_picked_up_base);
+        if (uncollectedBase > 0) {
+          // Atomically decrement variant reserved_stock by uncollectedBase (GREATEST(0, reserved_stock - $1)), leaving current_stock unchanged
+          await client.query(
+            `UPDATE product_variants
+             SET reserved_stock = GREATEST(0, reserved_stock - $1), updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2`,
+            [uncollectedBase, item.variant_id]
+          );
+
+          // Record stock_movements with movement_type = 'RESERVATION_RELEASE'
+          const movementId = generateUUIDv7();
+          const currentStock = Number(item.current_stock);
+          await client.query(
+            `INSERT INTO stock_movements (
+              id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock,
+              reference_no, notes, created_by
+            ) VALUES ($1, $2, $3, 'RESERVATION_RELEASE', $4, 0, $4, $5, $6, $7)`,
+            [
+              movementId,
+              item.product_id,
+              item.variant_id,
+              currentStock,
+              reservation.reservation_code,
+              `Pelepasan sisa stok reservasi ${reservation.reservation_code} (${uncollectedBase} unit dasar) [Selesai Sebagian - ${input.settlement_type}]: ${input.reason.trim()}`,
+              closer
+            ]
+          );
+        }
+      }
+
+      // 4. Update stock_reservations set status = 'CLOSED_PARTIAL', settlement_type = $1, settlement_notes = $2, closed_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
+      await client.query(
+        `UPDATE stock_reservations
+         SET 
+           status = 'CLOSED_PARTIAL',
+           settlement_type = $1,
+           settlement_notes = $2,
+           closed_at = CURRENT_TIMESTAMP,
+           completed_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3`,
+        [input.settlement_type, input.reason.trim(), id]
       );
 
       await client.query('COMMIT');

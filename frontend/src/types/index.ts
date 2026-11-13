@@ -204,13 +204,16 @@ export interface StockReservation {
   customer_name: string;
   customer_phone?: string | null;
   customer_address?: string | null;
-  status: 'PENDING' | 'PARTIAL' | 'COMPLETED' | 'CANCELLED';
+  status: 'PENDING' | 'PARTIAL' | 'COMPLETED' | 'CANCELLED' | 'CLOSED_PARTIAL';
   pickup_deadline: string;
   notes?: string | null;
   created_by: string;
   completed_at?: string | null;
   cancelled_at?: string | null;
   cancel_reason?: string | null;
+  settlement_type?: 'REFUND' | 'EXCHANGE' | 'DEPOSIT' | 'OTHER' | null;
+  settlement_notes?: string | null;
+  closed_at?: string | null;
   created_at: string;
   updated_at: string;
   items: ReservationItem[];

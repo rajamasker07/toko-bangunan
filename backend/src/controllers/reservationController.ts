@@ -164,4 +164,41 @@ export class ReservationController {
       res.status(400).json({ success: false, message: error.message });
     }
   }
+
+  static async closePartial(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const settlement_type = req.body.settlement_type;
+      const reason = req.body.reason || req.body.settlement_notes || req.body.notes;
+      const closed_by = req.body.closed_by || req.body.closedBy;
+
+      if (!settlement_type) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tipe penyelesaian (settlement_type) wajib diisi (REFUND, EXCHANGE, DEPOSIT, OTHER)'
+        });
+      }
+
+      if (!reason || !String(reason).trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Alasan / catatan penyelesaian sebagian (reason) wajib diisi'
+        });
+      }
+
+      const result = await ReservationService.closePartialReservation(id, {
+        settlement_type,
+        reason: String(reason).trim(),
+        closed_by
+      });
+
+      res.json({
+        success: true,
+        data: result,
+        message: 'Reservasi berhasil diselesaikan sebagian dan sisa stok ditahan telah dilepaskan'
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
 }

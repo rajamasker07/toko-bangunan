@@ -298,4 +298,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  closePartialReservation: (
+    id: string,
+    data: {
+      settlement_type: string;
+      reason: string;
+    }
+  ) =>
+    fetchJson<StockReservation>(`/reservations/${id}/close-partial`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };

@@ -31,6 +31,7 @@ import {
   MapPin,
   Calendar,
   CheckCircle2,
+  CheckCheck,
   ExternalLink,
   History,
   ShieldAlert,
@@ -104,6 +105,13 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
   const [selectedForCancel, setSelectedForCancel] = useState<StockReservation | null>(null);
   const [cancelReason, setCancelReason] = useState<string>('');
   const [savingCancel, setSavingCancel] = useState<boolean>(false);
+
+  // Selesaikan Sebagian (Close Partial) Dialog State
+  const [isClosePartialOpen, setIsClosePartialOpen] = useState<boolean>(false);
+  const [selectedForClosePartial, setSelectedForClosePartial] = useState<StockReservation | null>(null);
+  const [settlementType, setSettlementType] = useState<'REFUND' | 'EXCHANGE' | 'DEPOSIT' | 'OTHER'>('REFUND');
+  const [settlementReason, setSettlementReason] = useState<string>('');
+  const [savingClosePartial, setSavingClosePartial] = useState<boolean>(false);
 
   // Load reservations and alert metrics
   const loadData = useCallback(async () => {
@@ -245,7 +253,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
       let earliestDeadline: string | null = null;
 
       for (const r of item.reservations) {
-        if (r.status === 'COMPLETED') completedCount++;
+        if (r.status === 'COMPLETED' || r.status === 'CLOSED_PARTIAL') completedCount++;
         else if (r.status === 'CANCELLED') cancelledCount++;
         else if (r.status === 'PENDING' || r.status === 'PARTIAL') {
           activeCount++;
@@ -369,7 +377,9 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
         const hasPartial = c.reservations.some((r) => r.status === 'PARTIAL');
         if (!hasPartial) return false;
       } else if (customerFilter === 'COMPLETED') {
-        const hasCompleted = c.reservations.some((r) => r.status === 'COMPLETED');
+        const hasCompleted = c.reservations.some(
+          (r) => r.status === 'COMPLETED' || r.status === 'CLOSED_PARTIAL'
+        );
         if (!hasCompleted) return false;
       }
 
@@ -407,7 +417,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
         return r.status === 'PENDING' || r.status === 'PARTIAL';
       }
       if (customerOrderFilter === 'CLOSED') {
-        return r.status === 'COMPLETED' || r.status === 'CANCELLED';
+        return r.status === 'COMPLETED' || r.status === 'CANCELLED' || r.status === 'CLOSED_PARTIAL';
       }
       return true;
     });
@@ -418,7 +428,9 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
     if (!currentCustomer) return;
 
     const needsDetailFetch = currentCustomer.reservations.filter(
-      (r) => (r.status === 'PARTIAL' || r.status === 'COMPLETED') && r.pickups === undefined
+      (r) =>
+        (r.status === 'PARTIAL' || r.status === 'COMPLETED' || r.status === 'CLOSED_PARTIAL') &&
+        r.pickups === undefined
     );
 
     if (needsDetailFetch.length > 0) {
@@ -621,6 +633,58 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
     }
   };
 
+  // Selesaikan Sebagian (Close Partial) Handler
+  const handleOpenClosePartial = (r: StockReservation) => {
+    setSelectedForClosePartial(r);
+    setSettlementType('REFUND');
+    setSettlementReason('');
+    setIsClosePartialOpen(true);
+  };
+
+  const handleSubmitClosePartial = async () => {
+    if (!selectedForClosePartial) return;
+    if (!settlementReason.trim()) {
+      showToast('Alasan / rincian penyelesaian sisa stok wajib diisi.', 'error');
+      return;
+    }
+
+    setSavingClosePartial(true);
+    try {
+      await api.closePartialReservation(selectedForClosePartial.id, {
+        settlement_type: settlementType,
+        reason: settlementReason.trim(),
+      });
+
+      showToast(
+        `Nota ${selectedForClosePartial.reservation_code} berhasil diselesaikan sebagian dan sisa stok telah dilepaskan!`,
+        'success'
+      );
+      setIsClosePartialOpen(false);
+      setSelectedForClosePartial(null);
+      handleMutationSuccess();
+    } catch (err: any) {
+      console.error('Failed to close partial reservation:', err);
+      showToast(err.message || 'Gagal menyelesaikan sebagian reservasi.', 'error');
+    } finally {
+      setSavingClosePartial(false);
+    }
+  };
+
+  const formatSettlementLabel = (type?: string | null) => {
+    switch (type) {
+      case 'REFUND':
+        return 'Refund Uang';
+      case 'EXCHANGE':
+        return 'Tukar Barang';
+      case 'DEPOSIT':
+        return 'Deposit Saldo';
+      case 'OTHER':
+        return 'Lainnya / Kesepakatan';
+      default:
+        return type || '-';
+    }
+  };
+
   // Badges calculation
   const getDeadlineBadge = (r: StockReservation) => {
     if (r.status === 'COMPLETED') {
@@ -628,6 +692,15 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-300 dark:border-emerald-800">
           <CheckCircle2 className="w-3.5 h-3.5" />
           Selesai Diambil
+        </span>
+      );
+    }
+
+    if (r.status === 'CLOSED_PARTIAL') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-950/60 px-2 py-0.5 rounded-md border border-indigo-300 dark:border-indigo-800">
+          <CheckCheck className="w-3.5 h-3.5" />
+          Selesai Sebagian (Sisa Dilepas)
         </span>
       );
     }
@@ -690,7 +763,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
     );
   };
 
-  const getStatusBadge = (status: StockReservation['status']) => {
+  const getStatusBadge = (status: StockReservation['status'], reservation?: StockReservation) => {
     switch (status) {
       case 'PENDING':
         return (
@@ -708,6 +781,24 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
         return (
           <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
             Selesai
+          </span>
+        );
+      case 'CLOSED_PARTIAL':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800">
+            <CheckCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span>Selesai Sebagian</span>
+            {reservation?.settlement_type && (
+              <span className="ml-0.5 px-1.5 py-0.2 rounded bg-indigo-200/80 dark:bg-indigo-900/80 text-indigo-900 dark:text-indigo-200 text-[9px] font-bold normal-case">
+                {reservation.settlement_type === 'REFUND'
+                  ? 'Refund'
+                  : reservation.settlement_type === 'EXCHANGE'
+                  ? 'Tukar Barang'
+                  : reservation.settlement_type === 'DEPOSIT'
+                  ? 'Deposit'
+                  : 'Lainnya'}
+              </span>
+            )}
           </span>
         );
       case 'CANCELLED':
@@ -966,7 +1057,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
                       <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
                         {r.reservation_code}
                       </span>
-                      {getStatusBadge(r.status)}
+                      {getStatusBadge(r.status, r)}
                       {getDeadlineBadge(r)}
                       {r.invoice_no && (
                         <span className="text-xs text-slate-600 dark:text-slate-300 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
@@ -1016,6 +1107,25 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
                       <ShieldAlert className="w-4 h-4 shrink-0" />
                       Alasan Pembatalan: {r.cancel_reason} (Dibatalkan pada {formatDate(r.cancelled_at)})
                     </p>
+                  )}
+
+                  {r.status === 'CLOSED_PARTIAL' && (
+                    <div className="text-xs text-indigo-700 dark:text-indigo-300 font-medium bg-indigo-50 dark:bg-indigo-950/20 px-3.5 py-2.5 rounded-xl border border-indigo-200 dark:border-indigo-900/40 space-y-1">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <CheckCheck className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                        Diselesaikan Sebagian ({formatSettlementLabel(r.settlement_type)})
+                        {r.closed_at && (
+                          <span className="font-normal text-slate-500 dark:text-slate-400">
+                            • Ditutup pada {formatDate(r.closed_at)}
+                          </span>
+                        )}
+                      </div>
+                      {r.settlement_notes && (
+                        <p className="text-slate-600 dark:text-slate-300 pl-5.5">
+                          Rincian Penyelesaian: <strong>{r.settlement_notes}</strong>
+                        </p>
+                      )}
+                    </div>
                   )}
 
                   {/* Items Table */}
@@ -1077,6 +1187,13 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
                                     <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center justify-end gap-1">
                                       <CheckCircle2 className="w-3.5 h-3.5" />
                                       Lunas
+                                    </span>
+                                  ) : r.status === 'CLOSED_PARTIAL' ? (
+                                    <span className="text-indigo-600 dark:text-indigo-400 font-medium flex flex-col items-end">
+                                      <span className="line-through text-slate-400 text-[10px]">
+                                        {formatStock(remaining)} {item.base_unit_name || item.unit_name}
+                                      </span>
+                                      <span className="text-[11px] font-semibold">Dilepas ke Toko</span>
                                     </span>
                                   ) : (
                                     `${formatStock(remaining)} ${item.base_unit_name || item.unit_name}`
@@ -1164,7 +1281,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
                     </button>
 
                     {isActive && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           onClick={() => handleOpenExtend(r)}
@@ -1173,6 +1290,25 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
                           <CalendarPlus className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                           <span>Perpanjang Batas Waktu</span>
                         </button>
+
+                        {(r.status === 'PARTIAL' ||
+                          (r.items &&
+                            r.items.some((it) => {
+                              const rem = Number(
+                                it.qty_remaining_base ??
+                                  (Number(it.qty_reserved_base) - Number(it.qty_picked_up_base || 0))
+                              );
+                              return rem > 0;
+                            }))) && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenClosePartial(r)}
+                            className="px-3 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-indigo-300 dark:border-indigo-800/70 rounded-xl flex items-center gap-1.5 transition-colors"
+                          >
+                            <CheckCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                            <span>Selesaikan & Lepas Sisa</span>
+                          </button>
+                        )}
 
                         <button
                           type="button"
@@ -1421,6 +1557,202 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
             </div>
           </div>
         )}
+
+        {/* Selesaikan Sebagian (Close Partial) Modal */}
+        {isClosePartialOpen && selectedForClosePartial && (
+          <div
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !savingClosePartial) {
+                setIsClosePartialOpen(false);
+              }
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in"
+          >
+            <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-2xl shadow-2xl border border-indigo-200 dark:border-indigo-900/60 p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-3 text-indigo-600 dark:text-indigo-400">
+                  <div className="p-2.5 rounded-xl bg-indigo-100 dark:bg-indigo-950/60">
+                    <CheckCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      Selesaikan Nota & Lepas Sisa Titipan
+                    </h3>
+                    <p className="text-xs text-slate-500 font-mono">
+                      {selectedForClosePartial.reservation_code} • {selectedForClosePartial.customer_name}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsClosePartialOpen(false)}
+                  disabled={savingClosePartial}
+                  className="p-1 rounded text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-3 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/50 rounded-xl text-xs text-indigo-900 dark:text-indigo-200 space-y-1">
+                <p className="font-semibold flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                  <PackageCheck className="w-4 h-4 shrink-0" />
+                  Pelepasan Sisa Stok ke Toko
+                </p>
+                <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                  Sisa barang titipan yang belum diambil akan <strong>otomatis dilepas dan kembali ke stok toko siap jual</strong>. Status nota akan diselesaikan sebagian dan tidak lagi membebani batas waktu titip.
+                </p>
+              </div>
+
+              {/* Ringkasan Barang: Sudah Diambil vs Sisa Dilepas */}
+              <div className="space-y-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span>Ringkasan Barang Titipan</span>
+                  <span className="text-[11px] font-normal text-slate-500">
+                    {selectedForClosePartial.items?.length || 0} Macam Produk
+                  </span>
+                </span>
+
+                <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-xs bg-white dark:bg-slate-900">
+                    <thead className="bg-slate-50 dark:bg-slate-800/70 text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="py-2 px-3">Produk & Varian</th>
+                        <th className="py-2 px-3 text-right">Dititip</th>
+                        <th className="py-2 px-3 text-right">Sudah Diambil</th>
+                        <th className="py-2 px-3 text-right text-indigo-600 dark:text-indigo-400">Sisa Dilepas</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {selectedForClosePartial.items?.map((it) => {
+                        const remaining = Number(
+                          it.qty_remaining_base ??
+                            (Number(it.qty_reserved_base) - Number(it.qty_picked_up_base || 0))
+                        );
+                        return (
+                          <tr key={it.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                            <td className="py-2 px-3">
+                              <span className="font-medium text-slate-900 dark:text-white block">
+                                {it.product_name}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {it.variant_name} ({it.unit_name})
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right text-slate-600 dark:text-slate-300">
+                              {formatStock(it.qty_reserved_base)} {it.base_unit_name || it.unit_name}
+                            </td>
+                            <td className="py-2 px-3 text-right text-emerald-600 dark:text-emerald-400 font-medium">
+                              {formatStock(it.qty_picked_up_base)} {it.base_unit_name || it.unit_name}
+                            </td>
+                            <td className="py-2 px-3 text-right font-bold text-indigo-600 dark:text-indigo-400">
+                              {remaining > 0 ? (
+                                <span className="inline-block px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800">
+                                  {formatStock(remaining)} {it.base_unit_name || it.unit_name}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 font-normal">0 (Nihil)</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Opsi Penyelesaian Keuangan */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Penyelesaian Keuangan / Administrasi Sisa Barang <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    {
+                      id: 'REFUND',
+                      title: 'Refund Uang',
+                      desc: 'Tunai / transfer pengembalian uang sisa ke pelanggan',
+                    },
+                    {
+                      id: 'EXCHANGE',
+                      title: 'Tukar Barang Bangunan Lain',
+                      desc: 'Ditukar dengan material bangunan / produk lain',
+                    },
+                    {
+                      id: 'DEPOSIT',
+                      title: 'Simpan Saldo / Deposit',
+                      desc: 'Dicatat sebagai saldo simpanan belanja pelanggan',
+                    },
+                    {
+                      id: 'OTHER',
+                      title: 'Lainnya / Kesepakatan Khusus',
+                      desc: 'Kesepakatan khusus / penyelesaian kasir terpisah',
+                    },
+                  ].map((opt) => (
+                    <label
+                      key={opt.id}
+                      className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
+                        settlementType === opt.id
+                          ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-100 ring-1 ring-indigo-500'
+                          : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="settlement_type"
+                        value={opt.id}
+                        checked={settlementType === opt.id}
+                        onChange={() => setSettlementType(opt.id as any)}
+                        className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <div className="text-xs">
+                        <span className="font-bold block">{opt.title}</span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight block mt-0.5">
+                          {opt.desc}
+                        </span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Catatan / Rincian Penyelesaian */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Catatan / Rincian Penyelesaian <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  value={settlementReason}
+                  onChange={(e) => setSettlementReason(e.target.value)}
+                  placeholder="Misal: Refund tunai Rp 450.000 diserahkan kasir ke Pak Budi, atau sisa bata merah diganti semen 5 sak..."
+                  rows={2}
+                  className="w-full p-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white placeholder:text-slate-400"
+                />
+              </div>
+
+              {/* Tombol Aksi */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsClosePartialOpen(false)}
+                  disabled={savingClosePartial}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitClosePartial}
+                  disabled={savingClosePartial || !settlementReason.trim()}
+                  className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors"
+                >
+                  <CheckCheck className="w-4 h-4" />
+                  <span>{savingClosePartial ? 'Menyimpan...' : 'Lepas Sisa Stok & Selesaikan Nota'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1651,8 +1983,8 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
                   : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
               }`}
             >
-              Selesai (COMPLETED) (
-              {customerGroups.filter((c) => c.reservations.some((r) => r.status === 'COMPLETED')).length})
+              Selesai (
+              {customerGroups.filter((c) => c.reservations.some((r) => r.status === 'COMPLETED' || r.status === 'CLOSED_PARTIAL')).length})
             </button>
           </div>
         </div>
