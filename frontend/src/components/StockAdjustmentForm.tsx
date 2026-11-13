@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Product, ProductVariant, VariantUnit } from '../types';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue } from 'react';
+import { Product, VariantUnit } from '../types';
 import { api } from '../services/api';
-import { formatStock, formatRupiah } from '../utils/format';
+import { formatStock } from '../utils/format';
 import { 
-  SlidersHorizontal, 
   Search, 
   X, 
   Check, 
@@ -12,23 +11,14 @@ import {
   AlertTriangle, 
   ArrowRight, 
   ArrowLeft, 
-  Plus, 
-  Minus, 
   Scale, 
   Package, 
-  Layers, 
-  Building2, 
-  Folder, 
-  Tag, 
-  Sparkles, 
   Info, 
   ArrowUpRight, 
   ArrowDownLeft, 
   RotateCcw, 
-  FileText, 
   Barcode,
   ShieldCheck,
-  Hash,
   Boxes
 } from 'lucide-react';
 
@@ -48,6 +38,7 @@ export interface FlattenedVariant {
   brand?: string | null;
   supplier_name?: string | null;
   product_is_active?: boolean;
+  _searchIndex: string;
 }
 
 interface StockAdjustmentFormProps {
@@ -58,6 +49,136 @@ interface StockAdjustmentFormProps {
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
   isModal?: boolean;
 }
+
+/**
+ * Memoized Variant List Item Row to prevent unnecessary re-rendering
+ * of hundreds/thousands of items when only selection changes.
+ */
+interface VariantListItemProps {
+  variant: FlattenedVariant;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+  onDoubleSelect: (id: string) => void;
+}
+
+const VariantListItem = React.memo<VariantListItemProps>(({
+  variant: v,
+  isSelected,
+  onSelect,
+  onDoubleSelect,
+}) => {
+  const isLow = v.current_stock <= v.min_stock && v.current_stock > 0;
+  const isOut = v.current_stock <= 0;
+  const primaryUnit = v.units?.find((u) => u.is_base_unit) || v.units?.[0];
+
+  return (
+    <div
+      onClick={() => onSelect(v.id)}
+      onDoubleClick={() => onDoubleSelect(v.id)}
+      className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+        isSelected
+          ? 'border-amber-500 bg-amber-500/[0.08] dark:bg-amber-500/15 ring-2 ring-amber-500/40 shadow-xs'
+          : 'border-slate-200 dark:border-slate-800 hover:border-amber-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
+      }`}
+    >
+      {/* Left: Radio Selector & Info */}
+      <div className="flex items-start gap-3 min-w-0 flex-1">
+        <div className="mt-0.5 shrink-0">
+          <div
+            className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${
+              isSelected
+                ? 'border-amber-600 bg-amber-600 text-white'
+                : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800'
+            }`}
+          >
+            {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+          </div>
+        </div>
+
+        <div className="space-y-1 min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h4 className="font-bold text-sm text-slate-900 dark:text-white truncate">
+              {v.product_name}
+            </h4>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
+              {v.variant_name}
+            </span>
+            {v.is_active === false && (
+              <span className="text-[10px] font-bold text-rose-600 bg-rose-500/10 px-1.5 py-0.2 rounded">
+                Tidak Dijual
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2.5 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
+            <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+              SKU: {v.sku}
+            </span>
+            {v.barcode && (
+              <span className="font-mono flex items-center gap-0.5">
+                <Barcode className="w-3 h-3" /> {v.barcode}
+              </span>
+            )}
+            {v.category_name && (
+              <span>• {v.category_name}</span>
+            )}
+            {v.brand && (
+              <span>• Merk: {v.brand}</span>
+            )}
+          </div>
+
+          {/* Units summary */}
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-400 flex-wrap pt-0.5">
+            <span className="font-medium text-slate-500">Satuan:</span>
+            {v.units.map((u) => (
+              <span
+                key={u.id}
+                className={`px-1.5 py-0.2 rounded text-[10px] ${
+                  u.is_base_unit
+                    ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold'
+                    : 'bg-slate-100 dark:bg-slate-800/80 text-slate-500'
+                }`}
+              >
+                {u.unit_name} {Number(u.conversion_factor) > 1 ? `(x${u.conversion_factor})` : ''}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Right: Stock Metrics */}
+      <div className="text-right shrink-0 flex flex-col items-end gap-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-slate-400">Stok:</span>
+          <span className="font-mono text-sm font-extrabold text-slate-900 dark:text-white">
+            {formatStock(v.current_stock)}
+          </span>
+          <span className="text-[11px] text-slate-500">
+            {primaryUnit?.unit_name || 'unit'}
+          </span>
+        </div>
+
+        {isOut ? (
+          <span className="text-[10px] font-bold text-rose-600 bg-rose-500/10 px-2 py-0.5 rounded-full">
+            Habis (0)
+          </span>
+        ) : isLow ? (
+          <span className="text-[10px] font-bold text-amber-600 bg-amber-500/15 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+            <AlertTriangle className="w-3 h-3" /> Kritis
+          </span>
+        ) : (
+          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+            <ShieldCheck className="w-3 h-3" /> Aman
+          </span>
+        )}
+      </div>
+    </div>
+  );
+});
+
+VariantListItem.displayName = 'VariantListItem';
+
+const DISPLAY_CHUNK_SIZE = 40;
 
 export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
   products,
@@ -72,9 +193,15 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
 
   // Step 1: Search & Filter States
   const [searchQuery, setSearchQuery] = useState<string>('');
+  // React 18 useDeferredValue keeps input typing silky smooth at 120 FPS
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedStockFilter, setSelectedStockFilter] = useState<'all' | 'critical' | 'out' | 'multi_unit'>('all');
   const [selectedVariantId, setSelectedVariantId] = useState<string>('');
+
+  // Pagination / Windowing for rendering (prevents DOM bloat and browser freeze)
+  const [displayLimit, setDisplayLimit] = useState<number>(DISPLAY_CHUNK_SIZE);
 
   // Step 2: Adjustment Method States
   const [mode, setMode] = useState<'SET' | 'ADD' | 'SUBTRACT'>('SET');
@@ -83,17 +210,20 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
   const [movementType, setMovementType] = useState<string>('STOCK_OPNAME');
   const [referenceNo, setReferenceNo] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
-  const [createdBy, setCreatedBy] = useState<string>('Admin Gudang');
+  const [createdBy] = useState<string>('Admin Gudang');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const amountInputRef = useRef<HTMLInputElement>(null);
 
-  // Flatten all variants from products
+  // Flatten all variants from products and precompute normalized search index
   const allVariants = useMemo<FlattenedVariant[]>(() => {
     const list: FlattenedVariant[] = [];
-    products.forEach((p) => {
-      (p.variants || []).forEach((v) => {
+    for (const p of products) {
+      const vars = p.variants || [];
+      for (const v of vars) {
+        // Pre-normalize search tokens into a single lowercase index for O(1) matching
+        const searchIndex = `${p.name} ${v.variant_name} ${v.sku} ${p.sku} ${v.barcode || ''} ${p.category_name || ''} ${p.brand || ''}`.toLowerCase();
         list.push({
           id: v.id,
           variant_name: v.variant_name,
@@ -110,18 +240,51 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
           brand: p.brand,
           supplier_name: p.supplier_name,
           product_is_active: p.is_active !== false,
+          _searchIndex: searchIndex,
         });
-      });
-    });
+      }
+    }
     return list;
   }, [products]);
+
+  // Fast O(1) lookup Map by variant ID
+  const variantMap = useMemo(() => {
+    const map = new Map<string, FlattenedVariant>();
+    for (const v of allVariants) {
+      map.set(v.id, v);
+    }
+    return map;
+  }, [allVariants]);
+
+  // Precomputed stats for quick filter chips (avoids repeated full array scans during re-render)
+  const stockStats = useMemo(() => {
+    let criticalCount = 0;
+    let outCount = 0;
+    let multiUnitCount = 0;
+    for (const v of allVariants) {
+      if (v.current_stock <= 0) {
+        outCount++;
+      } else if (v.current_stock <= v.min_stock) {
+        criticalCount++;
+      }
+      if (v.units && v.units.length > 1) {
+        multiUnitCount++;
+      }
+    }
+    return {
+      total: allVariants.length,
+      critical: criticalCount,
+      out: outCount,
+      multiUnit: multiUnitCount,
+    };
+  }, [allVariants]);
 
   // Extract unique categories for filter
   const categoryList = useMemo(() => {
     const set = new Set<string>();
-    allVariants.forEach((v) => {
+    for (const v of allVariants) {
       if (v.category_name) set.add(v.category_name);
-    });
+    }
     return Array.from(set).sort();
   }, [allVariants]);
 
@@ -129,24 +292,33 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
   useEffect(() => {
     if (initialVariantId) {
       setSelectedVariantId(initialVariantId);
-      // Auto-jump to Step 2 if opened for a specific variant
       setCurrentStep(2);
     }
   }, [initialVariantId]);
 
-  // When step 1 mounts, focus search input
+  // Safe autofocus without memory leak
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     if (currentStep === 1) {
-      setTimeout(() => searchInputRef.current?.focus(), 80);
+      timer = setTimeout(() => searchInputRef.current?.focus(), 80);
     } else if (currentStep === 2) {
-      setTimeout(() => amountInputRef.current?.focus(), 80);
+      timer = setTimeout(() => amountInputRef.current?.focus(), 80);
     }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [currentStep]);
 
-  // Selected Variant lookup
+  // Reset pagination limit when search query or filters change
+  useEffect(() => {
+    setDisplayLimit(DISPLAY_CHUNK_SIZE);
+  }, [deferredSearchQuery, selectedCategory, selectedStockFilter]);
+
+  // Selected Variant lookup in O(1) time
   const currentVariant = useMemo(() => {
-    return allVariants.find((v) => v.id === selectedVariantId) || null;
-  }, [allVariants, selectedVariantId]);
+    if (!selectedVariantId) return null;
+    return variantMap.get(selectedVariantId) || null;
+  }, [variantMap, selectedVariantId]);
 
   // Available units for the selected variant
   const availableUnits = useMemo(() => {
@@ -176,42 +348,49 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
     return availableUnits.find((u) => u.is_base_unit) || availableUnits[0];
   }, [availableUnits]);
 
-  // Filtered variants for Step 1
+  // High performance multi-token search & filter for Step 1
   const filteredVariants = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
+    const rawTokens = deferredSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+
     return allVariants.filter((v) => {
-      // Text search
-      const matchText =
-        !q ||
-        v.product_name.toLowerCase().includes(q) ||
-        v.variant_name.toLowerCase().includes(q) ||
-        v.sku.toLowerCase().includes(q) ||
-        v.product_sku.toLowerCase().includes(q) ||
-        (v.barcode && v.barcode.toLowerCase().includes(q)) ||
-        (v.category_name && v.category_name.toLowerCase().includes(q)) ||
-        (v.brand && v.brand.toLowerCase().includes(q));
-
-      // Category filter
-      const matchCat = !selectedCategory || v.category_name === selectedCategory;
-
-      // Quick Stock Filter
-      let matchStock = true;
-      if (selectedStockFilter === 'critical') {
-        matchStock = v.current_stock <= v.min_stock && v.current_stock > 0;
-      } else if (selectedStockFilter === 'out') {
-        matchStock = v.current_stock <= 0;
-      } else if (selectedStockFilter === 'multi_unit') {
-        matchStock = v.units && v.units.length > 1;
+      // Category filter check first (cheapest comparison)
+      if (selectedCategory && v.category_name !== selectedCategory) {
+        return false;
       }
 
-      return matchText && matchCat && matchStock;
+      // Quick Stock Filter check
+      if (selectedStockFilter === 'critical') {
+        if (!(v.current_stock <= v.min_stock && v.current_stock > 0)) return false;
+      } else if (selectedStockFilter === 'out') {
+        if (v.current_stock > 0) return false;
+      } else if (selectedStockFilter === 'multi_unit') {
+        if (!v.units || v.units.length <= 1) return false;
+      }
+
+      // Multi-token search: all typed words must exist in pre-indexed string
+      if (rawTokens.length > 0) {
+        const matchesAll = rawTokens.every((token) => v._searchIndex.includes(token));
+        if (!matchesAll) return false;
+      }
+
+      return true;
     });
-  }, [allVariants, searchQuery, selectedCategory, selectedStockFilter]);
+  }, [allVariants, deferredSearchQuery, selectedCategory, selectedStockFilter]);
+
+  // Progressive slicing to cap DOM nodes and eliminate UI freezing
+  const displayedVariants = useMemo(() => {
+    return filteredVariants.slice(0, displayLimit);
+  }, [filteredVariants, displayLimit]);
+
+  const hasMoreVariants = filteredVariants.length > displayLimit;
+
+  const handleLoadMore = useCallback(() => {
+    setDisplayLimit((prev) => Math.min(prev + DISPLAY_CHUNK_SIZE, filteredVariants.length));
+  }, [filteredVariants.length]);
 
   // Compute stock simulation values
   const currentStock = currentVariant ? currentVariant.current_stock : 0;
   const inputQty = parseFloat(rawAmount) || 0;
-  // Converted amount in base units
   const amountInBaseUnit = inputQty * conversionFactor;
 
   let targetStock = currentStock;
@@ -231,7 +410,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
   const isTargetNegative = targetStock < 0;
 
   // Change mode handler with smart default movement_type
-  const handleSelectMode = (newMode: 'SET' | 'ADD' | 'SUBTRACT') => {
+  const handleSelectMode = useCallback((newMode: 'SET' | 'ADD' | 'SUBTRACT') => {
     setMode(newMode);
     if (newMode === 'SET') {
       setMovementType('STOCK_OPNAME');
@@ -240,36 +419,29 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
     } else if (newMode === 'SUBTRACT') {
       setMovementType('DAMAGED_EXPIRED');
     }
-  };
+  }, []);
+
+  // Variant selection handlers
+  const handleSelectVariant = useCallback((id: string) => {
+    setSelectedVariantId(id);
+  }, []);
+
+  const handleDoubleSelectVariant = useCallback((id: string) => {
+    setSelectedVariantId(id);
+    setCurrentStep(2);
+  }, []);
 
   // Step 1 Validation & Proceed to Step 2
-  const handleProceedToStep2 = () => {
+  const handleProceedToStep2 = useCallback(() => {
     if (!selectedVariantId || !currentVariant) {
       showToast('Silakan pilih salah satu varian produk terlebih dahulu!', 'error');
       return;
     }
     setCurrentStep(2);
-  };
-
-  // Keyboard navigation: Shift+Enter to advance, Ctrl+Enter to submit
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.shiftKey && e.key === 'Enter') {
-      if ((e.target as HTMLElement).tagName !== 'TEXTAREA') {
-        e.preventDefault();
-        if (currentStep === 1) {
-          handleProceedToStep2();
-        }
-      }
-    } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      if (currentStep === 2) {
-        handleSubmitForm();
-      }
-    }
-  };
+  }, [selectedVariantId, currentVariant, showToast]);
 
   // Submit Handler
-  const handleSubmitForm = async (e?: React.FormEvent) => {
+  const handleSubmitForm = useCallback(async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     if (!currentVariant) {
@@ -297,7 +469,6 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
     try {
       setIsSubmitting(true);
 
-      // Append unit conversion info into notes if package unit was used
       let finalNotes = notes.trim();
       if (conversionFactor > 1 && activeUnit) {
         finalNotes = `[${inputQty} ${activeUnit.unit_name} @${conversionFactor} ${baseUnit.unit_name}] ${finalNotes}`;
@@ -327,7 +498,42 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [
+    currentVariant, 
+    rawAmount, 
+    isTargetNegative, 
+    notes, 
+    conversionFactor, 
+    activeUnit, 
+    inputQty, 
+    baseUnit, 
+    mode, 
+    targetStock, 
+    amountInBaseUnit, 
+    movementType, 
+    referenceNo, 
+    createdBy, 
+    currentStock, 
+    showToast, 
+    onSuccess
+  ]);
+
+  // Keyboard navigation: Shift+Enter to advance, Ctrl+Enter to submit
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.shiftKey && e.key === 'Enter') {
+      if ((e.target as HTMLElement).tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        if (currentStep === 1) {
+          handleProceedToStep2();
+        }
+      }
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (currentStep === 2) {
+        handleSubmitForm();
+      }
+    }
+  }, [currentStep, handleProceedToStep2, handleSubmitForm]);
 
   return (
     <div onKeyDown={handleKeyDown} className="flex flex-col h-full">
@@ -426,9 +632,16 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
                 </p>
               </div>
 
-              <span className="text-xs text-slate-400 self-start sm:self-center font-medium">
-                Ditemukan: <strong className="text-slate-700 dark:text-slate-200">{filteredVariants.length}</strong> varian
-              </span>
+              <div className="flex items-center gap-1.5 self-start sm:self-center">
+                <span className="text-xs text-slate-400 font-medium">
+                  Ditemukan: <strong className="text-slate-700 dark:text-slate-200">{filteredVariants.length}</strong> varian
+                </span>
+                {filteredVariants.length > displayLimit && (
+                  <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-300/40">
+                    Menampilkan {displayedVariants.length} teratas
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Instant Search Bar */}
@@ -466,7 +679,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
                   }`}
                 >
-                  Semua ({allVariants.length})
+                  Semua ({stockStats.total})
                 </button>
                 <button
                   type="button"
@@ -478,7 +691,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
                   }`}
                 >
                   <AlertTriangle className="w-3 h-3" />
-                  <span>Stok Kritis ({allVariants.filter((v) => v.current_stock <= v.min_stock && v.current_stock > 0).length})</span>
+                  <span>Stok Kritis ({stockStats.critical})</span>
                 </button>
                 <button
                   type="button"
@@ -490,7 +703,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
                   }`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block"></span>
-                  <span>Stok Habis ({allVariants.filter((v) => v.current_stock <= 0).length})</span>
+                  <span>Stok Habis ({stockStats.out})</span>
                 </button>
                 <button
                   type="button"
@@ -502,7 +715,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
                   }`}
                 >
                   <Boxes className="w-3 h-3" />
-                  <span>Multi-Satuan</span>
+                  <span>Multi-Satuan ({stockStats.multiUnit})</span>
                 </button>
               </div>
 
@@ -536,120 +749,30 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
                 </p>
               </div>
             ) : (
-              filteredVariants.map((v) => {
-                const isSelected = selectedVariantId === v.id;
-                const isLow = v.current_stock <= v.min_stock && v.current_stock > 0;
-                const isOut = v.current_stock <= 0;
-                const primaryUnit = v.units?.find((u) => u.is_base_unit) || v.units?.[0];
-
-                return (
-                  <div
+              <>
+                {displayedVariants.map((v) => (
+                  <VariantListItem
                     key={v.id}
-                    onClick={() => setSelectedVariantId(v.id)}
-                    onDoubleClick={() => {
-                      setSelectedVariantId(v.id);
-                      handleProceedToStep2();
-                    }}
-                    className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                      isSelected
-                        ? 'border-amber-500 bg-amber-500/[0.08] dark:bg-amber-500/15 ring-2 ring-amber-500/40 shadow-xs'
-                        : 'border-slate-200 dark:border-slate-800 hover:border-amber-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
-                    }`}
-                  >
-                    {/* Left: Radio Selector & Info */}
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <div className="mt-0.5 shrink-0">
-                        <div
-                          className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${
-                            isSelected
-                              ? 'border-amber-600 bg-amber-600 text-white'
-                              : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800'
-                          }`}
-                        >
-                          {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                        </div>
-                      </div>
+                    variant={v}
+                    isSelected={selectedVariantId === v.id}
+                    onSelect={handleSelectVariant}
+                    onDoubleSelect={handleDoubleSelectVariant}
+                  />
+                ))}
 
-                      <div className="space-y-1 min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-bold text-sm text-slate-900 dark:text-white truncate">
-                            {v.product_name}
-                          </h4>
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
-                            {v.variant_name}
-                          </span>
-                          {v.is_active === false && (
-                            <span className="text-[10px] font-bold text-rose-600 bg-rose-500/10 px-1.5 py-0.2 rounded">
-                              Tidak Dijual
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2.5 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
-                          <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
-                            SKU: {v.sku}
-                          </span>
-                          {v.barcode && (
-                            <span className="font-mono flex items-center gap-0.5">
-                              <Barcode className="w-3 h-3" /> {v.barcode}
-                            </span>
-                          )}
-                          {v.category_name && (
-                            <span>• {v.category_name}</span>
-                          )}
-                          {v.brand && (
-                            <span>• Merk: {v.brand}</span>
-                          )}
-                        </div>
-
-                        {/* Units summary */}
-                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 flex-wrap pt-0.5">
-                          <span className="font-medium text-slate-500">Satuan:</span>
-                          {v.units.map((u) => (
-                            <span
-                              key={u.id}
-                              className={`px-1.5 py-0.2 rounded text-[10px] ${
-                                u.is_base_unit
-                                  ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold'
-                                  : 'bg-slate-100 dark:bg-slate-800/80 text-slate-500'
-                              }`}
-                            >
-                              {u.unit_name} {Number(u.conversion_factor) > 1 ? `(x${u.conversion_factor})` : ''}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Right: Stock Metrics */}
-                    <div className="text-right shrink-0 flex flex-col items-end gap-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-slate-400">Stok:</span>
-                        <span className="font-mono text-sm font-extrabold text-slate-900 dark:text-white">
-                          {formatStock(v.current_stock)}
-                        </span>
-                        <span className="text-[11px] text-slate-500">
-                          {primaryUnit?.unit_name || 'unit'}
-                        </span>
-                      </div>
-
-                      {isOut ? (
-                        <span className="text-[10px] font-bold text-rose-600 bg-rose-500/10 px-2 py-0.5 rounded-full">
-                          Habis (0)
-                        </span>
-                      ) : isLow ? (
-                        <span className="text-[10px] font-bold text-amber-600 bg-amber-500/15 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                          <AlertTriangle className="w-3 h-3" /> Kritis
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                          <ShieldCheck className="w-3 h-3" /> Aman
-                        </span>
-                      )}
-                    </div>
+                {/* Progressive load more button to prevent browser freeze on large inventories */}
+                {hasMoreVariants && (
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      onClick={handleLoadMore}
+                      className="px-4 py-2 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 rounded-xl border border-amber-200 dark:border-amber-800/80 transition-colors shadow-2xs"
+                    >
+                      Tampilkan {Math.min(DISPLAY_CHUNK_SIZE, filteredVariants.length - displayLimit)} Varian Lagi (Menampilkan {displayedVariants.length} dari {filteredVariants.length})
+                    </button>
                   </div>
-                );
-              })
+                )}
+              </>
             )}
           </div>
 

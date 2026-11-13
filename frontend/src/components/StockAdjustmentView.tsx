@@ -1,17 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Product } from '../types';
 import { StockAdjustmentForm } from './StockAdjustmentForm';
 import { StockMovementsView } from './StockMovementsView';
-import { formatStock } from '../utils/format';
 import { 
   SlidersHorizontal, 
   History, 
   Package, 
   AlertTriangle, 
-  ShieldCheck, 
-  Sparkles,
-  Layers,
-  ArrowRight
+  Layers
 } from 'lucide-react';
 
 interface StockAdjustmentViewProps {
@@ -33,21 +29,37 @@ export const StockAdjustmentView: React.FC<StockAdjustmentViewProps> = ({
   const [refreshMovementsTrigger, setRefreshMovementsTrigger] = useState<number>(0);
 
   // Sync activeSubTab if initialTab changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (initialTab) {
       setActiveSubTab(initialTab);
     }
   }, [initialTab]);
 
-  // Compute quick summary stats
-  const totalVariants = products.reduce((acc, p) => acc + (p.variants?.length || 1), 0);
-  const lowStockCount = products.filter((p) => p.has_low_stock && Number(p.total_stock) > 0).length;
-  const outOfStockCount = products.filter((p) => Number(p.total_stock) <= 0).length;
+  // Compute quick summary stats in a single pass with useMemo (prevents GC thrashing and lag)
+  const { totalVariants, lowStockCount, outOfStockCount } = useMemo(() => {
+    let variantsCount = 0;
+    let lowCount = 0;
+    let outCount = 0;
+    for (const p of products) {
+      variantsCount += p.variants?.length || 1;
+      const stock = Number(p.total_stock) || 0;
+      if (stock <= 0) {
+        outCount++;
+      } else if (p.has_low_stock) {
+        lowCount++;
+      }
+    }
+    return {
+      totalVariants: variantsCount,
+      lowStockCount: lowCount,
+      outOfStockCount: outCount,
+    };
+  }, [products]);
 
-  const handleAdjustmentSuccess = () => {
+  const handleAdjustmentSuccess = useCallback(() => {
     onRefresh();
     setRefreshMovementsTrigger((prev) => prev + 1);
-  };
+  }, [onRefresh]);
 
   return (
     <div className="space-y-6 animate-in fade-in">
