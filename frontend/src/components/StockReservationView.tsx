@@ -775,7 +775,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
               className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs sm:text-sm hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 shadow-2xs transition-all"
             >
               <ArrowLeft className="w-4 h-4 text-amber-600" />
-              <span>← Kembali ke Pilih Pelanggan</span>
+              <span>Kembali ke Pilih Pelanggan</span>
             </button>
 
             <span className="text-xs text-slate-400 font-medium hidden md:inline">
@@ -800,7 +800,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
               className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-md flex items-center gap-2 transition-all"
             >
               <Plus className="w-4 h-4" />
-              <span>+ Buat Titip Ambil Baru</span>
+              <span>Buat Titip Ambil Baru</span>
             </button>
           </div>
         </div>
@@ -1459,7 +1459,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
             className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-md flex items-center gap-2 transition-all"
           >
             <Plus className="w-4 h-4" />
-            <span>+ Buat Titip Ambil Baru</span>
+            <span>Buat Titip Ambil Baru</span>
           </button>
         </div>
       </div>

@@ -978,9 +978,10 @@ export const CreateReservationModal: React.FC<CreateReservationModalProps> = ({
                     <button
                       type="button"
                       onClick={() => setStep(2)}
-                      className="mt-3 px-4 py-2 text-xs font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-300 dark:border-amber-800 hover:bg-amber-100"
+                      className="mt-3 px-4 py-2 text-xs font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-300 dark:border-amber-800 hover:bg-amber-100 flex items-center gap-1.5 mx-auto"
                     >
-                      ← Kembali ke Pilih Produk
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      Kembali ke Pilih Produk
                     </button>
                   </div>
                 ) : (
