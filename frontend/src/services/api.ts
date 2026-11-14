@@ -383,7 +383,7 @@ export const api = {
     brand?: string;
     stockStatus?: string;
     saleStatus?: string;
-  }) => {
+  }, options?: RequestInit) => {
     const params = new URLSearchParams();
     if (filters?.search) params.append('search', filters.search);
     if (filters?.categoryId) params.append('categoryId', filters.categoryId);
@@ -391,7 +391,7 @@ export const api = {
     if (filters?.stockStatus && filters.stockStatus !== 'all') params.append('stockStatus', filters.stockStatus);
     if (filters?.saleStatus && filters.saleStatus !== 'all') params.append('saleStatus', filters.saleStatus);
     const queryStr = params.toString() ? `?${params.toString()}` : '';
-    return fetchJson<Product[]>(`/products${queryStr}`);
+    return fetchJson<Product[]>(`/products${queryStr}`, options);
   },
   getProductById: (id: string) => fetchJson<Product>(`/products/${id}`),
   createProduct: (data: any) =>

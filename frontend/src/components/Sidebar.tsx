@@ -71,7 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         {
           id: 'products',
-          label: 'Data Produk & Varian',
+          label: 'Katalog Produk',
           icon: Package,
           badge: lowStockCount > 0 ? formatBadgeCount(lowStockCount) : null,
           badgeIcon: AlertTriangle,

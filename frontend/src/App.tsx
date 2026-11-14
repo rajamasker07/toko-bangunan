@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HardHat, Loader2, RefreshCw, LogOut, WifiOff } from 'lucide-react';
 import { api } from './services/api';
 import { Product, ProductVariant, Category, Brand, Supplier, DashboardSummary, ReservationAlertSummary } from './types';
@@ -184,14 +184,26 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  // AbortController ref to cancel in-flight product queries on rapid tab switches or unmount
+  const loadProductsAbortRef = useRef<AbortController | null>(null);
+
   const loadProducts = useCallback(async () => {
+    // Abort previous in-flight product fetch if any
+    if (loadProductsAbortRef.current) {
+      loadProductsAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    loadProductsAbortRef.current = controller;
+
     try {
       setLoadingProducts(true);
       const [prodData, catFlat, brandData] = await Promise.all([
-        api.getProducts(),
+        api.getProducts(undefined, { signal: controller.signal }),
         categories.length === 0 ? api.getCategories(false) : Promise.resolve(categories),
         brands.length === 0 ? api.getBrands() : Promise.resolve(brands),
       ]);
+
+      if (controller.signal.aborted) return;
 
       setProducts(prodData);
       if (categories.length === 0) setCategories(catFlat);
@@ -211,10 +223,15 @@ export const App: React.FC = () => {
         return fresh;
       });
     } catch (err: any) {
+      if (err.name === 'AbortError' || controller.signal.aborted) {
+        return;
+      }
       console.error(err);
       showToast(err.message || 'Gagal memuat produk dari server', 'error');
     } finally {
-      setLoadingProducts(false);
+      if (!controller.signal.aborted) {
+        setLoadingProducts(false);
+      }
     }
   }, [categories, brands, showToast]);
 
