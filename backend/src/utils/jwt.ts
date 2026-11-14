@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { env } from '../config/env.js';
-import { USER_ROLES, type JwtAccessPayload, type UserRole } from '../types/auth.js';
+import { isValidRole } from '../config/rbac.js';
+import type { JwtAccessPayload, UserRole } from '../types/auth.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -106,7 +107,7 @@ export function verifyAccessToken(token: string): JwtAccessPayload {
     typeof payload.exp !== 'number' ||
     typeof payload.iat !== 'number' ||
     typeof payload.role !== 'string' ||
-    !(USER_ROLES as readonly string[]).includes(payload.role)
+    !isValidRole(payload.role)
   ) {
     throw new TokenVerificationError('TOKEN_INVALID', 'Klaim token tidak lengkap.');
   }

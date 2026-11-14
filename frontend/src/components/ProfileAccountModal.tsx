@@ -15,7 +15,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
 import { api } from '../services/api';
-import { ROLE_META } from '../utils/rbac';
+import { getRoleMeta } from '../utils/rbac';
 import { formatDate } from '../utils/format';
 import { validatePasswordStrength } from '../utils/validation';
 
@@ -32,7 +32,7 @@ export const ProfileAccountModal: React.FC<ProfileAccountModalProps> = ({
   onClose,
   isForced = false,
 }) => {
-  const { user, logout, applyAuthSession, updateLocalUser } = useAuth();
+  const { user, logout, applyAuthSession, updateLocalUser, roles } = useAuth();
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState<ModalTab>(isForced ? 'password' : 'profile');
@@ -65,7 +65,7 @@ export const ProfileAccountModal: React.FC<ProfileAccountModalProps> = ({
 
   if (!isOpen || !user) return null;
 
-  const roleMeta = ROLE_META[user.role];
+  const roleMeta = getRoleMeta(user.role, roles);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();

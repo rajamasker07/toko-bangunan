@@ -14,6 +14,8 @@ import {
   UserRole,
   StockReservation,
   ReservationAlertSummary,
+  RoleDefinition,
+  Permission,
 } from '../types';
 
 const BASE_URL = '/api';
@@ -578,5 +580,46 @@ export const api = {
     fetchJson<StockReservation>(`/reservations/${id}/close-partial`, {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  // Role & Permissions Management
+  getRoles: (options?: RequestInit) => fetchJson<RoleDefinition[]>('/roles', options),
+
+  getPermissionCatalog: (options?: RequestInit) =>
+    fetchJson<any>('/roles/permissions', options),
+
+  createRole: (data: {
+    code: string;
+    name: string;
+    short_name?: string;
+    description?: string;
+    badge_color?: string;
+    hierarchy_level?: number;
+    permissions: Permission[];
+  }) =>
+    fetchJson<RoleDefinition>('/roles', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateRole: (
+    code: string,
+    data: {
+      name?: string;
+      short_name?: string;
+      description?: string;
+      badge_color?: string;
+      hierarchy_level?: number;
+      permissions?: Permission[];
+    }
+  ) =>
+    fetchJson<RoleDefinition>(`/roles/${code}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteRole: (code: string) =>
+    fetchJson<void>(`/roles/${code}`, {
+      method: 'DELETE',
     }),
 };

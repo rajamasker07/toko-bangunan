@@ -4,6 +4,8 @@ import { env } from '../config/env.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 import { brandKey, normalizeBrandName } from '../utils/brand.js';
 import { generateRandomPassword, hashPassword } from '../utils/password.js';
+import { ALL_PERMISSIONS } from '../types/auth.js';
+import { syncRolesCacheFromDb } from '../config/rbac.js';
 
 async function columnExists(client: PoolClient, table: string, column: string): Promise<boolean> {
   const res = await client.query(
@@ -110,7 +112,26 @@ export async function initializeDatabase() {
 
     await client.query('BEGIN');
 
-    // 0. Users & Sessions Tables (Authentication & RBAC)
+    // 0. Dynamic Roles Table (RBAC)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS roles (
+        id UUID PRIMARY KEY,
+        code VARCHAR(50) UNIQUE NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        short_name VARCHAR(50) NOT NULL,
+        description TEXT,
+        badge_color VARCHAR(30) DEFAULT 'slate' NOT NULL,
+        hierarchy_level INT DEFAULT 10 NOT NULL,
+        is_system BOOLEAN DEFAULT FALSE NOT NULL,
+        permissions JSONB DEFAULT '[]'::jsonb NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_roles_code_lower ON roles (LOWER(code));
+      CREATE INDEX IF NOT EXISTS idx_roles_hierarchy ON roles(hierarchy_level DESC);
+    `);
+
+    // 0a. Users & Sessions Tables (Authentication & RBAC)
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY,
@@ -118,8 +139,7 @@ export async function initializeDatabase() {
         email VARCHAR(150),
         full_name VARCHAR(100) NOT NULL,
         password_hash TEXT NOT NULL,
-        role VARCHAR(30) NOT NULL DEFAULT 'kasir'
-          CHECK (role IN ('owner', 'admin', 'gudang', 'kasir')),
+        role VARCHAR(50) NOT NULL DEFAULT 'kasir',
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
         token_version INTEGER NOT NULL DEFAULT 1,
@@ -133,6 +153,127 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
       CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active);
     `);
+
+    // 0b. Hapus constraint lama users_role_check / CHECK (role IN (...)) secara aman
+    const legacyRoleConstraints = await client.query(`
+      SELECT con.conname
+      FROM pg_constraint con
+      JOIN pg_class rel ON rel.oid = con.conrelid
+      JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+      WHERE rel.relname = 'users'
+        AND con.contype = 'c'
+        AND pg_get_constraintdef(con.oid) ILIKE '%role%'
+    `);
+    for (const row of legacyRoleConstraints.rows as Array<{ conname: string }>) {
+      await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS "${row.conname}"`);
+    }
+
+    try {
+      await client.query(`ALTER TABLE users ALTER COLUMN role TYPE VARCHAR(50)`);
+    } catch {
+      // Abaikan jika tipe sudah sesuai
+    }
+
+    // 0c. Seed / sync 4 role default ('owner', 'admin', 'gudang', 'kasir')
+    const defaultRolesSeed = [
+      {
+        code: 'owner',
+        name: 'Owner (Pemilik Toko)',
+        short_name: 'Owner',
+        description:
+          'Akses penuh ke seluruh stok, harga modal, master data, dan manajemen semua akun serta peran.',
+        badge_color: 'purple',
+        hierarchy_level: 100,
+        is_system: true,
+        permissions: ALL_PERMISSIONS,
+      },
+      {
+        code: 'admin',
+        name: 'Admin / Kepala Toko',
+        short_name: 'Admin',
+        description:
+          'Mengelola inventaris, harga, master data, reservasi, peran bawahan, serta akun Staf Gudang & Kasir.',
+        badge_color: 'blue',
+        hierarchy_level: 80,
+        is_system: true,
+        permissions: ALL_PERMISSIONS.filter((p) => p !== 'users:delete'),
+      },
+      {
+        code: 'gudang',
+        name: 'Staf Gudang',
+        short_name: 'Gudang',
+        description:
+          'Menyesuaikan stok, membuat/ubah produk & varian, penyerahan titipan barang, melihat supplier.',
+        badge_color: 'amber',
+        hierarchy_level: 50,
+        is_system: true,
+        permissions: [
+          'dashboard:read',
+          'products:read',
+          'products:create',
+          'products:update',
+          'master:read',
+          'suppliers:read',
+          'stock:read',
+          'stock:adjust',
+          'reservations:read',
+          'reservations:pickup',
+        ],
+      },
+      {
+        code: 'kasir',
+        name: 'Kasir / Penjualan',
+        short_name: 'Kasir',
+        description:
+          'Melihat dashboard, katalog produk, riwayat stok, serta membuat & memproses reservasi/titipan barang.',
+        badge_color: 'emerald',
+        hierarchy_level: 30,
+        is_system: true,
+        permissions: [
+          'dashboard:read',
+          'products:read',
+          'master:read',
+          'stock:read',
+          'reservations:read',
+          'reservations:create',
+          'reservations:pickup',
+          'reservations:cancel',
+        ],
+      },
+    ];
+
+    for (const roleDef of defaultRolesSeed) {
+      await client.query(
+        `
+        INSERT INTO roles (
+          id, code, name, short_name, description, badge_color,
+          hierarchy_level, is_system, permissions, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (code) DO UPDATE SET
+          name = EXCLUDED.name,
+          short_name = EXCLUDED.short_name,
+          description = EXCLUDED.description,
+          badge_color = EXCLUDED.badge_color,
+          hierarchy_level = EXCLUDED.hierarchy_level,
+          is_system = TRUE,
+          permissions = EXCLUDED.permissions,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+        [
+          generateUUIDv7(),
+          roleDef.code,
+          roleDef.name,
+          roleDef.short_name,
+          roleDef.description,
+          roleDef.badge_color,
+          roleDef.hierarchy_level,
+          roleDef.is_system,
+          JSON.stringify(roleDef.permissions),
+        ]
+      );
+    }
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS user_sessions (
@@ -636,6 +777,10 @@ export async function initializeDatabase() {
     await ensureBootstrapOwner(client);
 
     await client.query('COMMIT');
+
+    // 10. Sinkronisasi cache in-memory peran & hak akses (Dynamic RBAC)
+    await syncRolesCacheFromDb();
+
     console.log('✅ Toko Bangunan database schema created successfully!');
   } catch (error) {
     await client.query('ROLLBACK');
