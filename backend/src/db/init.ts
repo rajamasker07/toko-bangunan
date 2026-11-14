@@ -354,6 +354,27 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_supplier_sales_active ON supplier_sales(is_active);
     `);
 
+    // 2d. Supplier Invoices Table (Nota Hutang Pembelian & Jatuh Tempo Supplier)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS supplier_invoices (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        supplier_id UUID NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+        invoice_number VARCHAR(100) NOT NULL,
+        purchase_order_no VARCHAR(100),
+        invoice_date DATE NOT NULL,
+        due_date DATE NOT NULL,
+        total_amount NUMERIC(15, 2) NOT NULL DEFAULT 0,
+        paid_amount NUMERIC(15, 2) NOT NULL DEFAULT 0,
+        status VARCHAR(20) NOT NULL DEFAULT 'UNPAID',
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_supplier_invoices_supplier ON supplier_invoices(supplier_id);
+      CREATE INDEX IF NOT EXISTS idx_supplier_invoices_due_date ON supplier_invoices(due_date);
+      CREATE INDEX IF NOT EXISTS idx_supplier_invoices_status ON supplier_invoices(status);
+    `);
+
     // 3. Products Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS products (

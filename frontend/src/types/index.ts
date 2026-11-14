@@ -46,6 +46,40 @@ export interface SupplierSales {
   updated_at?: string;
 }
 
+export type InvoicePaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'OVERDUE';
+
+export interface SupplierInvoice {
+  id: string;
+  supplier_id: string;
+  invoice_number: string;
+  purchase_order_no: string | null;
+  invoice_date: string;
+  due_date: string;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  status: InvoicePaymentStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  days_until_due?: number;
+  days_overdue?: number;
+  is_overdue?: boolean;
+  is_due_soon?: boolean;
+}
+
+export interface SupplierInvoiceSummary {
+  total_invoices: number;
+  unpaid_count: number;
+  partial_count: number;
+  paid_count: number;
+  overdue_count: number;
+  due_soon_count: number;
+  total_invoice_amount: number;
+  total_paid_amount: number;
+  total_debt_amount: number;
+}
+
 export interface Supplier {
   id: string;
   name: string;
@@ -60,9 +94,17 @@ export interface Supplier {
   created_at: string;
   updated_at: string;
   product_count?: number;
+  active_product_count?: number;
   sales?: SupplierSales[];
   sales_count?: number;
   active_sales_count?: number;
+  invoice_summary?: {
+    total_invoices: number;
+    unpaid_count: number;
+    overdue_count: number;
+    due_soon_count: number;
+    total_debt_amount: number;
+  };
 }
 
 export interface VariantUnit {

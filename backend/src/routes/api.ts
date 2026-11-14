@@ -9,6 +9,7 @@ import { SupplierController } from '../controllers/supplierController.js';
 import { UnitController } from '../controllers/unitController.js';
 import { ReservationController } from '../controllers/reservationController.js';
 import { RoleController } from '../controllers/roleController.js';
+import { SupplierInvoiceController } from '../controllers/supplierInvoiceController.js';
 import { UserController } from '../controllers/userController.js';
 import { VariantController } from '../controllers/variantController.js';
 import {
@@ -134,6 +135,38 @@ router.delete(
   '/suppliers/:supplierId/sales/:id',
   requirePermission('master:delete'),
   SupplierController.deleteSales
+);
+
+// Supplier Invoices & Due Dates (Nota Hutang & Jatuh Tempo Pembelian)
+router.get(
+  '/suppliers/:supplierId/invoices',
+  requirePermission('suppliers:read'),
+  SupplierInvoiceController.listBySupplier
+);
+router.get(
+  '/suppliers/:supplierId/invoices/summary',
+  requirePermission('suppliers:read'),
+  SupplierInvoiceController.getSummaryBySupplier
+);
+router.post(
+  '/suppliers/:supplierId/invoices',
+  requirePermission('master:write'),
+  SupplierInvoiceController.create
+);
+router.put(
+  '/supplier-invoices/:id',
+  requirePermission('master:write'),
+  SupplierInvoiceController.update
+);
+router.post(
+  '/supplier-invoices/:id/payment',
+  requirePermission('master:write'),
+  SupplierInvoiceController.recordPayment
+);
+router.delete(
+  '/supplier-invoices/:id',
+  requirePermission('master:delete'),
+  SupplierInvoiceController.delete
 );
 
 // Products
