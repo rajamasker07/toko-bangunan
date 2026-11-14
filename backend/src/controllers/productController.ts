@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { hasPermission } from '../config/rbac.js';
 import { ProductService } from '../services/productService.js';
 
 export class ProductController {
@@ -9,7 +10,11 @@ export class ProductController {
       const brand = req.query.brand as string;
       const stockStatus = req.query.stockStatus as any;
       const saleStatus = req.query.saleStatus as any;
-      const products = await ProductService.getProducts({ search, categoryId, brand, stockStatus, saleStatus });
+      const includeBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const products = await ProductService.getProducts(
+        { search, categoryId, brand, stockStatus, saleStatus },
+        { includeBuyPrice }
+      );
       res.json({ success: true, data: products });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
@@ -19,7 +24,8 @@ export class ProductController {
   static async getById(req: Request, res: Response) {
     try {
       const id = String(req.params.id);
-      const product = await ProductService.getProductById(id);
+      const includeBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const product = await ProductService.getProductById(id, { includeBuyPrice });
       if (!product) {
         return res.status(404).json({ success: false, message: 'Produk tidak ditemukan' });
       }
@@ -35,7 +41,12 @@ export class ProductController {
       if (!name) {
         return res.status(400).json({ success: false, message: 'Nama produk wajib diisi' });
       }
-      const product = await ProductService.createProduct(req.body);
+      const includeBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const product = await ProductService.createProduct(req.body, {
+        userId: req.user!.id,
+        createdBy: req.user!.full_name,
+        allowBuyPrice: includeBuyPrice,
+      });
       res.status(201).json({ success: true, data: product, message: 'Produk berhasil dibuat' });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
@@ -45,7 +56,8 @@ export class ProductController {
   static async update(req: Request, res: Response) {
     try {
       const id = String(req.params.id);
-      const product = await ProductService.updateProduct(id, req.body);
+      const includeBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const product = await ProductService.updateProduct(id, req.body, { includeBuyPrice });
       res.json({ success: true, data: product, message: 'Produk berhasil diperbarui' });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
@@ -65,7 +77,8 @@ export class ProductController {
   static async toggleStatus(req: Request, res: Response) {
     try {
       const id = String(req.params.id);
-      const product = await ProductService.toggleProductStatus(id);
+      const includeBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const product = await ProductService.toggleProductStatus(id, { includeBuyPrice });
       res.json({
         success: true,
         data: product,

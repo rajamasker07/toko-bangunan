@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Product, ProductVariant } from '../types';
 import { formatRupiah, formatStock } from '../utils/format';
+import { useAuth } from '../context/AuthContext';
 import { Pagination } from './common/Pagination';
 import { 
   ArrowLeft, 
@@ -46,6 +47,12 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
   onToggleProductStatus,
   onToggleVariantStatus,
 }) => {
+  const { can } = useAuth();
+  const canCreate = can('products:create');
+  const canUpdate = can('products:update');
+  const canDelete = can('products:delete');
+  const canAdjust = can('stock:adjust');
+
   // Pagination for variants list (in case product has many variants)
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(6);
@@ -151,7 +158,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
               </span>
             </div>
 
-            {onToggleProductStatus && (
+            {canUpdate && onToggleProductStatus && (
               <button
                 type="button"
                 onClick={() => onToggleProductStatus(product)}
@@ -171,7 +178,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
               </button>
             )}
 
-            {onEditProduct && (
+            {canUpdate && onEditProduct && (
               <button
                 onClick={() => onEditProduct(product)}
                 className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all shrink-0 border border-slate-200 dark:border-slate-700"
@@ -182,13 +189,26 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
               </button>
             )}
 
-            <button
-              onClick={() => onAddVariant(product.id)}
-              className="flex items-center gap-2 px-4 py-3 rounded-xl font-bold text-xs bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Tambah Varian</span>
-            </button>
+            {canCreate && (
+              <button
+                onClick={() => onAddVariant(product.id)}
+                className="flex items-center gap-2 px-4 py-3 rounded-xl font-bold text-xs bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Tambah Varian</span>
+              </button>
+            )}
+
+            {canDelete && (
+              <button
+                type="button"
+                onClick={() => onDeleteProduct(product.id, product.name)}
+                className="p-3 rounded-xl border border-rose-200 dark:border-rose-800/70 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors shrink-0"
+                title="Hapus Produk"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -317,7 +337,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                       </div>
 
                       {/* Toggle Variant Status */}
-                      {onToggleVariantStatus && (
+                      {canUpdate && onToggleVariantStatus && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -339,7 +359,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                         </button>
                       )}
 
-                      {onEditVariant && (
+                      {canUpdate && onEditVariant && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -353,17 +373,19 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                         </button>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenAdjust(v.id);
-                        }}
-                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
-                        title="Penyesuaian Stok Cepat"
-                      >
-                        Adjust
-                      </button>
+                      {canAdjust && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenAdjust(v.id);
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+                          title="Penyesuaian Stok Cepat"
+                        >
+                          Adjust
+                        </button>
+                      )}
 
                       <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 group-hover:bg-amber-500 group-hover:text-white transition-all">
                         <ChevronRight className="w-4 h-4" />

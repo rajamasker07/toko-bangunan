@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { NumericInput } from './common/NumericInput';
 import { X, Plus, Trash2, CheckCircle2, Layers, Boxes, AlertTriangle, ArrowLeftRight, Banknote, Coins } from 'lucide-react';
 
@@ -20,6 +21,9 @@ export const AddVariantModal: React.FC<AddVariantModalProps> = ({
   onSuccess,
   showToast,
 }) => {
+  const { can } = useAuth();
+  const canViewBuyPrice = can('products:view_buy_price');
+
   const [variantName, setVariantName] = useState('');
   const [sku, setSku] = useState('');
   const [barcode, setBarcode] = useState('');
@@ -95,7 +99,7 @@ export const AddVariantModal: React.FC<AddVariantModalProps> = ({
           unit_name: u.unit_name.trim(),
           conversion_factor: Number(u.conversion_factor) || 1,
           is_base_unit: Boolean(u.is_base_unit),
-          buy_price: Number(u.buy_price) || 0,
+          ...(canViewBuyPrice ? { buy_price: Number(u.buy_price) || 0 } : {}),
           sell_price: Number(u.sell_price) || 0,
           wholesale_price: u.wholesale_price ? Number(u.wholesale_price) : null,
         })),
@@ -230,7 +234,10 @@ export const AddVariantModal: React.FC<AddVariantModalProps> = ({
 
             <div className="space-y-2">
               {units.map((u, idx) => (
-                <div key={idx} className="grid grid-cols-5 gap-2 items-center">
+                <div
+                  key={idx}
+                  className={`grid ${canViewBuyPrice ? 'grid-cols-5' : 'grid-cols-4'} gap-2 items-center`}
+                >
                   <input
                     type="text"
                     value={u.unit_name}
@@ -259,16 +266,18 @@ export const AddVariantModal: React.FC<AddVariantModalProps> = ({
                     placeholder="Harga Jual"
                     inputClassName="font-bold"
                   />
-                  <NumericInput
-                    size="sm"
-                    value={u.buy_price}
-                    onChange={(val) => handleUnitChange(idx, 'buy_price', val)}
-                    allowDecimals={true}
-                    maxDecimals={2}
-                    prefixIcon={Coins}
-                    prefixText="Rp"
-                    placeholder="Harga Beli"
-                  />
+                  {canViewBuyPrice && (
+                    <NumericInput
+                      size="sm"
+                      value={u.buy_price}
+                      onChange={(val) => handleUnitChange(idx, 'buy_price', val)}
+                      allowDecimals={true}
+                      maxDecimals={2}
+                      prefixIcon={Coins}
+                      prefixText="Rp"
+                      placeholder="Harga Beli"
+                    />
+                  )}
                   <div>
                     {u.is_base_unit ? (
                       <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 rounded">

@@ -1,6 +1,7 @@
 import { pool } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 import { brandKey, normalizeBrandName } from '../utils/brand.js';
+import { ensureBootstrapOwner } from './init.js';
 
 export async function seedDatabase() {
   const client = await pool.connect();
@@ -8,8 +9,10 @@ export async function seedDatabase() {
     console.log('🌱 Starting database seeder for Toko Bangunan...');
     await client.query('BEGIN');
 
-    // Clean existing tables
+    // Clean product/category/stock tables while preserving users, user_sessions, brands, suppliers, units
     await client.query('TRUNCATE stock_movements, variant_units, product_variants, products, categories CASCADE;');
+
+    const bootstrapOwner = await ensureBootstrapOwner(client);
 
     // 1. Categories Hierarchy
     // Root Categories
@@ -119,9 +122,16 @@ export async function seedDatabase() {
         if (v.initialStock > 0) {
           const moveId = generateUUIDv7();
           await client.query(`
-            INSERT INTO stock_movements (id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by)
-            VALUES ($1, $2, $3, 'INITIAL_STOCK', 0, $4, $4, 'INIT-STOCK-001', 'Stok awal setup sistem', 'System Admin');
-          `, [moveId, productId, variantId, v.initialStock]);
+            INSERT INTO stock_movements (id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by, user_id)
+            VALUES ($1, $2, $3, 'INITIAL_STOCK', 0, $4, $4, 'INIT-STOCK-001', 'Stok awal setup sistem', $5, $6);
+          `, [
+            moveId,
+            productId,
+            variantId,
+            v.initialStock,
+            bootstrapOwner?.full_name || 'System Admin',
+            bootstrapOwner?.id || null,
+          ]);
         }
       }
     };

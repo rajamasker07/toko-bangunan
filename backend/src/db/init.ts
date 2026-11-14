@@ -1,7 +1,9 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../config/db.js';
+import { env } from '../config/env.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 import { brandKey, normalizeBrandName } from '../utils/brand.js';
+import { generateRandomPassword, hashPassword } from '../utils/password.js';
 
 async function columnExists(client: PoolClient, table: string, column: string): Promise<boolean> {
   const res = await client.query(
@@ -10,6 +12,58 @@ async function columnExists(client: PoolClient, table: string, column: string): 
     [table, column]
   );
   return (res.rowCount ?? 0) > 0;
+}
+
+/**
+ * Buat akun Owner awal secara aman jika tabel `users` masih kosong.
+ * - Jika `BOOTSTRAP_OWNER_PASSWORD` tersedia di env, pakai password tersebut.
+ * - Jika kosong, buat password acak 1x pakai via CSPRNG dan wajibkan ganti password saat login.
+ */
+export async function ensureBootstrapOwner(
+  client: PoolClient
+): Promise<{ id: string; full_name: string } | null> {
+  const countRes = await client.query('SELECT COUNT(*)::int AS count FROM users');
+  if (countRes.rows[0].count > 0) {
+    const existingOwner = await client.query(
+      `SELECT id, full_name
+       FROM users
+       WHERE role = 'owner' AND is_active = TRUE
+       ORDER BY created_at ASC
+       LIMIT 1`
+    );
+    return (existingOwner.rows[0] as { id: string; full_name: string } | undefined) || null;
+  }
+
+  const username = env.bootstrapOwner.username || 'owner';
+  const fullName = env.bootstrapOwner.fullName || 'Pemilik Toko';
+  const email = env.bootstrapOwner.email || null;
+  const isGenerated = !env.bootstrapOwner.password;
+  const rawPassword = env.bootstrapOwner.password || generateRandomPassword(12);
+  const mustChangePassword = isGenerated ? true : env.bootstrapOwner.forcePasswordChange;
+  const passwordHash = await hashPassword(rawPassword);
+  const ownerId = generateUUIDv7();
+
+  await client.query(
+    `INSERT INTO users (
+       id, username, email, full_name, password_hash, role, is_active, must_change_password
+     ) VALUES ($1, $2, $3, $4, $5, 'owner', TRUE, $6)
+     ON CONFLICT (username) DO NOTHING`,
+    [ownerId, username, email, fullName, passwordHash, mustChangePassword]
+  );
+
+  if (isGenerated) {
+    console.log('🔐 ========================================================');
+    console.log(`🔐 Akun Owner awal dibuat: username="${username}"`);
+    console.log(`🔐 Password sementara 1x pakai: ${rawPassword}`);
+    console.log('🔐 Segera login dan ganti password Anda!');
+    console.log('🔐 ========================================================');
+  } else {
+    console.log(
+      `🔐 Akun Owner awal siap: username="${username}" (must_change_password=${mustChangePassword})`
+    );
+  }
+
+  return { id: ownerId, full_name: fullName };
 }
 
 /**
@@ -55,6 +109,45 @@ export async function initializeDatabase() {
     console.log('🔄 Initializing Toko Bangunan database schema...');
 
     await client.query('BEGIN');
+
+    // 0. Users & Sessions Tables (Authentication & RBAC)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY,
+        username VARCHAR(50) NOT NULL UNIQUE,
+        email VARCHAR(150),
+        full_name VARCHAR(100) NOT NULL,
+        password_hash TEXT NOT NULL,
+        role VARCHAR(30) NOT NULL DEFAULT 'kasir'
+          CHECK (role IN ('owner', 'admin', 'gudang', 'kasir')),
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+        token_version INTEGER NOT NULL DEFAULT 1,
+        last_login_at TIMESTAMPTZ,
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username_lower ON users (LOWER(username));
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower ON users (LOWER(email)) WHERE email IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+      CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id UUID PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        refresh_token_hash VARCHAR(64) NOT NULL,
+        user_agent VARCHAR(255),
+        ip_address VARCHAR(64),
+        expires_at TIMESTAMPTZ NOT NULL,
+        revoked_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
+    `);
 
     // 1. Categories Table (Supports multi-level subcategories)
     await client.query(`
@@ -180,6 +273,7 @@ export async function initializeDatabase() {
         sku VARCHAR(100) UNIQUE NOT NULL,
         barcode VARCHAR(100),
         current_stock NUMERIC(12, 2) DEFAULT 0 NOT NULL,
+        reserved_stock NUMERIC(12, 2) DEFAULT 0 NOT NULL,
         min_stock NUMERIC(12, 2) DEFAULT 5 NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -189,6 +283,11 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_product_variants_sku ON product_variants(sku);
       CREATE INDEX IF NOT EXISTS idx_product_variants_active ON product_variants(is_active);
     `);
+
+    // 3e. Kolom reserved_stock jika belum ada
+    if (!(await columnExists(client, 'product_variants', 'reserved_stock'))) {
+      await client.query('ALTER TABLE product_variants ADD COLUMN reserved_stock NUMERIC(12, 2) DEFAULT 0 NOT NULL;');
+    }
 
     // 4. Variant Units (Satuan Harga bertingkat / multi-unit)
     await client.query(`
@@ -226,6 +325,16 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
       CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at DESC);
     `);
+
+    // 5b. Tambah kolom stock_movements.user_id jika belum ada (kompatibel PostgreSQL 9.5)
+    if (!(await columnExists(client, 'stock_movements', 'user_id'))) {
+      await client.query(
+        'ALTER TABLE stock_movements ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE SET NULL;'
+      );
+      await client.query(
+        'CREATE INDEX IF NOT EXISTS idx_stock_movements_user ON stock_movements(user_id);'
+      );
+    }
 
     // 6. Data Awal Supplier jika tabel masih kosong
     const suppCount = await client.query('SELECT COUNT(*)::int AS count FROM suppliers');
@@ -449,6 +558,82 @@ export async function initializeDatabase() {
         );
       }
     }
+
+    // 8. Stock Reservations (Sistem Titip Barang & Reservasi Stok Pelanggan)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stock_reservations (
+        id UUID PRIMARY KEY,
+        reservation_code VARCHAR(50) UNIQUE NOT NULL,
+        invoice_no VARCHAR(100),
+        customer_name VARCHAR(150) NOT NULL,
+        customer_phone VARCHAR(50),
+        customer_address TEXT,
+        status VARCHAR(30) DEFAULT 'PENDING' NOT NULL,
+        pickup_deadline TIMESTAMPTZ NOT NULL,
+        notes TEXT,
+        created_by VARCHAR(100) DEFAULT 'Admin',
+        completed_at TIMESTAMPTZ,
+        cancelled_at TIMESTAMPTZ,
+        cancel_reason TEXT,
+        settlement_type VARCHAR(50),
+        settlement_notes TEXT,
+        closed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_stock_reservations_status ON stock_reservations(status);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservations_deadline ON stock_reservations(pickup_deadline);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservations_code ON stock_reservations(reservation_code);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservations_created ON stock_reservations(created_at DESC);
+    `);
+
+    // 8a. Kolom settlement_type, settlement_notes, closed_at jika belum ada
+    if (!(await columnExists(client, 'stock_reservations', 'settlement_type'))) {
+      await client.query('ALTER TABLE stock_reservations ADD COLUMN settlement_type VARCHAR(50);');
+    }
+    if (!(await columnExists(client, 'stock_reservations', 'settlement_notes'))) {
+      await client.query('ALTER TABLE stock_reservations ADD COLUMN settlement_notes TEXT;');
+    }
+    if (!(await columnExists(client, 'stock_reservations', 'closed_at'))) {
+      await client.query('ALTER TABLE stock_reservations ADD COLUMN closed_at TIMESTAMPTZ;');
+    }
+
+    // 8b. Stock Reservation Items (Rincian barang & unit yang ditahan)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stock_reservation_items (
+        id UUID PRIMARY KEY,
+        reservation_id UUID NOT NULL REFERENCES stock_reservations(id) ON DELETE CASCADE,
+        product_id UUID NOT NULL REFERENCES products(id),
+        variant_id UUID NOT NULL REFERENCES product_variants(id),
+        unit_name VARCHAR(50) NOT NULL,
+        conversion_factor NUMERIC(12, 4) DEFAULT 1 NOT NULL,
+        qty_ordered_unit NUMERIC(12, 2) NOT NULL,
+        qty_reserved_base NUMERIC(12, 2) NOT NULL,
+        qty_picked_up_base NUMERIC(12, 2) DEFAULT 0 NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_stock_reservation_items_res ON stock_reservation_items(reservation_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservation_items_variant ON stock_reservation_items(variant_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservation_items_product ON stock_reservation_items(product_id);
+    `);
+
+    // 8c. Stock Reservation Pickups (Log Riwayat Pengambilan Barang Bertahap / Penuh)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stock_reservation_pickups (
+        id UUID PRIMARY KEY,
+        reservation_id UUID NOT NULL REFERENCES stock_reservations(id) ON DELETE CASCADE,
+        receiver_name VARCHAR(150) NOT NULL,
+        vehicle_plate VARCHAR(50),
+        notes TEXT,
+        handed_by VARCHAR(100) DEFAULT 'Admin',
+        items JSONB NOT NULL,
+        picked_up_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_stock_reservation_pickups_res ON stock_reservation_pickups(reservation_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservation_pickups_date ON stock_reservation_pickups(picked_up_at DESC);
+    `);
+
+    // 9. Bootstrap akun Owner awal jika tabel users masih kosong
+    await ensureBootstrapOwner(client);
 
     await client.query('COMMIT');
     console.log('✅ Toko Bangunan database schema created successfully!');

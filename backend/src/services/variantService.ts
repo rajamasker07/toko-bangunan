@@ -5,24 +5,36 @@ export class VariantService {
   /**
    * Add variant to an existing product
    */
-  static async addVariant(productId: string, data: {
-    variant_name: string;
-    sku?: string;
-    barcode?: string;
-    initial_stock?: number;
-    min_stock?: number;
-    units?: Array<{
-      unit_name: string;
-      conversion_factor?: number;
-      is_base_unit?: boolean;
-      buy_price?: number;
-      sell_price: number;
-      wholesale_price?: number | null;
-    }>;
-  }) {
+  static async addVariant(
+    productId: string,
+    data: {
+      variant_name: string;
+      sku?: string;
+      barcode?: string;
+      initial_stock?: number;
+      min_stock?: number;
+      units?: Array<{
+        unit_name: string;
+        conversion_factor?: number;
+        is_base_unit?: boolean;
+        buy_price?: number;
+        sell_price: number;
+        wholesale_price?: number | null;
+      }>;
+    },
+    options?: {
+      userId?: string | null;
+      createdBy?: string;
+      allowBuyPrice?: boolean;
+    }
+  ) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      const allowBuyPrice = options?.allowBuyPrice ?? true;
+      const actorName = (options?.createdBy || 'Admin').slice(0, 100);
+      const actorId = options?.userId || null;
 
       const variantId = generateUUIDv7();
       const sku = data.sku || `VAR-${Date.now().toString().slice(-6)}`;
@@ -51,7 +63,7 @@ export class VariantService {
               u.unit_name,
               Number(u.conversion_factor) || 1,
               Boolean(u.is_base_unit),
-              Number(u.buy_price) || 0,
+              allowBuyPrice ? Number(u.buy_price) || 0 : 0,
               Number(u.sell_price) || 0,
               u.wholesale_price ? Number(u.wholesale_price) : null
             ]
@@ -63,9 +75,9 @@ export class VariantService {
         const moveId = generateUUIDv7();
         await client.query(
           `INSERT INTO stock_movements (
-            id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by
-          ) VALUES ($1, $2, $3, 'INITIAL_STOCK', 0, $4, $4, $5, 'Stok awal varian baru ditambahkan', 'Admin')`,
-          [moveId, productId, variantId, initialStock, `ADD-${sku}`]
+            id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by, user_id
+          ) VALUES ($1, $2, $3, 'INITIAL_STOCK', 0, $4, $4, $5, 'Stok awal varian baru ditambahkan', $6, $7)`,
+          [moveId, productId, variantId, initialStock, `ADD-${sku}`, actorName, actorId]
         );
       }
 

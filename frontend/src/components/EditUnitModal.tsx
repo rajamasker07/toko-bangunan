@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { VariantUnit } from '../types';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { X, CheckCircle2, Tag } from 'lucide-react';
 
 interface EditUnitModalProps {
@@ -20,6 +21,9 @@ export const EditUnitModal: React.FC<EditUnitModalProps> = ({
   onSuccess,
   showToast,
 }) => {
+  const { can } = useAuth();
+  const canViewBuyPrice = can('products:view_buy_price');
+
   const [unitName, setUnitName] = useState('');
   const [conversionFactor, setConversionFactor] = useState<number>(1);
   const [sellPrice, setSellPrice] = useState<number>(0);
@@ -56,7 +60,7 @@ export const EditUnitModal: React.FC<EditUnitModalProps> = ({
         unit_name: unitName.trim(),
         conversion_factor: unit.is_base_unit ? 1 : Number(conversionFactor) || 1,
         sell_price: Number(sellPrice),
-        buy_price: Number(buyPrice) || 0,
+        ...(canViewBuyPrice ? { buy_price: Number(buyPrice) || 0 } : {}),
         wholesale_price: wholesalePrice ? Number(wholesalePrice) : null,
       });
 
@@ -135,7 +139,7 @@ export const EditUnitModal: React.FC<EditUnitModalProps> = ({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className={canViewBuyPrice ? 'grid grid-cols-2 gap-2' : 'grid grid-cols-1 gap-2'}>
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Harga Jual (Rp):
@@ -150,18 +154,20 @@ export const EditUnitModal: React.FC<EditUnitModalProps> = ({
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Harga Modal (Rp):
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={buyPrice}
-                onChange={(e) => setBuyPrice(Number(e.target.value))}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
-              />
-            </div>
+            {canViewBuyPrice && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Harga Modal (Rp):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={buyPrice}
+                  onChange={(e) => setBuyPrice(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+                />
+              </div>
+            )}
           </div>
 
           <div>

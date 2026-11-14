@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import { Product, Category, Brand } from '../types';
 import { formatRupiah, formatStock } from '../utils/format';
+import { useAuth } from '../context/AuthContext';
 import { Pagination } from './common/Pagination';
+import { SearchableSelect, SearchableOption } from './common/SearchableSelect';
 import { 
   Search, 
   Filter, 
@@ -16,7 +18,9 @@ import {
   Package,
   ChevronRight,
   Edit2,
-  Power
+  Power,
+  Folder,
+  Tag
 } from 'lucide-react';
 
 interface ProductListViewProps {
@@ -48,7 +52,14 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   onToggleProductStatus,
   initialStockFilter = 'all',
 }) => {
+  const { can } = useAuth();
+  const canCreate = can('products:create');
+  const canUpdate = can('products:update');
+  const canDelete = can('products:delete');
+  const canAdjust = can('stock:adjust');
+
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [stockFilter, setStockFilter] = useState(initialStockFilter);
@@ -68,6 +79,30 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
     return list.sort((a, b) => a.localeCompare(b));
   }, [brands, products]);
 
+  // Searchable options for Category dropdown
+  const categoryOptions = useMemo<SearchableOption[]>(() => {
+    return categories.map((c) => {
+      const count = products.filter((p) => p.category_id === c.id).length;
+      return {
+        value: c.id,
+        label: c.name,
+        subtitle: `${count} produk`,
+      };
+    });
+  }, [categories, products]);
+
+  // Searchable options for Brand (Merek) dropdown
+  const brandOptions = useMemo<SearchableOption[]>(() => {
+    return brandList.map((brandName) => {
+      const count = products.filter((p) => p.brand && p.brand.toLowerCase() === brandName.toLowerCase()).length;
+      return {
+        value: brandName,
+        label: brandName,
+        subtitle: `${count} produk`,
+      };
+    });
+  }, [brandList, products]);
+
   // Pagination states
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
@@ -75,52 +110,58 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   // Reset to page 1 whenever filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, selectedCategory, selectedBrand, stockFilter, saleFilter]);
+  }, [deferredSearch, selectedCategory, selectedBrand, stockFilter, saleFilter]);
 
-  // Filter products client-side for ultra-responsive instant UX
-  const filteredProducts = products.filter((p) => {
-    const query = search.toLowerCase();
-    const matchSearch =
-      p.name.toLowerCase().includes(query) ||
-      p.sku.toLowerCase().includes(query) ||
-      (p.brand && p.brand.toLowerCase().includes(query)) ||
-      (p.category_name && p.category_name.toLowerCase().includes(query)) ||
-      p.variants?.some(
-        (v) =>
-          v.variant_name.toLowerCase().includes(query) ||
-          v.sku.toLowerCase().includes(query)
-      );
+  // Filter products client-side for ultra-responsive instant UX with useMemo to avoid re-calculating on unrelated renders
+  const filteredProducts = useMemo(() => {
+    const query = deferredSearch.trim().toLowerCase();
 
-    const matchCategory =
-      !selectedCategory || p.category_id === selectedCategory;
+    return products.filter((p) => {
+      const matchSearch =
+        !query ||
+        p.name.toLowerCase().includes(query) ||
+        p.sku.toLowerCase().includes(query) ||
+        (p.brand && p.brand.toLowerCase().includes(query)) ||
+        (p.category_name && p.category_name.toLowerCase().includes(query)) ||
+        p.variants?.some(
+          (v) =>
+            v.variant_name.toLowerCase().includes(query) ||
+            v.sku.toLowerCase().includes(query)
+        );
 
-    const matchBrand =
-      !selectedBrand || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
+      const matchCategory =
+        !selectedCategory || p.category_id === selectedCategory;
 
-    let matchStock = true;
-    if (stockFilter === 'low') {
-      matchStock = Boolean(p.has_low_stock && Number(p.total_stock) > 0);
-    } else if (stockFilter === 'out') {
-      matchStock = Number(p.total_stock) <= 0;
-    } else if (stockFilter === 'normal') {
-      matchStock = !p.has_low_stock && Number(p.total_stock) > 0;
-    }
+      const matchBrand =
+        !selectedBrand || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
 
-    let matchSale = true;
-    if (saleFilter === 'active') {
-      matchSale = p.is_active !== false;
-    } else if (saleFilter === 'inactive') {
-      matchSale = p.is_active === false;
-    }
+      let matchStock = true;
+      if (stockFilter === 'low') {
+        matchStock = Boolean(p.has_low_stock && Number(p.total_stock) > 0);
+      } else if (stockFilter === 'out') {
+        matchStock = Number(p.total_stock) <= 0;
+      } else if (stockFilter === 'normal') {
+        matchStock = !p.has_low_stock && Number(p.total_stock) > 0;
+      }
 
-    return matchSearch && matchCategory && matchBrand && matchStock && matchSale;
-  });
+      let matchSale = true;
+      if (saleFilter === 'active') {
+        matchSale = p.is_active !== false;
+      } else if (saleFilter === 'inactive') {
+        matchSale = p.is_active === false;
+      }
+
+      return matchSearch && matchCategory && matchBrand && matchStock && matchSale;
+    });
+  }, [products, deferredSearch, selectedCategory, selectedBrand, stockFilter, saleFilter]);
 
   // Paginated slice
-  const paginatedProducts = filteredProducts.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+  const paginatedProducts = useMemo(() => {
+    return filteredProducts.slice(
+      (currentPage - 1) * pageSize,
+      currentPage * pageSize
+    );
+  }, [filteredProducts, currentPage, pageSize]);
 
   const exportCSV = () => {
     const headers = ['ID (UUIDv7)', 'Nama Produk', 'SKU', 'Merk', 'Kategori', 'Total Stok', 'Batas Min', 'Varian', 'Harga Dasar'];
@@ -170,13 +211,15 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
             <Download className="w-3.5 h-3.5" />
             <span>Export CSV</span>
           </button>
-          <button
-            onClick={onOpenCreate}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Produk</span>
-          </button>
+          {canCreate && (
+            <button
+              onClick={onOpenCreate}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Produk</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -197,34 +240,34 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
           {/* Category Filter */}
           <div className="sm:col-span-4">
-            <select
+            <SearchableSelect
               value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
-            >
-              <option value="">Semua Kategori</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              onChange={(val) => setSelectedCategory(val)}
+              options={categoryOptions}
+              placeholder="Semua Kategori"
+              searchPlaceholder="Cari kategori..."
+              allowClear={true}
+              clearLabel="Semua Kategori"
+              size="sm"
+              icon={Folder}
+              className="w-full"
+            />
           </div>
 
           {/* Brand Filter (Merek) */}
           <div className="sm:col-span-3">
-            <select
+            <SearchableSelect
               value={selectedBrand}
-              onChange={(e) => setSelectedBrand(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
-            >
-              <option value="">Semua Merek ({brandList.length})</option>
-              {brandList.map((brandName) => (
-                <option key={brandName} value={brandName}>
-                  {brandName}
-                </option>
-              ))}
-            </select>
+              onChange={(val) => setSelectedBrand(val)}
+              options={brandOptions}
+              placeholder={`Semua Merek (${brandList.length})`}
+              searchPlaceholder="Cari merek..."
+              allowClear={true}
+              clearLabel="Semua Merek"
+              size="sm"
+              icon={Tag}
+              className="w-full"
+            />
           </div>
         </div>
 
@@ -372,12 +415,14 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                 Reset Filter
               </button>
             )}
-            <button
-              onClick={onOpenCreate}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700"
-            >
-              <Plus className="w-4 h-4" /> Tambah Produk Baru
-            </button>
+            {canCreate && (
+              <button
+                onClick={onOpenCreate}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700"
+              >
+                <Plus className="w-4 h-4" /> Tambah Produk Baru
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -400,6 +445,17 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                   const primaryUnit = firstVariant?.units?.find((u) => u.is_base_unit) || firstVariant?.units?.[0];
                   const isLow = product.has_low_stock && Number(product.total_stock) > 0;
                   const isOut = Number(product.total_stock) <= 0;
+                  const reservedStock = Number(
+                    (product as any).total_reserved_stock ??
+                    (product as any).reserved_stock ??
+                    product.variants?.reduce((sum, v) => sum + Number((v as any).reserved_stock || 0), 0) ??
+                    0
+                  );
+                  const availableStock = Number(
+                    (product as any).total_available_stock ??
+                    (product as any).available_stock ??
+                    Math.max(0, Number(product.total_stock) - reservedStock)
+                  );
 
                   return (
                     <tr
@@ -497,7 +553,14 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                             </span>
                           )}
                         </div>
-                        <span className="text-[10px] text-slate-400">
+                        {reservedStock > 0 && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-300 dark:border-amber-800">
+                              Diamankan: {formatStock(reservedStock)} | Siap Jual: {formatStock(availableStock)}
+                            </span>
+                          </div>
+                        )}
+                        <span className="text-[10px] text-slate-400 block mt-0.5">
                           Min alert: {formatStock(product.min_stock_alert)}
                         </span>
                       </td>
@@ -519,7 +582,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {onToggleProductStatus && (
+                          {canUpdate && onToggleProductStatus && (
                             <button
                               type="button"
                               onClick={() => onToggleProductStatus(product)}
@@ -546,7 +609,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                             <Eye className="w-4 h-4" />
                           </button>
 
-                          {onEditProduct && (
+                          {canUpdate && onEditProduct && (
                             <button
                               onClick={() => onEditProduct(product)}
                               className="p-1.5 rounded-lg text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
@@ -556,22 +619,26 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                             </button>
                           )}
 
-                          <button
-                            onClick={() => onOpenAdjust(firstVariant?.id || '')}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500 text-white hover:bg-amber-600 shadow-sm"
-                            title="Penyesuaian Stok Cepat"
-                          >
-                            <SlidersHorizontal className="w-3 h-3" />
-                            <span>Adjust</span>
-                          </button>
+                          {canAdjust && (
+                            <button
+                              onClick={() => onOpenAdjust(firstVariant?.id || '')}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500 text-white hover:bg-amber-600 shadow-sm"
+                              title="Penyesuaian Stok Cepat"
+                            >
+                              <SlidersHorizontal className="w-3 h-3" />
+                              <span>Adjust</span>
+                            </button>
+                          )}
 
-                          <button
-                            onClick={() => onDeleteProduct(product.id, product.name)}
-                            className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                            title="Hapus Produk"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canDelete && (
+                            <button
+                              onClick={() => onDeleteProduct(product.id, product.name)}
+                              className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                              title="Hapus Produk"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

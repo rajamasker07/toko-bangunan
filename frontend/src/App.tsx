@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { HardHat, Loader2, RefreshCw, LogOut, WifiOff } from 'lucide-react';
 import { api } from './services/api';
-import { Product, ProductVariant, Category, Brand, Supplier, DashboardSummary } from './types';
+import { Product, ProductVariant, Category, Brand, Supplier, DashboardSummary, ReservationAlertSummary } from './types';
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
+import { StockReservationView } from './components/StockReservationView';
 import { ProductListView } from './components/ProductListView';
 import { ProductDetailView } from './components/ProductDetailView';
 import { VariantDetailView } from './components/VariantDetailView';
@@ -17,12 +19,27 @@ import { CategoryManagementView } from './components/CategoryManagementView';
 import { BrandManagementView } from './components/BrandManagementView';
 import { SupplierManagementView } from './components/SupplierManagementView';
 import { DocsView } from './components/DocsView';
+import { LoginView } from './components/LoginView';
+import { ProfileAccountModal } from './components/ProfileAccountModal';
+import { UserManagementView } from './components/UserManagementView';
 import { useToast } from './components/Toast';
+import { useAuth } from './context/AuthContext';
 
 export const App: React.FC = () => {
   const { showToast } = useToast();
+  const {
+    user,
+    isAuthenticated,
+    isHydrating,
+    hydrationError,
+    retryHydration,
+    logout,
+    can,
+    canAccess,
+  } = useAuth();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
 
   // Independent Data States
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -40,6 +57,9 @@ export const App: React.FC = () => {
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loadingSuppliers, setLoadingSuppliers] = useState<boolean>(false);
+
+  const [reservationAlerts, setReservationAlerts] = useState<ReservationAlertSummary | null>(null);
+  const [loadingAlerts, setLoadingAlerts] = useState<boolean>(false);
 
   // Navigation drill-down state for "Data Produk"
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -152,14 +172,38 @@ export const App: React.FC = () => {
     }
   }, [showToast]);
 
+  const loadReservationAlerts = useCallback(async () => {
+    try {
+      setLoadingAlerts(true);
+      const alertData = await api.getReservationAlerts();
+      setReservationAlerts(alertData);
+    } catch (err: any) {
+      console.error('Failed to load reservation alerts:', err);
+    } finally {
+      setLoadingAlerts(false);
+    }
+  }, []);
+
+  // AbortController ref to cancel in-flight product queries on rapid tab switches or unmount
+  const loadProductsAbortRef = useRef<AbortController | null>(null);
+
   const loadProducts = useCallback(async () => {
+    // Abort previous in-flight product fetch if any
+    if (loadProductsAbortRef.current) {
+      loadProductsAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    loadProductsAbortRef.current = controller;
+
     try {
       setLoadingProducts(true);
       const [prodData, catFlat, brandData] = await Promise.all([
-        api.getProducts(),
+        api.getProducts(undefined, { signal: controller.signal }),
         categories.length === 0 ? api.getCategories(false) : Promise.resolve(categories),
         brands.length === 0 ? api.getBrands() : Promise.resolve(brands),
       ]);
+
+      if (controller.signal.aborted) return;
 
       setProducts(prodData);
       if (categories.length === 0) setCategories(catFlat);
@@ -179,22 +223,64 @@ export const App: React.FC = () => {
         return fresh;
       });
     } catch (err: any) {
+      if (err.name === 'AbortError' || controller.signal.aborted) {
+        return;
+      }
       console.error(err);
       showToast(err.message || 'Gagal memuat produk dari server', 'error');
     } finally {
-      setLoadingProducts(false);
+      if (!controller.signal.aborted) {
+        setLoadingProducts(false);
+      }
     }
   }, [categories, brands, showToast]);
 
-  // Initial load: summary only (lightweight boot)
+  // Clear cached application data on logout / 401
   useEffect(() => {
-    loadSummary();
-  }, [loadSummary]);
+    if (!isAuthenticated) {
+      setSummary(null);
+      setLoadingSummary(false);
+      setReservationAlerts(null);
+      setLoadingAlerts(false);
+      setProducts([]);
+      setCategories([]);
+      setCategoriesTree([]);
+      setBrands([]);
+      setSuppliers([]);
+      setSelectedProduct(null);
+      setSelectedVariant(null);
+      setIsCreateOpen(false);
+      setIsAdjustOpen(false);
+      setAdjustVariantId(undefined);
+      setIsAddVariantOpen(false);
+      setIsEditProductOpen(false);
+      setEditingProduct(null);
+      setIsEditVariantOpen(false);
+      setEditingVariant(null);
+      setIsProfileModalOpen(false);
+      setActiveTab('dashboard');
+    }
+  }, [isAuthenticated]);
 
-  // Tab switch listener: lazy load data for the active page
+  // Initial load: summary only once authenticated (lightweight boot)
   useEffect(() => {
+    if (!isAuthenticated) return;
+    loadSummary();
+  }, [isAuthenticated, loadSummary]);
+
+  // Route guard + tab switch listener: lazy load data for the active page
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    if (!canAccess(activeTab)) {
+      showToast('Anda tidak memiliki izin mengakses halaman tersebut.', 'error');
+      setActiveTab('dashboard');
+      return;
+    }
+
     if (activeTab === 'dashboard') {
       loadSummary();
+      loadReservationAlerts();
     } else if (activeTab === 'products') {
       loadProducts();
     } else if (activeTab === 'categories') {
@@ -206,11 +292,20 @@ export const App: React.FC = () => {
       loadBrands();
     } else if (activeTab === 'suppliers') {
       loadSuppliers();
+    } else if (activeTab === 'reservations') {
+      if (products.length === 0) {
+        loadProducts();
+      }
+      loadReservationAlerts();
     }
-  }, [activeTab]);
+  }, [activeTab, isAuthenticated, canAccess, can, products.length, loadSummary, loadReservationAlerts, loadProducts, loadCategories, loadBrands, loadSuppliers]);
 
   // Handle open adjust stock modal
   const handleOpenAdjust = (variantId?: string) => {
+    if (!can('stock:adjust')) {
+      showToast('Anda tidak memiliki izin melakukan penyesuaian stok.', 'error');
+      return;
+    }
     if (products.length === 0) {
       loadProducts();
     }
@@ -220,6 +315,10 @@ export const App: React.FC = () => {
 
   // Handle navigate to products with specific stock filter
   const handleNavigateToProducts = (filter = 'all') => {
+    if (!canAccess('products')) {
+      showToast('Anda tidak memiliki izin mengakses data produk.', 'error');
+      return;
+    }
     setProductStockFilter(filter);
     setSelectedProduct(null);
     setSelectedVariant(null);
@@ -228,18 +327,26 @@ export const App: React.FC = () => {
 
   // Handle tab change from sidebar
   const handleTabChange = (tab: ActiveTab) => {
+    if (!canAccess(tab)) {
+      showToast('Anda tidak memiliki izin mengakses menu tersebut.', 'error');
+      return;
+    }
     if (tab === 'products' && activeTab === 'products') {
       setSelectedProduct(null);
       setSelectedVariant(null);
     }
     if (tab === 'adjust') {
-      setAdjustInitialTab('form');
+      setAdjustInitialTab(can('stock:adjust') ? 'form' : 'history');
     }
     setActiveTab(tab);
   };
 
   // Handle delete product
   const handleDeleteProduct = async (id: string, name: string) => {
+    if (!can('products:delete')) {
+      showToast('Anda tidak memiliki izin menghapus produk.', 'error');
+      return;
+    }
     if (!confirm(`Hapus produk "${name}" dan seluruh variannya? Tindakan ini tidak dapat dibatalkan.`)) {
       return;
     }
@@ -258,6 +365,10 @@ export const App: React.FC = () => {
 
   // Handle toggle product sale status (Masih Dijual vs Sudah Tidak Dijual)
   const handleToggleProductStatus = async (prod: Product) => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin mengubah status produk.', 'error');
+      return;
+    }
     try {
       const res = await api.toggleProductStatus(prod.id);
       showToast(res.message || 'Status produk berhasil diperbarui', 'success');
@@ -270,6 +381,10 @@ export const App: React.FC = () => {
 
   // Handle toggle variant sale status (Masih Dijual vs Sudah Tidak Dijual)
   const handleToggleVariantStatus = async (variantId: string) => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin mengubah status varian.', 'error');
+      return;
+    }
     try {
       const res = await api.toggleVariantStatus(variantId);
       showToast(res.message || 'Status varian berhasil diperbarui', 'success');
@@ -282,6 +397,10 @@ export const App: React.FC = () => {
 
   // Handle open edit product
   const handleOpenEditProduct = (prod: Product) => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin mengedit produk.', 'error');
+      return;
+    }
     if (categoriesTree.length === 0) {
       loadCategories();
     }
@@ -291,17 +410,83 @@ export const App: React.FC = () => {
 
   // Handle open edit variant
   const handleOpenEditVariant = (variant: ProductVariant, prodName?: string) => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin mengedit varian.', 'error');
+      return;
+    }
     setEditingVariant(variant);
     setEditingVariantProductName(prodName || selectedProduct?.name || '');
     setIsEditVariantOpen(true);
   };
 
   const handleOpenCreateProduct = () => {
+    if (!can('products:create')) {
+      showToast('Anda tidak memiliki izin menambah produk baru.', 'error');
+      return;
+    }
     if (categoriesTree.length === 0) {
       loadCategories();
     }
     setIsCreateOpen(true);
   };
+
+  if (isHydrating) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-6">
+        <div className="p-4 rounded-2xl bg-gradient-to-tr from-amber-600 to-orange-500 text-white shadow-lg shadow-orange-500/25 mb-4">
+          <HardHat className="w-8 h-8" />
+        </div>
+        <div className="flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200">
+          <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
+          <span>Memverifikasi sesi pengguna...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated && hydrationError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-6">
+        <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl text-center space-y-4">
+          <div className="inline-flex p-3 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
+            <WifiOff className="w-7 h-7" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+              Koneksi ke Server Terputus
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+              {hydrationError}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+            <button
+              type="button"
+              onClick={() => retryHydration()}
+              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Coba Lagi
+            </button>
+            <button
+              type="button"
+              onClick={() => logout({ silent: true })}
+              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <LogOut className="w-4 h-4" />
+              Kembali ke Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginView />;
+  }
+
+  const isForcedPasswordChange = Boolean(user?.must_change_password);
 
   return (
     <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors overflow-hidden">
@@ -311,6 +496,8 @@ export const App: React.FC = () => {
         onNavigateToLowStock={() => handleNavigateToProducts('low')}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={toggleSidebar}
+        onOpenProfileModal={() => setIsProfileModalOpen(true)}
+        onNavigateToUsers={() => handleTabChange('users')}
       />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
@@ -319,6 +506,7 @@ export const App: React.FC = () => {
           activeTab={activeTab}
           setActiveTab={handleTabChange}
           lowStockCount={summary?.low_stock_count}
+          alertCount={(reservationAlerts?.overdue_count || 0) + (reservationAlerts?.due_soon_count || 0)}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={toggleSidebar}
         />
@@ -329,6 +517,8 @@ export const App: React.FC = () => {
             <DashboardView
               summary={summary}
               loading={loadingSummary}
+              reservationAlerts={reservationAlerts}
+              onNavigateToReservations={() => setActiveTab('reservations')}
               onOpenCreateProduct={handleOpenCreateProduct}
               onOpenStockAdjust={handleOpenAdjust}
               onNavigateToProducts={handleNavigateToProducts}
@@ -414,6 +604,18 @@ export const App: React.FC = () => {
             />
           )}
 
+          {activeTab === 'reservations' && (
+            <StockReservationView
+              products={products}
+              showToast={showToast}
+              onRefreshGlobal={() => {
+                loadProducts();
+                loadSummary();
+                loadReservationAlerts();
+              }}
+            />
+          )}
+
           {/* 3 Dedicated Standalone Pages for Master Data */}
           {activeTab === 'categories' && (
             <CategoryManagementView
@@ -434,7 +636,7 @@ export const App: React.FC = () => {
             />
           )}
 
-          {activeTab === 'suppliers' && (
+          {activeTab === 'suppliers' && canAccess('suppliers') && (
             <SupplierManagementView
               suppliers={suppliers}
               loading={loadingSuppliers}
@@ -443,78 +645,98 @@ export const App: React.FC = () => {
             />
           )}
 
+          {activeTab === 'users' && canAccess('users') && (
+            <UserManagementView showToast={showToast} />
+          )}
+
           {activeTab === 'docs' && <DocsView />}
         </main>
       </div>
 
       {/* Modals */}
-      <ProductFormModal
-        isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
-        categories={categoriesTree}
-        onSuccess={() => {
-          loadProducts();
-          loadSummary();
-        }}
-        showToast={showToast}
+      <ProfileAccountModal
+        isOpen={isProfileModalOpen || isForcedPasswordChange}
+        isForced={isForcedPasswordChange}
+        onClose={() => setIsProfileModalOpen(false)}
       />
 
-      <StockAdjustmentModal
-        isOpen={isAdjustOpen}
-        onClose={() => {
-          setIsAdjustOpen(false);
-          setAdjustVariantId(undefined);
-        }}
-        products={products}
-        initialVariantId={adjustVariantId}
-        onSuccess={() => {
-          loadProducts();
-          loadSummary();
-        }}
-        showToast={showToast}
-      />
+      {can('products:create') && (
+        <ProductFormModal
+          isOpen={isCreateOpen}
+          onClose={() => setIsCreateOpen(false)}
+          categories={categoriesTree}
+          onSuccess={() => {
+            loadProducts();
+            loadSummary();
+          }}
+          showToast={showToast}
+        />
+      )}
 
-      <AddVariantModal
-        isOpen={isAddVariantOpen}
-        onClose={() => setIsAddVariantOpen(false)}
-        productId={addVariantProductId}
-        productName={addVariantProductName}
-        onSuccess={() => {
-          loadProducts();
-          loadSummary();
-        }}
-        showToast={showToast}
-      />
+      {can('stock:adjust') && (
+        <StockAdjustmentModal
+          isOpen={isAdjustOpen}
+          onClose={() => {
+            setIsAdjustOpen(false);
+            setAdjustVariantId(undefined);
+          }}
+          products={products}
+          initialVariantId={adjustVariantId}
+          onSuccess={() => {
+            loadProducts();
+            loadSummary();
+          }}
+          showToast={showToast}
+        />
+      )}
 
-      <EditProductModal
-        isOpen={isEditProductOpen}
-        onClose={() => {
-          setIsEditProductOpen(false);
-          setEditingProduct(null);
-        }}
-        product={editingProduct}
-        categories={categoriesTree}
-        onSuccess={() => {
-          loadProducts();
-          loadSummary();
-        }}
-        showToast={showToast}
-      />
+      {can('products:create') && (
+        <AddVariantModal
+          isOpen={isAddVariantOpen}
+          onClose={() => setIsAddVariantOpen(false)}
+          productId={addVariantProductId}
+          productName={addVariantProductName}
+          onSuccess={() => {
+            loadProducts();
+            loadSummary();
+          }}
+          showToast={showToast}
+        />
+      )}
 
-      <EditVariantModal
-        isOpen={isEditVariantOpen}
-        onClose={() => {
-          setIsEditVariantOpen(false);
-          setEditingVariant(null);
-        }}
-        variant={editingVariant}
-        productName={editingVariantProductName}
-        onSuccess={() => {
-          loadProducts();
-          loadSummary();
-        }}
-        showToast={showToast}
-      />
+      {can('products:update') && (
+        <EditProductModal
+          isOpen={isEditProductOpen}
+          onClose={() => {
+            setIsEditProductOpen(false);
+            setEditingProduct(null);
+          }}
+          product={editingProduct}
+          categories={categoriesTree}
+          onSuccess={() => {
+            loadProducts();
+            loadSummary();
+          }}
+          showToast={showToast}
+        />
+      )}
+
+      {can('products:update') && (
+        <EditVariantModal
+          isOpen={isEditVariantOpen}
+          onClose={() => {
+            setIsEditVariantOpen(false);
+            setEditingVariant(null);
+          }}
+          variant={editingVariant}
+          productName={editingVariantProductName}
+          onSuccess={() => {
+            loadProducts();
+            loadSummary();
+          }}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 };

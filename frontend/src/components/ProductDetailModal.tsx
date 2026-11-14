@@ -1,6 +1,7 @@
 import React from 'react';
 import { Product, ProductVariant, VariantUnit } from '../types';
 import { formatRupiah, formatStock } from '../utils/format';
+import { useAuth } from '../context/AuthContext';
 import { X, Package, Layers, Tag, SlidersHorizontal, AlertTriangle, ShieldCheck } from 'lucide-react';
 
 interface ProductDetailModalProps {
@@ -14,6 +15,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   onClose,
   onAdjustStock,
 }) => {
+  const { can } = useAuth();
+  const canAdjust = can('stock:adjust');
+  const canViewBuyPrice = can('products:view_buy_price');
+
   if (!product) return null;
 
   return (
@@ -120,13 +125,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                         </p>
                       </div>
 
-                      <button
-                        onClick={() => onAdjustStock(variant.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-sm self-start sm:self-auto"
-                      >
-                        <SlidersHorizontal className="w-3.5 h-3.5" />
-                        <span>Adjust Stok</span>
-                      </button>
+                      {canAdjust && (
+                        <button
+                          onClick={() => onAdjustStock(variant.id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-sm self-start sm:self-auto"
+                        >
+                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                          <span>Adjust Stok</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* Unit Prices List */}
@@ -166,7 +173,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                                   {formatRupiah(u.sell_price)}
                                 </span>
                               </div>
-                              {Number(u.buy_price) > 0 && (
+                              {canViewBuyPrice && u.buy_price != null && Number(u.buy_price) > 0 && (
                                 <div className="flex justify-between text-slate-400 text-[11px]">
                                   <span>Harga Beli:</span>
                                   <span>{formatRupiah(u.buy_price)}</span>

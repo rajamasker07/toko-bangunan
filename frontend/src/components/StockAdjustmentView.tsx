@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Product } from '../types';
+import { useAuth } from '../context/AuthContext';
 import { StockAdjustmentForm } from './StockAdjustmentForm';
 import { StockMovementsView } from './StockMovementsView';
 import { 
@@ -25,15 +26,21 @@ export const StockAdjustmentView: React.FC<StockAdjustmentViewProps> = ({
   initialVariantId,
   initialTab = 'form',
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'form' | 'history'>(initialTab);
+  const { can } = useAuth();
+  const canAdjust = can('stock:adjust');
+  const resolvedInitialTab = canAdjust ? initialTab : 'history';
+
+  const [activeSubTab, setActiveSubTab] = useState<'form' | 'history'>(resolvedInitialTab);
   const [refreshMovementsTrigger, setRefreshMovementsTrigger] = useState<number>(0);
 
-  // Sync activeSubTab if initialTab changes
+  // Sync activeSubTab if initialTab or permission changes
   useEffect(() => {
-    if (initialTab) {
+    if (!canAdjust) {
+      setActiveSubTab('history');
+    } else if (initialTab) {
       setActiveSubTab(initialTab);
     }
-  }, [initialTab]);
+  }, [initialTab, canAdjust]);
 
   // Compute quick summary stats in a single pass with useMemo (prevents GC thrashing and lag)
   const { totalVariants, lowStockCount, outOfStockCount } = useMemo(() => {
@@ -77,18 +84,20 @@ export const StockAdjustmentView: React.FC<StockAdjustmentViewProps> = ({
 
         {/* View Switcher Tabs */}
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl self-start md:self-auto border border-slate-200 dark:border-slate-700">
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('form')}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              activeSubTab === 'form'
-                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-amber-500" />
-            <span>Formulir Penyesuaian</span>
-          </button>
+          {canAdjust && (
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('form')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeSubTab === 'form'
+                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-amber-500" />
+              <span>Formulir Penyesuaian</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setActiveSubTab('history')}
@@ -150,7 +159,7 @@ export const StockAdjustmentView: React.FC<StockAdjustmentViewProps> = ({
       </div>
 
       {/* Main Container */}
-      {activeSubTab === 'form' ? (
+      {canAdjust && activeSubTab === 'form' ? (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden flex flex-col">
           <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2">

@@ -8,7 +8,10 @@ export type StockActionType =
   | 'DAMAGED_EXPIRED'    // Barang rusak / pecah / cacat
   | 'RETURN_IN'          // Retur dari pelanggan
   | 'RETURN_OUT'         // Retur ke supplier
-  | 'MANUAL_ADJUSTMENT'; // Penyesuaian manual lainnya
+  | 'MANUAL_ADJUSTMENT'  // Penyesuaian manual lainnya
+  | 'RESERVATION_HOLD'   // Penahanan stok untuk reservasi titip barang
+  | 'RESERVATION_PICKUP' // Pengambilan stok barang titipan oleh pelanggan
+  | 'RESERVATION_RELEASE'; // Pelepasan penahanan stok karena reservasi batal
 
 export interface AdjustStockInput {
   variant_id: string;
@@ -17,6 +20,7 @@ export interface AdjustStockInput {
   movement_type: StockActionType;
   reference_no?: string;
   notes: string;
+  user_id?: string | null;
   created_by?: string;
 }
 
@@ -74,12 +78,13 @@ export class StockService {
       // 3. Create UUIDv7 for transaction log
       const movementId = generateUUIDv7();
       const refNo = input.reference_no || `ADJ-${Date.now().toString().slice(-6)}`;
-      const creator = input.created_by || 'Admin';
+      const creator = (input.created_by || 'Admin').slice(0, 100);
+      const userId = input.user_id || null;
 
       await client.query(
         `INSERT INTO stock_movements (
-          id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by, user_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           movementId,
           variant.product_id,
@@ -90,7 +95,8 @@ export class StockService {
           newStock,
           refNo,
           input.notes,
-          creator
+          creator,
+          userId
         ]
       );
 
@@ -107,7 +113,9 @@ export class StockService {
         current_stock: newStock,
         movement_type: input.movement_type,
         reference_no: refNo,
-        notes: input.notes
+        notes: input.notes,
+        created_by: creator,
+        user_id: userId
       };
     } catch (error) {
       await client.query('ROLLBACK');
@@ -170,10 +178,13 @@ export class StockService {
         sm.*,
         p.name as product_name,
         pv.variant_name,
-        pv.sku as variant_sku
+        pv.sku as variant_sku,
+        u.username as created_by_username,
+        u.role as created_by_role
       FROM stock_movements sm
       JOIN products p ON sm.product_id = p.id
       JOIN product_variants pv ON sm.variant_id = pv.id
+      LEFT JOIN users u ON sm.user_id = u.id
       ${whereClause}
       ORDER BY sm.created_at DESC
       LIMIT $${limitIndex} OFFSET $${offsetIndex}

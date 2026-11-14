@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Product, ProductVariant, StockMovement, VariantUnit } from '../types';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { formatRupiah, formatStock, formatDate } from '../utils/format';
 import { Pagination } from './common/Pagination';
 import { EditUnitModal } from './EditUnitModal';
@@ -47,6 +48,12 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
   onToggleVariantStatus,
   onRefresh,
 }) => {
+  const { can } = useAuth();
+  const canUpdateVariant = can('products:update');
+  const canAdjustStock = can('stock:adjust');
+  const canWritePricing = can('pricing:write');
+  const canViewBuyPrice = can('products:view_buy_price');
+
   // Movements log state with paging
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [totalMovements, setTotalMovements] = useState<number>(0);
@@ -267,37 +274,39 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
             </div>
 
             {/* Toggle Status Button */}
-            <button
-              type="button"
-              onClick={async () => {
-                if (onToggleVariantStatus) {
-                  onToggleVariantStatus(variant.id);
-                } else {
-                  try {
-                    const res = await api.toggleVariantStatus(variant.id);
-                    showToast(res.message || 'Status varian berhasil diubah', 'success');
-                    if (onRefresh) onRefresh();
-                  } catch (err: any) {
-                    showToast(err.message || 'Gagal mengubah status varian', 'error');
+            {canUpdateVariant && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (onToggleVariantStatus) {
+                    onToggleVariantStatus(variant.id);
+                  } else {
+                    try {
+                      const res = await api.toggleVariantStatus(variant.id);
+                      showToast(res.message || 'Status varian berhasil diubah', 'success');
+                      if (onRefresh) onRefresh();
+                    } catch (err: any) {
+                      showToast(err.message || 'Gagal mengubah status varian', 'error');
+                    }
                   }
+                }}
+                className={`flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs transition-all shrink-0 border ${
+                  variant.is_active !== false
+                    ? 'border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
+                    : 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                }`}
+                title={
+                  variant.is_active !== false
+                    ? 'Hentikan penjualan varian ini'
+                    : 'Aktifkan kembali penjualan varian ini'
                 }
-              }}
-              className={`flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs transition-all shrink-0 border ${
-                variant.is_active !== false
-                  ? 'border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
-                  : 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
-              }`}
-              title={
-                variant.is_active !== false
-                  ? 'Hentikan penjualan varian ini'
-                  : 'Aktifkan kembali penjualan varian ini'
-              }
-            >
-              <Power className="w-4 h-4" />
-              <span>{variant.is_active !== false ? 'Hentikan Penjualan Varian' : 'Jual Kembali Varian'}</span>
-            </button>
+              >
+                <Power className="w-4 h-4" />
+                <span>{variant.is_active !== false ? 'Hentikan Penjualan Varian' : 'Jual Kembali Varian'}</span>
+              </button>
+            )}
 
-            {onEditVariant && (
+            {canUpdateVariant && onEditVariant && (
               <button
                 onClick={() => onEditVariant(variant)}
                 className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all shrink-0 border border-slate-200 dark:border-slate-700"
@@ -309,13 +318,15 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
             )}
 
             {/* Quick Adjust Button */}
-            <button
-              onClick={() => onOpenAdjust(variant.id)}
-              className="flex items-center gap-2 px-4 py-3 rounded-xl font-bold text-xs bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all shrink-0"
-            >
-              <SlidersHorizontal className="w-4 h-4" />
-              <span>Penyesuaian Stok</span>
-            </button>
+            {canAdjustStock && (
+              <button
+                onClick={() => onOpenAdjust(variant.id)}
+                className="flex items-center gap-2 px-4 py-3 rounded-xl font-bold text-xs bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all shrink-0"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                <span>Penyesuaian Stok</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -360,13 +371,15 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
             </p>
           </div>
 
-          <button
-            onClick={() => setIsAddUnitOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Tambah Satuan Baru</span>
-          </button>
+          {canWritePricing && (
+            <button
+              onClick={() => setIsAddUnitOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Tambah Satuan Baru</span>
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -394,26 +407,30 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                       1 {u.unit_name} = {formatStock(u.conversion_factor)} unit dasar
                     </span>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingUnit(u);
-                      setIsEditUnitOpen(true);
-                    }}
-                    className="p-1 rounded-md text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors ml-1"
-                    title="Edit Satuan & Harga"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                  {!u.is_base_unit && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteUnit(u.id, u.unit_name)}
-                      className="p-1 rounded-md text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                      title="Hapus Satuan"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  {canWritePricing && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingUnit(u);
+                          setIsEditUnitOpen(true);
+                        }}
+                        className="p-1 rounded-md text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors ml-1"
+                        title="Edit Satuan & Harga"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      {!u.is_base_unit && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteUnit(u.id, u.unit_name)}
+                          className="p-1 rounded-md text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                          title="Hapus Satuan"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -425,7 +442,7 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                     {formatRupiah(u.sell_price)}
                   </span>
                 </div>
-                {Number(u.buy_price) > 0 && (
+                {canViewBuyPrice && u.buy_price != null && Number(u.buy_price) > 0 && (
                   <div className="flex justify-between text-slate-400 text-[11px]">
                     <span>Harga Modal:</span>
                     <span>{formatRupiah(u.buy_price)}</span>
@@ -561,9 +578,16 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                         </td>
 
                         <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
-                          <span className="flex items-center gap-1 text-[11px]">
+                          <span
+                            className="flex items-center gap-1 text-[11px]"
+                            title={
+                              m.created_by_username
+                                ? `@${m.created_by_username}`
+                                : undefined
+                            }
+                          >
                             <User className="w-3 h-3 text-slate-400" />
-                            {m.created_by || 'Admin'}
+                            {m.created_by || 'Sistem'}
                           </span>
                         </td>
                       </tr>
@@ -631,7 +655,7 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className={canViewBuyPrice ? 'grid grid-cols-2 gap-2' : 'grid grid-cols-1 gap-2'}>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     Harga Jual Standar:
@@ -646,18 +670,20 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Harga Modal / Beli:
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={newBuyPrice}
-                    onChange={(e) => setNewBuyPrice(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
-                  />
-                </div>
+                {canViewBuyPrice && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Harga Modal / Beli:
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={newBuyPrice}
+                      onChange={(e) => setNewBuyPrice(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+                    />
+                  </div>
+                )}
               </div>
 
               <div>

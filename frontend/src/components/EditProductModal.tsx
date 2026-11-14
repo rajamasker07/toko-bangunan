@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Product, Category, Brand, Supplier } from '../types';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { NumericInput } from './common/NumericInput';
 import { X, CheckCircle2, Package, FolderPlus, Award, Truck, AlertTriangle } from 'lucide-react';
 
@@ -21,6 +22,9 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   onSuccess,
   showToast,
 }) => {
+  const { can } = useAuth();
+  const canWriteMaster = can('master:write');
+
   const [name, setName] = useState('');
   const [sku, setSku] = useState('');
   const [barcode, setBarcode] = useState('');
@@ -304,14 +308,16 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                   Kategori / Sub-Kategori:
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setShowQuickCategory((prev) => !prev)}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline"
-                >
-                  <FolderPlus className="w-3.5 h-3.5" />
-                  <span>{showQuickCategory ? 'Tutup' : '+ Kategori Baru'}</span>
-                </button>
+                {canWriteMaster && (
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickCategory((prev) => !prev)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline"
+                  >
+                    <FolderPlus className="w-3.5 h-3.5" />
+                    <span>{showQuickCategory ? 'Tutup' : '+ Kategori Baru'}</span>
+                  </button>
+                )}
               </div>
               <select
                 value={categoryId}
@@ -323,7 +329,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
               </select>
 
               {/* Quick Category Form */}
-              {showQuickCategory && (
+              {canWriteMaster && showQuickCategory && (
                 <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2">
                   <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
                     Tambah Kategori Cepat:
@@ -370,14 +376,16 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                   Merk / Brand:
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setShowQuickBrand((prev) => !prev)}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline"
-                >
-                  <Award className="w-3.5 h-3.5" />
-                  <span>{showQuickBrand ? 'Tutup' : '+ Merk Baru'}</span>
-                </button>
+                {canWriteMaster && (
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickBrand((prev) => !prev)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline"
+                  >
+                    <Award className="w-3.5 h-3.5" />
+                    <span>{showQuickBrand ? 'Tutup' : '+ Merk Baru'}</span>
+                  </button>
+                )}
               </div>
               <select
                 value={brandId}
@@ -393,7 +401,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
               </select>
 
               {/* Quick Brand Form */}
-              {showQuickBrand && (
+              {canWriteMaster && showQuickBrand && (
                 <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2">
                   <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
                     Tambah Merk Baru:

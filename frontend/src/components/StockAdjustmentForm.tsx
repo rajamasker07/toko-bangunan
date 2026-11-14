@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { Product, VariantUnit } from '../types';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { formatStock } from '../utils/format';
 import { SearchableSelect, SearchableOption } from './common/SearchableSelect';
 import { 
@@ -21,7 +22,8 @@ import {
   Barcode,
   ShieldCheck,
   Boxes,
-  Folder
+  Folder,
+  User
 } from 'lucide-react';
 
 export interface FlattenedVariant {
@@ -190,6 +192,8 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
   showToast,
   isModal = false,
 }) => {
+  const { user } = useAuth();
+
   // Stepper State (Step 1: Cari Variant Produk -> Step 2: Metode Penyesuaian)
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
 
@@ -212,7 +216,6 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
   const [movementType, setMovementType] = useState<string>('STOCK_OPNAME');
   const [referenceNo, setReferenceNo] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
-  const [createdBy] = useState<string>('Admin Gudang');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -498,7 +501,6 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
         movement_type: movementType,
         reference_no: referenceNo.trim() || `ADJ-${Date.now().toString().slice(-6)}`,
         notes: finalNotes,
-        created_by: createdBy.trim() || 'Admin Gudang',
       });
 
       showToast(`Penyesuaian stok untuk "${currentVariant.product_name} (${currentVariant.variant_name})" berhasil disimpan!`, 'success');
@@ -529,7 +531,6 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
     amountInBaseUnit, 
     movementType, 
     referenceNo, 
-    createdBy, 
     currentStock, 
     showToast, 
     onSuccess
@@ -1227,6 +1228,17 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
               )}
             </div>
           )}
+
+          {/* Read-only authenticated officer badge */}
+          <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/70 text-xs">
+            <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300 font-semibold">
+              <User className="w-3.5 h-3.5 text-amber-500" />
+              Petugas Pencatat:
+            </span>
+            <span className="font-bold text-slate-900 dark:text-white">
+              {user ? `${user.full_name} (@${user.username})` : '-'}
+            </span>
+          </div>
 
           {/* Form Actions Footer */}
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">

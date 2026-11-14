@@ -70,7 +70,7 @@ export interface VariantUnit {
   unit_name: string;
   conversion_factor: number | string;
   is_base_unit: boolean;
-  buy_price: number | string;
+  buy_price: number | string | null;
   sell_price: number | string;
   wholesale_price?: number | string | null;
 }
@@ -81,6 +81,8 @@ export interface ProductVariant {
   sku: string;
   barcode?: string | null;
   current_stock: number | string;
+  reserved_stock?: number | string;
+  available_stock?: number | string;
   min_stock: number | string;
   is_active?: boolean;
   units: VariantUnit[];
@@ -108,6 +110,8 @@ export interface Product {
   is_active: boolean;
   has_variants: boolean;
   total_stock: number | string;
+  total_reserved_stock?: number | string;
+  total_available_stock?: number | string;
   variant_count: number;
   has_low_stock?: boolean;
   has_out_of_stock?: boolean;
@@ -129,7 +133,10 @@ export interface StockMovement {
   current_stock: number | string;
   reference_no: string | null;
   notes: string | null;
+  user_id?: string | null;
   created_by: string;
+  created_by_username?: string | null;
+  created_by_role?: UserRole | null;
   created_at: string;
 }
 
@@ -154,4 +161,139 @@ export interface DashboardSummary {
     product_name: string;
     category_name?: string;
   }>;
+}
+
+export type UserRole = 'owner' | 'admin' | 'gudang' | 'kasir';
+
+export type Permission =
+  | 'dashboard:read'
+  | 'products:read'
+  | 'products:create'
+  | 'products:update'
+  | 'products:delete'
+  | 'products:view_buy_price'
+  | 'pricing:write'
+  | 'master:read'
+  | 'suppliers:read'
+  | 'master:write'
+  | 'master:delete'
+  | 'stock:read'
+  | 'stock:adjust'
+  | 'users:read'
+  | 'users:manage'
+  | 'users:delete';
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  email: string | null;
+  full_name: string;
+  role: UserRole;
+  is_active: boolean;
+  must_change_password: boolean;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface AuthSessionPayload {
+  access_token: string;
+  refresh_token: string;
+  token_type: 'Bearer';
+  expires_in: number;
+  user: AuthUser;
+  permissions: Permission[];
+}
+
+export interface AuthMePayload {
+  user: AuthUser;
+  permissions: Permission[];
+}
+
+export interface UsersSummaryMetrics {
+  total: number;
+  active: number;
+  inactive: number;
+  by_role: Record<UserRole, number>;
+}
+
+export interface PaginatedUsersResponse {
+  items: AuthUser[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+  summary: UsersSummaryMetrics;
+}
+
+export interface ReservationItem {
+  id: string;
+  reservation_id: string;
+  product_id: string;
+  variant_id: string;
+  product_name: string;
+  variant_name: string;
+  sku: string;
+  unit_name: string;
+  conversion_factor: number;
+  qty_ordered_unit: number;
+  qty_reserved_base: number;
+  qty_picked_up_base: number;
+  qty_remaining_base: number;
+  base_unit_name?: string;
+}
+
+export interface ReservationPickupItem {
+  item_id: string;
+  qty_picked_up: number;
+  product_name?: string;
+  variant_name?: string;
+  unit_name?: string;
+  [key: string]: any;
+}
+
+export interface ReservationPickup {
+  id: string;
+  reservation_id: string;
+  receiver_name: string;
+  vehicle_plate?: string | null;
+  notes?: string | null;
+  handed_by: string;
+  items: ReservationPickupItem[] | any[];
+  picked_up_at: string;
+}
+
+export interface StockReservation {
+  id: string;
+  reservation_code: string;
+  invoice_no?: string | null;
+  customer_name: string;
+  customer_phone?: string | null;
+  customer_address?: string | null;
+  status: 'PENDING' | 'PARTIAL' | 'COMPLETED' | 'CANCELLED' | 'CLOSED_PARTIAL';
+  pickup_deadline: string;
+  notes?: string | null;
+  created_by: string;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
+  cancel_reason?: string | null;
+  settlement_type?: 'REFUND' | 'EXCHANGE' | 'DEPOSIT' | 'OTHER' | null;
+  settlement_notes?: string | null;
+  closed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  items: ReservationItem[];
+  pickups?: ReservationPickup[];
+  is_overdue?: boolean;
+  is_due_soon?: boolean;
+  days_remaining?: number;
+  days_overdue?: number;
+  total_items_count?: number;
+}
+
+export interface ReservationAlertSummary {
+  total_active: number;
+  overdue_count: number;
+  due_soon_count: number;
+  total_items_held: number;
 }

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Brand } from '../types';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { Pagination } from './common/Pagination';
 import { 
   Award, 
@@ -15,7 +16,8 @@ import {
   Building2,
   Calendar,
   Layers,
-  RefreshCw
+  RefreshCw,
+  Eye
 } from 'lucide-react';
 
 interface BrandManagementViewProps {
@@ -31,6 +33,10 @@ export const BrandManagementView: React.FC<BrandManagementViewProps> = ({
   onRefresh,
   showToast,
 }) => {
+  const { can } = useAuth();
+  const canWrite = can('master:write');
+  const canDelete = can('master:delete');
+
   const [search, setSearch] = useState('');
   const [filterUsage, setFilterUsage] = useState<'all' | 'used' | 'unused'>('all');
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -147,6 +153,12 @@ export const BrandManagementView: React.FC<BrandManagementViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
+          {!canWrite && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-700">
+              <Eye className="w-3.5 h-3.5" />
+              Mode Lihat Saja
+            </span>
+          )}
           {onRefresh && (
             <button
               onClick={onRefresh}
@@ -157,13 +169,15 @@ export const BrandManagementView: React.FC<BrandManagementViewProps> = ({
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-500' : ''}`} />
             </button>
           )}
-          <button
-            onClick={openCreateModal}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Merek Baru</span>
-          </button>
+          {canWrite && (
+            <button
+              onClick={openCreateModal}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Merek Baru</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -277,7 +291,7 @@ export const BrandManagementView: React.FC<BrandManagementViewProps> = ({
                     <th className="py-3 px-4">Kunci Validasi Anti-Duplikat</th>
                     <th className="py-3 px-4 text-center">Jumlah Produk</th>
                     <th className="py-3 px-4">ID Merek (UUIDv7)</th>
-                    <th className="py-3 px-4 text-right">Aksi</th>
+                    {(canWrite || canDelete) && <th className="py-3 px-4 text-right">Aksi</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -324,26 +338,32 @@ export const BrandManagementView: React.FC<BrandManagementViewProps> = ({
                           {b.id}
                         </td>
 
-                        <td className="py-3.5 px-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(b)}
-                              className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
-                              title="Edit Nama Merek"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(b)}
-                              className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                              title="Hapus Merek"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
+                        {(canWrite || canDelete) && (
+                          <td className="py-3.5 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {canWrite && (
+                                <button
+                                  type="button"
+                                  onClick={() => openEditModal(b)}
+                                  className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                                  title="Edit Nama Merek"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                              )}
+                              {canDelete && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(b)}
+                                  className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                                  title="Hapus Merek"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Supplier, SupplierSales, SalesPhone } from '../types';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { Pagination } from './common/Pagination';
 import { 
   Truck, 
@@ -25,7 +26,8 @@ import {
   Building2,
   ChevronDown,
   ChevronUp,
-  RefreshCw
+  RefreshCw,
+  Eye
 } from 'lucide-react';
 
 interface SupplierManagementViewProps {
@@ -50,6 +52,10 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
   onRefresh,
   showToast,
 }) => {
+  const { can } = useAuth();
+  const canWrite = can('master:write');
+  const canDelete = can('master:delete');
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [salesFilter, setSalesFilter] = useState<'all' | 'has_sales' | 'no_sales'>('all');
@@ -424,6 +430,12 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
+          {!canWrite && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-700">
+              <Eye className="w-3.5 h-3.5" />
+              Mode Lihat Saja
+            </span>
+          )}
           {onRefresh && (
             <button
               onClick={onRefresh}
@@ -434,13 +446,15 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-500' : ''}`} />
             </button>
           )}
-          <button
-            onClick={openCreateModal}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Supplier Baru</span>
-          </button>
+          {canWrite && (
+            <button
+              onClick={openCreateModal}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Supplier Baru</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -590,12 +604,14 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
             Coba ubah kata kunci pencarian atau tambahkan supplier baru.
           </p>
-          <button
-            onClick={openCreateModal}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700"
-          >
-            <Plus className="w-4 h-4" /> Tambah Supplier Baru
-          </button>
+          {canWrite && (
+            <button
+              onClick={openCreateModal}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700"
+            >
+              <Plus className="w-4 h-4" /> Tambah Supplier Baru
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -649,24 +665,30 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(s)}
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
-                        title="Edit Data Supplier"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSupplier(s)}
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                        title="Hapus Supplier"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {(canWrite || canDelete) && (
+                      <div className="flex items-center gap-1">
+                        {canWrite && (
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(s)}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                            title="Edit Data Supplier"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSupplier(s)}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                            title="Hapus Supplier"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Company Details Box */}
@@ -747,15 +769,17 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => openCreateSalesModal(s)}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors"
-                          title="Tambah Sales untuk supplier ini"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Tambah Sales</span>
-                        </button>
+                        {canWrite && (
+                          <button
+                            type="button"
+                            onClick={() => openCreateSalesModal(s)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors"
+                            title="Tambah Sales untuk supplier ini"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Tambah Sales</span>
+                          </button>
+                        )}
 
                         {salesCount > 0 && (
                           <button
@@ -778,13 +802,15 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
                             <p className="text-[11px] text-slate-400">
                               Belum ada kontak sales perwakilan untuk supplier ini.
                             </p>
-                            <button
-                              type="button"
-                              onClick={() => openCreateSalesModal(s)}
-                              className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
-                            >
-                              <Plus className="w-3 h-3" /> Tambah kontak sales sekarang
-                            </button>
+                            {canWrite && (
+                              <button
+                                type="button"
+                                onClick={() => openCreateSalesModal(s)}
+                                className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                              >
+                                <Plus className="w-3 h-3" /> Tambah kontak sales sekarang
+                              </button>
+                            )}
                           </div>
                         ) : (
                           salesList.map((sales) => {
@@ -824,39 +850,47 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
                                     </span>
                                   </div>
 
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    {/* Toggle Active Status Button */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleToggleSalesStatus(sales)}
-                                      className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
-                                        sales.is_active
-                                          ? 'text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30'
-                                          : 'text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
-                                      }`}
-                                      title={sales.is_active ? 'Nonaktifkan sales ini' : 'Aktifkan sales ini'}
-                                    >
-                                      {sales.is_active ? 'Nonaktifkan' : 'Aktifkan'}
-                                    </button>
+                                  {(canWrite || canDelete) && (
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {/* Toggle Active Status Button */}
+                                      {canWrite && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleToggleSalesStatus(sales)}
+                                          className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
+                                            sales.is_active
+                                              ? 'text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30'
+                                              : 'text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
+                                          }`}
+                                          title={sales.is_active ? 'Nonaktifkan sales ini' : 'Aktifkan sales ini'}
+                                        >
+                                          {sales.is_active ? 'Nonaktifkan' : 'Aktifkan'}
+                                        </button>
+                                      )}
 
-                                    <button
-                                      type="button"
-                                      onClick={() => openEditSalesModal(s, sales)}
-                                      className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40"
-                                      title="Edit Sales"
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
+                                      {canWrite && (
+                                        <button
+                                          type="button"
+                                          onClick={() => openEditSalesModal(s, sales)}
+                                          className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                                          title="Edit Sales"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
 
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteSales(sales)}
-                                      className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                                      title="Hapus Sales"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
+                                      {canDelete && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteSales(sales)}
+                                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                                          title="Hapus Sales"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
 
                                 {/* Multiple Phone Numbers List */}

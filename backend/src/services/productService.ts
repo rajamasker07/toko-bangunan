@@ -53,19 +53,41 @@ export interface CreateProductInput {
   variants?: CreateVariantInput[];
 }
 
+function redactProductBuyPrice<T extends { variants?: Array<{ units?: Array<Record<string, any>> }> }>(
+  product: T,
+  includeBuyPrice: boolean
+): T {
+  if (includeBuyPrice || !Array.isArray(product?.variants)) {
+    return product;
+  }
+
+  return {
+    ...product,
+    variants: product.variants.map((variant) => ({
+      ...variant,
+      units: Array.isArray(variant.units)
+        ? variant.units.map((unit) => ({ ...unit, buy_price: null }))
+        : variant.units,
+    })),
+  };
+}
+
 export class ProductService {
   /**
    * List all products with variant counts, total stock, category info, and low stock status
    */
-  static async getProducts(filters?: {
-    search?: string;
-    categoryId?: string;
-    brand?: string;
-    stockStatus?: 'all' | 'low' | 'out' | 'normal';
-    saleStatus?: 'all' | 'active' | 'inactive';
-    limit?: number;
-    offset?: number;
-  }) {
+  static async getProducts(
+    filters?: {
+      search?: string;
+      categoryId?: string;
+      brand?: string;
+      stockStatus?: 'all' | 'low' | 'out' | 'normal';
+      saleStatus?: 'all' | 'active' | 'inactive';
+      limit?: number;
+      offset?: number;
+    },
+    options?: { includeBuyPrice?: boolean }
+  ) {
     const params: any[] = [];
     const conditions: string[] = [];
 
@@ -121,6 +143,8 @@ export class ProductService {
         s.name as supplier_name,
         s.code as supplier_code,
         COALESCE(SUM(pv.current_stock), 0)::numeric as total_stock,
+        COALESCE(SUM(COALESCE(pv.reserved_stock, 0)), 0)::numeric as total_reserved_stock,
+        COALESCE(SUM(pv.current_stock - COALESCE(pv.reserved_stock, 0)), 0)::numeric as total_available_stock,
         COUNT(pv.id)::int as variant_count,
         BOOL_OR(pv.current_stock <= pv.min_stock) as has_low_stock,
         BOOL_OR(pv.current_stock = 0) as has_out_of_stock,
@@ -132,6 +156,8 @@ export class ProductService {
               'sku', pv2.sku,
               'barcode', pv2.barcode,
               'current_stock', pv2.current_stock,
+              'reserved_stock', COALESCE(pv2.reserved_stock, 0),
+              'available_stock', (pv2.current_stock - COALESCE(pv2.reserved_stock, 0)),
               'min_stock', pv2.min_stock,
               'is_active', pv2.is_active,
               'units', (
@@ -175,13 +201,14 @@ export class ProductService {
       }
     }
 
-    return rows;
+    const includeBuyPrice = options?.includeBuyPrice ?? true;
+    return rows.map((row) => redactProductBuyPrice(row, includeBuyPrice));
   }
 
   /**
    * Get single product detail by ID with all variants & unit pricing
    */
-  static async getProductById(id: string) {
+  static async getProductById(id: string, options?: { includeBuyPrice?: boolean }) {
     const sql = `
       SELECT 
         p.*,
@@ -195,6 +222,8 @@ export class ProductService {
               'sku', pv.sku,
               'barcode', pv.barcode,
               'current_stock', pv.current_stock,
+              'reserved_stock', COALESCE(pv.reserved_stock, 0),
+              'available_stock', (pv.current_stock - COALESCE(pv.reserved_stock, 0)),
               'min_stock', pv.min_stock,
               'is_active', pv.is_active,
               'units', (
@@ -225,7 +254,9 @@ export class ProductService {
       GROUP BY p.id, c.name, b.name, s.name, s.code
     `;
     const res = await query(sql, [id]);
-    return res.rows[0] || null;
+    const row = res.rows[0] || null;
+    if (!row) return null;
+    return redactProductBuyPrice(row, options?.includeBuyPrice ?? true);
   }
 
   /**
@@ -259,10 +290,21 @@ export class ProductService {
   /**
    * Create product: handles single-variant (auto-create variant) or multi-variant
    */
-  static async createProduct(data: CreateProductInput) {
+  static async createProduct(
+    data: CreateProductInput,
+    options?: {
+      userId?: string | null;
+      createdBy?: string;
+      allowBuyPrice?: boolean;
+    }
+  ) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      const allowBuyPrice = options?.allowBuyPrice ?? true;
+      const actorId = options?.userId || null;
+      const actorName = (options?.createdBy || 'Admin').slice(0, 100);
 
       const productId = generateUUIDv7();
       const productSku = data.sku || this.generateSKU(data.name);
@@ -314,7 +356,7 @@ export class ProductService {
 
         // Satuan harga for single variant
         const baseUnitName = data.base_unit_name || 'Pcs';
-        const buyPrice = Number(data.buy_price) || 0;
+        const buyPrice = allowBuyPrice ? Number(data.buy_price) || 0 : 0;
         const sellPrice = Number(data.sell_price) || 0;
         const wholesalePrice = data.wholesale_price ? Number(data.wholesale_price) : null;
 
@@ -342,7 +384,7 @@ export class ProductService {
               u.unit_name,
               Number(u.conversion_factor) || 1,
               Boolean(u.is_base_unit),
-              Number(u.buy_price) || 0,
+              allowBuyPrice ? Number(u.buy_price) || 0 : 0,
               Number(u.sell_price) || 0,
               u.wholesale_price ? Number(u.wholesale_price) : null
             ]
@@ -354,9 +396,9 @@ export class ProductService {
           const moveId = generateUUIDv7();
           await client.query(
             `INSERT INTO stock_movements (
-              id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by
-            ) VALUES ($1, $2, $3, 'INITIAL_STOCK', 0, $4, $4, $5, 'Stok awal produk baru', 'Admin')`,
-            [moveId, productId, variantId, initialStock, `INIT-${productSku}`]
+              id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by, user_id
+            ) VALUES ($1, $2, $3, 'INITIAL_STOCK', 0, $4, $4, $5, 'Stok awal produk baru', $6, $7)`,
+            [moveId, productId, variantId, initialStock, `INIT-${productSku}`, actorName, actorId]
           );
         }
       } else {
@@ -388,7 +430,7 @@ export class ProductService {
                   u.unit_name,
                   Number(u.conversion_factor) || 1,
                   Boolean(u.is_base_unit),
-                  Number(u.buy_price) || 0,
+                  allowBuyPrice ? Number(u.buy_price) || 0 : 0,
                   Number(u.sell_price) || 0,
                   u.wholesale_price ? Number(u.wholesale_price) : null
                 ]
@@ -401,16 +443,16 @@ export class ProductService {
             const moveId = generateUUIDv7();
             await client.query(
               `INSERT INTO stock_movements (
-                id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by
-              ) VALUES ($1, $2, $3, 'INITIAL_STOCK', 0, $4, $4, $5, 'Stok awal varian baru', 'Admin')`,
-              [moveId, productId, variantId, initialStock, `INIT-${variantSku}`]
+                id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by, user_id
+              ) VALUES ($1, $2, $3, 'INITIAL_STOCK', 0, $4, $4, $5, 'Stok awal varian baru', $6, $7)`,
+              [moveId, productId, variantId, initialStock, `INIT-${variantSku}`, actorName, actorId]
             );
           }
         }
       }
 
       await client.query('COMMIT');
-      return this.getProductById(productId);
+      return this.getProductById(productId, { includeBuyPrice: allowBuyPrice });
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -422,24 +464,28 @@ export class ProductService {
   /**
    * Update Product basic info
    */
-  static async updateProduct(id: string, data: {
-    name?: string;
-    sku?: string;
-    barcode?: string;
-    category_id?: string | null;
-    brand_id?: string | null;
-    brand?: string | null;
-    supplier_id?: string | null;
-    description?: string;
-    min_stock_alert?: number;
-    is_active?: boolean;
-    weight?: number | null;
-    length?: number | null;
-    width?: number | null;
-    height?: number | null;
-    material?: string | null;
-    specifications?: string | null;
-  }) {
+  static async updateProduct(
+    id: string,
+    data: {
+      name?: string;
+      sku?: string;
+      barcode?: string;
+      category_id?: string | null;
+      brand_id?: string | null;
+      brand?: string | null;
+      supplier_id?: string | null;
+      description?: string;
+      min_stock_alert?: number;
+      is_active?: boolean;
+      weight?: number | null;
+      length?: number | null;
+      width?: number | null;
+      height?: number | null;
+      material?: string | null;
+      specifications?: string | null;
+    },
+    options?: { includeBuyPrice?: boolean }
+  ) {
     const fields: string[] = [];
     const values: any[] = [];
 
@@ -507,14 +553,14 @@ export class ProductService {
       fields.push(`specifications = $${values.length}`);
     }
 
-    if (fields.length === 0) return this.getProductById(id);
+    if (fields.length === 0) return this.getProductById(id, options);
 
     values.push(id);
     fields.push('updated_at = CURRENT_TIMESTAMP');
 
     const sql = `UPDATE products SET ${fields.join(', ')} WHERE id = $${values.length} RETURNING *`;
     await query(sql, values);
-    return this.getProductById(id);
+    return this.getProductById(id, options);
   }
 
   /**
@@ -528,7 +574,7 @@ export class ProductService {
   /**
    * Toggle product sale status (is_active: masih dijual vs sudah tidak dijual)
    */
-  static async toggleProductStatus(id: string) {
+  static async toggleProductStatus(id: string, options?: { includeBuyPrice?: boolean }) {
     const res = await query(
       `UPDATE products 
        SET is_active = NOT is_active, updated_at = CURRENT_TIMESTAMP 
@@ -537,6 +583,6 @@ export class ProductService {
       [id]
     );
     if (!res.rows[0]) throw new Error('Produk tidak ditemukan');
-    return this.getProductById(id);
+    return this.getProductById(id, options);
   }
 }

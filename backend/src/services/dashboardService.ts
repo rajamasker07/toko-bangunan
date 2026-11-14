@@ -31,10 +31,13 @@ export class DashboardService {
         sm.*,
         p.name as product_name,
         pv.variant_name,
-        pv.sku as variant_sku
+        pv.sku as variant_sku,
+        u.username as created_by_username,
+        u.role as created_by_role
       FROM stock_movements sm
       JOIN products p ON sm.product_id = p.id
       JOIN product_variants pv ON sm.variant_id = pv.id
+      LEFT JOIN users u ON sm.user_id = u.id
       ORDER BY sm.created_at DESC
       LIMIT 8
     `);
