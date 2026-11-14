@@ -4,8 +4,8 @@ import { StockService } from '../services/stockService.js';
 export class StockController {
   static async adjust(req: Request, res: Response) {
     try {
-      const { variant_id, adjustment_mode, amount, movement_type, notes, reference_no, created_by } = req.body;
-      
+      const { variant_id, adjustment_mode, amount, movement_type, notes, reference_no } = req.body;
+
       if (!variant_id || !adjustment_mode || amount === undefined || !movement_type || !notes) {
         return res.status(400).json({ 
           success: false, 
@@ -20,7 +20,8 @@ export class StockController {
         movement_type,
         notes,
         reference_no,
-        created_by
+        user_id: req.user!.id,
+        created_by: req.user!.full_name,
       });
 
       res.json({ success: true, data: result, message: 'Penyesuaian stok berhasil disimpan!' });

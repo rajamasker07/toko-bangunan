@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Category, Brand, Supplier, UnitMaster } from '../types';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { NumericInput, formatIdNumber } from './common/NumericInput';
 import { ProfitBadge } from './common/ProfitBadge';
 import { UnitSelect } from './common/UnitSelect';
@@ -52,6 +53,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   onSuccess,
   showToast,
 }) => {
+  const { can } = useAuth();
+  const canViewBuyPrice = can('products:view_buy_price');
+  const canWriteMaster = can('master:write');
+
   const formRef = useRef<HTMLFormElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -818,7 +823,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             unit_name: baseUnitName,
             conversion_factor: 1,
             is_base_unit: true,
-            buy_price: Number(buyPrice) || 0,
+            ...(canViewBuyPrice ? { buy_price: Number(buyPrice) || 0 } : {}),
             sell_price: Number(sellPrice) || 0,
             wholesale_price: wholesalePrice ? Number(wholesalePrice) : null,
           },
@@ -828,7 +833,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               unit_name: u.unit_name,
               conversion_factor: Number(u.conversion_factor) || 1,
               is_base_unit: false,
-              buy_price: effectiveBuy,
+              ...(canViewBuyPrice ? { buy_price: effectiveBuy } : {}),
               sell_price: Number(u.sell_price) || 0,
               wholesale_price: null,
             };
@@ -840,7 +845,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           initial_stock: Number(initialStock) || 0,
           min_stock: Number(minStockAlert) || 5,
           base_unit_name: baseUnitName,
-          buy_price: Number(buyPrice) || 0,
+          ...(canViewBuyPrice ? { buy_price: Number(buyPrice) || 0 } : {}),
           sell_price: Number(sellPrice) || 0,
           wholesale_price: wholesalePrice ? Number(wholesalePrice) : null,
           units,
@@ -873,7 +878,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   unit_name: u.unit_name,
                   conversion_factor: Number(u.conversion_factor) || 1,
                   is_base_unit: Boolean(u.is_base_unit),
-                  buy_price: effectiveBuy,
+                  ...(canViewBuyPrice ? { buy_price: effectiveBuy } : {}),
                   sell_price: Number(u.sell_price) || 0,
                   wholesale_price: u.wholesale_price ? Number(u.wholesale_price) : null,
                 };
@@ -883,16 +888,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         };
       }
 
-      const res = await fetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Gagal menyimpan produk');
-      }
+      await api.createProduct(payload);
 
       showToast('Produk dan varian baru berhasil ditambahkan!', 'success');
       resetForm();
@@ -1092,14 +1088,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                     Kategori / Sub-Kategori:
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowQuickCategory((prev) => !prev)}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
-                  >
-                    <FolderPlus className="w-3.5 h-3.5" />
-                    <span>{showQuickCategory ? 'Tutup' : '+ Kategori Baru'}</span>
-                  </button>
+                  {canWriteMaster && (
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickCategory((prev) => !prev)}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
+                    >
+                      <FolderPlus className="w-3.5 h-3.5" />
+                      <span>{showQuickCategory ? 'Tutup' : '+ Kategori Baru'}</span>
+                    </button>
+                  )}
                 </div>
                 <SearchableSelect
                   value={categoryId}
@@ -1110,12 +1108,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   icon={FolderPlus}
                   allowClear={true}
                   clearLabel="-- Tanpa Kategori --"
-                  onAddNew={handleDirectAddCategory}
+                  onAddNew={canWriteMaster ? handleDirectAddCategory : undefined}
                   addNewLabel={(q) => `+ Buat Kategori Baru "${q}"`}
                 />
 
                 {/* Inline Quick Category Form */}
-                {showQuickCategory && (
+                {canWriteMaster && showQuickCategory && (
                   <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2 animate-in fade-in slide-in-from-top-1">
                     <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
                       Tambah Kategori Cepat:
@@ -1166,14 +1164,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                     Merk / Brand:
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowQuickBrand((prev) => !prev)}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
-                  >
-                    <Award className="w-3.5 h-3.5" />
-                    <span>{showQuickBrand ? 'Tutup' : '+ Merk Baru'}</span>
-                  </button>
+                  {canWriteMaster && (
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickBrand((prev) => !prev)}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
+                    >
+                      <Award className="w-3.5 h-3.5" />
+                      <span>{showQuickBrand ? 'Tutup' : '+ Merk Baru'}</span>
+                    </button>
+                  )}
                 </div>
                 <SearchableSelect
                   value={brandId}
@@ -1184,12 +1184,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   icon={Award}
                   allowClear={true}
                   clearLabel="-- Tanpa Merk (Polos / No Brand) --"
-                  onAddNew={handleDirectAddBrand}
+                  onAddNew={canWriteMaster ? handleDirectAddBrand : undefined}
                   addNewLabel={(q) => `+ Buat Merk Baru "${q}"`}
                 />
 
                 {/* Inline Quick Brand Form */}
-                {showQuickBrand && (
+                {canWriteMaster && showQuickBrand && (
                   <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2 animate-in fade-in slide-in-from-top-1">
                     <div>
                       <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
@@ -1233,14 +1233,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                     Mitra Supplier / Pemasok (Opsional):
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowQuickSupplier((prev) => !prev)}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
-                  >
-                    <Truck className="w-3.5 h-3.5" />
-                    <span>{showQuickSupplier ? 'Tutup' : '+ Supplier Baru'}</span>
-                  </button>
+                  {canWriteMaster && (
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickSupplier((prev) => !prev)}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
+                    >
+                      <Truck className="w-3.5 h-3.5" />
+                      <span>{showQuickSupplier ? 'Tutup' : '+ Supplier Baru'}</span>
+                    </button>
+                  )}
                 </div>
                 <SearchableSelect
                   value={supplierId}
@@ -1251,12 +1253,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   icon={Truck}
                   allowClear={true}
                   clearLabel="-- Tanpa Supplier Terpilih (Bisa Diatur Nanti) --"
-                  onAddNew={handleDirectAddSupplier}
+                  onAddNew={canWriteMaster ? handleDirectAddSupplier : undefined}
                   addNewLabel={(q) => `+ Buat Supplier Baru "${q}"`}
                 />
 
                 {/* Inline Quick Supplier Form */}
-                {showQuickSupplier && (
+                {canWriteMaster && showQuickSupplier && (
                   <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2 animate-in fade-in slide-in-from-top-1">
                     <div>
                       <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
@@ -1438,25 +1440,27 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                       Satuan Dasar (Stock Unit):
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => setShowQuickUnit((prev) => !prev)}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
-                    >
-                      <Scale className="w-3.5 h-3.5" />
-                      <span>{showQuickUnit ? 'Tutup' : '+ Satuan Baru'}</span>
-                    </button>
+                    {canWriteMaster && (
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickUnit((prev) => !prev)}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 hover:underline transition-colors"
+                      >
+                        <Scale className="w-3.5 h-3.5" />
+                        <span>{showQuickUnit ? 'Tutup' : '+ Satuan Baru'}</span>
+                      </button>
+                    )}
                   </div>
                   <UnitSelect
                     value={baseUnitName}
                     onChange={setBaseUnitName}
                     units={unitsList}
-                    onAddNewUnit={handleQuickAddUnit}
+                    onAddNewUnit={canWriteMaster ? handleQuickAddUnit : undefined}
                     placeholder="Pilih atau cari satuan..."
                   />
 
                   {/* Inline Quick Unit Form */}
-                  {showQuickUnit && (
+                  {canWriteMaster && showQuickUnit && (
                     <div className="mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2 animate-in fade-in slide-in-from-top-1">
                       <div>
                         <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
@@ -1524,20 +1528,22 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 </div>
 
                 {/* 3. Harga Beli / Modal (Rp) -> Urut lebih dulu sebelum harga jual */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Harga Beli / Modal (Rp):
-                  </label>
-                  <NumericInput
-                    value={buyPrice}
-                    onChange={setBuyPrice}
-                    allowDecimals={true}
-                    maxDecimals={2}
-                    prefixIcon={Coins}
-                    prefixText="Rp"
-                    placeholder="Contoh: 62.000"
-                  />
-                </div>
+                {canViewBuyPrice && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Harga Beli / Modal (Rp):
+                    </label>
+                    <NumericInput
+                      value={buyPrice}
+                      onChange={setBuyPrice}
+                      allowDecimals={true}
+                      maxDecimals={2}
+                      prefixIcon={Coins}
+                      prefixText="Rp"
+                      placeholder="Contoh: 62.000"
+                    />
+                  </div>
+                )}
 
                 {/* 4. Harga Jual Standar (Rp) */}
                 <div>
@@ -1574,7 +1580,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 </div>
 
                 {/* Ringkasan Keuntungan Produk Standar */}
-                {(buyPrice > 0 || sellPrice > 0) && (
+                {canViewBuyPrice && (buyPrice > 0 || sellPrice > 0) && (
                   <div className="sm:col-span-2 md:col-span-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -1602,7 +1608,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                       Satuan Harga Tambahan (Multi-Satuan e.g. Truk, Ikat, Dus):
                     </span>
                     <span className="text-[11px] text-slate-400">
-                      Tentukan harga jual untuk satuan kemasan yang lebih besar (Modal otomatis dihitung dari Modal Dasar × Isi).
+                      Tentukan harga jual untuk satuan kemasan yang lebih besar{canViewBuyPrice ? ' (Modal otomatis dihitung dari Modal Dasar × Isi)' : ''}.
                     </span>
                   </div>
                   <button
@@ -1616,10 +1622,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
                 {simpleAdditionalUnits.length > 0 && (
                   <div className="hidden sm:grid grid-cols-12 gap-2 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1 mb-1.5">
-                    <div className="col-span-3">Nama Satuan</div>
-                    <div className="col-span-2">Isi ({baseUnitName})</div>
-                    <div className="col-span-3">Harga Jual</div>
-                    <div className="col-span-3">Keuntungan</div>
+                    <div className={canViewBuyPrice ? 'col-span-3' : 'col-span-4'}>Nama Satuan</div>
+                    <div className={canViewBuyPrice ? 'col-span-2' : 'col-span-3'}>Isi ({baseUnitName})</div>
+                    <div className={canViewBuyPrice ? 'col-span-3' : 'col-span-4'}>Harga Jual</div>
+                    {canViewBuyPrice && <div className="col-span-3">Keuntungan</div>}
                     <div className="col-span-1 text-center">Aksi</div>
                   </div>
                 )}
@@ -1634,17 +1640,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                         key={u.id}
                         className="grid grid-cols-12 gap-2 items-center bg-slate-50/70 dark:bg-slate-800/40 p-2.5 sm:p-2 rounded-xl border border-slate-200/60 dark:border-slate-700/40"
                       >
-                        <div className="col-span-12 sm:col-span-3">
+                        <div className={canViewBuyPrice ? 'col-span-12 sm:col-span-3' : 'col-span-12 sm:col-span-4'}>
                           <UnitSelect
                             size="sm"
                             value={u.unit_name}
                             onChange={(val) => handleUpdateSimpleUnit(u.id, 'unit_name', val)}
                             units={unitsList}
-                            onAddNewUnit={handleQuickAddUnit}
+                            onAddNewUnit={canWriteMaster ? handleQuickAddUnit : undefined}
                             placeholder="Pilih atau cari satuan..."
                           />
                         </div>
-                        <div className="col-span-6 sm:col-span-2">
+                        <div className={canViewBuyPrice ? 'col-span-6 sm:col-span-2' : 'col-span-5 sm:col-span-3'}>
                           <NumericInput
                             size="sm"
                             allowDecimals={true}
@@ -1656,7 +1662,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                             onChange={(val) => handleUpdateSimpleUnit(u.id, 'conversion_factor', val)}
                           />
                         </div>
-                        <div className="col-span-6 sm:col-span-3">
+                        <div className={canViewBuyPrice ? 'col-span-6 sm:col-span-3' : 'col-span-5 sm:col-span-4'}>
                           <NumericInput
                             size="sm"
                             allowDecimals={true}
@@ -1669,15 +1675,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                             inputClassName="font-bold"
                           />
                         </div>
-                        <div className="col-span-10 sm:col-span-3 flex items-center min-w-0">
-                          <ProfitBadge
-                            buyPrice={autoModal}
-                            sellPrice={u.sell_price}
-                            compact={true}
-                            unitName={u.unit_name || 'Unit'}
-                          />
-                        </div>
-                        <div className="col-span-2 sm:col-span-1 flex items-center justify-center">
+                        {canViewBuyPrice && (
+                          <div className="col-span-10 sm:col-span-3 flex items-center min-w-0">
+                            <ProfitBadge
+                              buyPrice={autoModal}
+                              sellPrice={u.sell_price}
+                              compact={true}
+                              unitName={u.unit_name || 'Unit'}
+                            />
+                          </div>
+                        )}
+                        <div className={canViewBuyPrice ? 'col-span-2 sm:col-span-1 flex items-center justify-center' : 'col-span-2 sm:col-span-1 flex items-center justify-center'}>
                           <button
                             type="button"
                             onClick={() => handleRemoveSimpleUnit(u.id)}
@@ -1797,17 +1805,19 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                                     </span>
                                     <span>({baseUnit.unit_name || 'Satuan Pokok'})</span>
                                   </span>
-                                  <div className="min-w-0">
-                                    <ProfitBadge
-                                      buyPrice={baseUnit.buy_price}
-                                      sellPrice={baseUnit.sell_price}
-                                      compact={true}
-                                      unitName={baseUnit.unit_name}
-                                    />
-                                  </div>
+                                  {canViewBuyPrice && (
+                                    <div className="min-w-0">
+                                      <ProfitBadge
+                                        buyPrice={baseUnit.buy_price}
+                                        sellPrice={baseUnit.sell_price}
+                                        compact={true}
+                                        unitName={baseUnit.unit_name}
+                                      />
+                                    </div>
+                                  )}
                                 </div>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                <div className={`grid grid-cols-1 gap-2.5 ${canViewBuyPrice ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
                                   <div>
                                     <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
                                       Nama Satuan Dasar:
@@ -1817,25 +1827,27 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                                       value={baseUnit.unit_name}
                                       onChange={(val) => handleUnitChange(variant.id, baseUnit.id, 'unit_name', val)}
                                       units={unitsList}
-                                      onAddNewUnit={handleQuickAddUnit}
+                                      onAddNewUnit={canWriteMaster ? handleQuickAddUnit : undefined}
                                       placeholder="Pilih satuan..."
                                     />
                                   </div>
-                                  <div>
-                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
-                                      Harga Beli / Modal (Rp):
-                                    </label>
-                                    <NumericInput
-                                      size="sm"
-                                      value={baseUnit.buy_price}
-                                      onChange={(val) => handleUnitChange(variant.id, baseUnit.id, 'buy_price', val)}
-                                      allowDecimals={true}
-                                      maxDecimals={2}
-                                      prefixIcon={Coins}
-                                      prefixText="Rp"
-                                      placeholder="Modal Dasar"
-                                    />
-                                  </div>
+                                  {canViewBuyPrice && (
+                                    <div>
+                                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                                        Harga Beli / Modal (Rp):
+                                      </label>
+                                      <NumericInput
+                                        size="sm"
+                                        value={baseUnit.buy_price}
+                                        onChange={(val) => handleUnitChange(variant.id, baseUnit.id, 'buy_price', val)}
+                                        allowDecimals={true}
+                                        maxDecimals={2}
+                                        prefixIcon={Coins}
+                                        prefixText="Rp"
+                                        placeholder="Modal Dasar"
+                                      />
+                                    </div>
+                                  )}
                                   <div>
                                     <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
                                       Harga Jual Standar (Rp):
@@ -1864,7 +1876,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                                     Satuan Tambahan (Multi-Satuan e.g. Dus, Truk, Ikat):
                                   </span>
                                   <span className="text-[10px] text-slate-400">
-                                    Harga modal otomatis dihitung dari (Modal Dasar × Isi Konversi).
+                                    {canViewBuyPrice
+                                      ? 'Harga modal otomatis dihitung dari (Modal Dasar × Isi Konversi).'
+                                      : 'Atur satuan kemasan tambahan dan faktor konversinya.'}
                                   </span>
                                 </div>
                                 <button
@@ -1878,10 +1892,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
                               {additionalUnits.length > 0 && (
                                 <div className="hidden sm:grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1 mb-1.5">
-                                  <div className="col-span-3">Nama Satuan</div>
-                                  <div className="col-span-2">Isi ({baseUnit?.unit_name || 'Dasar'})</div>
-                                  <div className="col-span-3">Harga Jual</div>
-                                  <div className="col-span-3">Keuntungan</div>
+                                  <div className={canViewBuyPrice ? 'col-span-3' : 'col-span-4'}>Nama Satuan</div>
+                                  <div className={canViewBuyPrice ? 'col-span-2' : 'col-span-3'}>Isi ({baseUnit?.unit_name || 'Dasar'})</div>
+                                  <div className={canViewBuyPrice ? 'col-span-3' : 'col-span-4'}>Harga Jual</div>
+                                  {canViewBuyPrice && <div className="col-span-3">Keuntungan</div>}
                                   <div className="col-span-1 text-center">Aksi</div>
                                 </div>
                               )}
@@ -1895,17 +1909,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                                       key={u.id}
                                       className="grid grid-cols-12 gap-2 items-center bg-white dark:bg-slate-800/80 p-2 sm:p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700/60"
                                     >
-                                      <div className="col-span-12 sm:col-span-3">
+                                      <div className={canViewBuyPrice ? 'col-span-12 sm:col-span-3' : 'col-span-12 sm:col-span-4'}>
                                         <UnitSelect
                                           size="sm"
                                           value={u.unit_name}
                                           onChange={(val) => handleUnitChange(variant.id, u.id, 'unit_name', val)}
                                           units={unitsList}
-                                          onAddNewUnit={handleQuickAddUnit}
+                                          onAddNewUnit={canWriteMaster ? handleQuickAddUnit : undefined}
                                           placeholder="Pilih satuan..."
                                         />
                                       </div>
-                                      <div className="col-span-6 sm:col-span-2">
+                                      <div className={canViewBuyPrice ? 'col-span-6 sm:col-span-2' : 'col-span-5 sm:col-span-3'}>
                                         <NumericInput
                                           size="sm"
                                           value={u.conversion_factor}
@@ -1917,7 +1931,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                                           placeholder="Isi berapa"
                                         />
                                       </div>
-                                      <div className="col-span-6 sm:col-span-3">
+                                      <div className={canViewBuyPrice ? 'col-span-6 sm:col-span-3' : 'col-span-5 sm:col-span-4'}>
                                         <NumericInput
                                           size="sm"
                                           value={u.sell_price}
@@ -1930,14 +1944,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                                           inputClassName="font-bold"
                                         />
                                       </div>
-                                      <div className="col-span-10 sm:col-span-3 flex items-center min-w-0">
-                                        <ProfitBadge
-                                          buyPrice={autoModal}
-                                          sellPrice={u.sell_price}
-                                          compact={true}
-                                          unitName={u.unit_name || 'Unit'}
-                                        />
-                                      </div>
+                                      {canViewBuyPrice && (
+                                        <div className="col-span-10 sm:col-span-3 flex items-center min-w-0">
+                                          <ProfitBadge
+                                            buyPrice={autoModal}
+                                            sellPrice={u.sell_price}
+                                            compact={true}
+                                            unitName={u.unit_name || 'Unit'}
+                                          />
+                                        </div>
+                                      )}
                                       <div className="col-span-2 sm:col-span-1 flex items-center justify-center">
                                         <button
                                           type="button"

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { hasPermission } from '../config/rbac.js';
 import { VariantService } from '../services/variantService.js';
 
 export class VariantController {
@@ -9,7 +10,12 @@ export class VariantController {
       if (!variant_name) {
         return res.status(400).json({ success: false, message: 'Nama varian wajib diisi' });
       }
-      const variant = await VariantService.addVariant(productId, req.body);
+      const allowBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const variant = await VariantService.addVariant(productId, req.body, {
+        userId: req.user!.id,
+        createdBy: req.user!.full_name,
+        allowBuyPrice,
+      });
       res.status(201).json({ success: true, data: variant, message: 'Varian berhasil ditambahkan' });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });

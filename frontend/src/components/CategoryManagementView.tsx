@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Category } from '../types';
+import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { 
   FolderTree, 
   Plus, 
@@ -10,7 +12,8 @@ import {
   X,
   Search,
   GitFork,
-  RefreshCw
+  RefreshCw,
+  Eye
 } from 'lucide-react';
 
 interface CategoryManagementViewProps {
@@ -28,6 +31,10 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
   onRefresh,
   showToast,
 }) => {
+  const { can } = useAuth();
+  const canWrite = can('master:write');
+  const canDelete = can('master:delete');
+
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -59,6 +66,10 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWrite) {
+      showToast('Anda tidak memiliki izin mengelola kategori.', 'error');
+      return;
+    }
     if (!name.trim()) {
       showToast('Nama kategori tidak boleh kosong', 'error');
       return;
@@ -66,22 +77,16 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
 
     try {
       setIsSubmitting(true);
-      const url = editingCategory ? `/api/categories/${editingCategory.id}` : '/api/categories';
-      const method = editingCategory ? 'PUT' : 'POST';
+      const payload = {
+        name: name.trim(),
+        parent_id: parentId || null,
+        description: description.trim() || undefined,
+      };
 
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          parent_id: parentId || null,
-          description: description.trim() || undefined,
-        }),
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Gagal menyimpan kategori');
+      if (editingCategory) {
+        await api.updateCategory(editingCategory.id, payload);
+      } else {
+        await api.createCategory(payload);
       }
 
       showToast(
@@ -91,28 +96,27 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
       setIsModalOpen(false);
       onRefresh();
     } catch (err: any) {
-      showToast(err.message, 'error');
+      showToast(err.message || 'Gagal menyimpan kategori', 'error');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleDelete = async (cat: Category) => {
+    if (!canDelete) {
+      showToast('Anda tidak memiliki izin menghapus kategori.', 'error');
+      return;
+    }
     if (!confirm(`Apakah Anda yakin ingin menghapus kategori "${cat.name}"?`)) {
       return;
     }
 
     try {
-      const res = await fetch(`/api/categories/${cat.id}`, { method: 'DELETE' });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Gagal menghapus kategori');
-      }
-
+      await api.deleteCategory(cat.id);
       showToast('Kategori berhasil dihapus', 'success');
       onRefresh();
     } catch (err: any) {
-      showToast(err.message, 'error');
+      showToast(err.message || 'Gagal menghapus kategori', 'error');
     }
   };
 
@@ -189,30 +193,38 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 shrink-0">
-            <button
-              onClick={() => openCreateModal(cat.id)}
-              className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-xs font-semibold flex items-center gap-1"
-              title="Tambah Sub-Kategori di bawah kategori ini"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Sub-kategori</span>
-            </button>
-            <button
-              onClick={() => openEditModal(cat)}
-              className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800"
-              title="Edit Kategori"
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => handleDelete(cat)}
-              className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-              title="Hapus Kategori"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          {(canWrite || canDelete) && (
+            <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 shrink-0">
+              {canWrite && (
+                <>
+                  <button
+                    onClick={() => openCreateModal(cat.id)}
+                    className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-xs font-semibold flex items-center gap-1"
+                    title="Tambah Sub-Kategori di bawah kategori ini"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Sub-kategori</span>
+                  </button>
+                  <button
+                    onClick={() => openEditModal(cat)}
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    title="Edit Kategori"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              )}
+              {canDelete && (
+                <button
+                  onClick={() => handleDelete(cat)}
+                  className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                  title="Hapus Kategori"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {hasChildren && (
@@ -239,6 +251,12 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
+          {!canWrite && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-700">
+              <Eye className="w-3.5 h-3.5" />
+              Mode Lihat Saja
+            </span>
+          )}
           {onRefresh && (
             <button
               onClick={onRefresh}
@@ -249,13 +267,15 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-500' : ''}`} />
             </button>
           )}
-          <button
-            onClick={() => openCreateModal()}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Kategori Utama</span>
-          </button>
+          {canWrite && (
+            <button
+              onClick={() => openCreateModal()}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Kategori Utama</span>
+            </button>
+          )}
         </div>
       </div>
 

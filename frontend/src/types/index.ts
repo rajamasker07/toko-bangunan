@@ -70,7 +70,7 @@ export interface VariantUnit {
   unit_name: string;
   conversion_factor: number | string;
   is_base_unit: boolean;
-  buy_price: number | string;
+  buy_price: number | string | null;
   sell_price: number | string;
   wholesale_price?: number | string | null;
 }
@@ -129,7 +129,10 @@ export interface StockMovement {
   current_stock: number | string;
   reference_no: string | null;
   notes: string | null;
+  user_id?: string | null;
   created_by: string;
+  created_by_username?: string | null;
+  created_by_role?: UserRole | null;
   created_at: string;
 }
 
@@ -154,4 +157,67 @@ export interface DashboardSummary {
     product_name: string;
     category_name?: string;
   }>;
+}
+
+export type UserRole = 'owner' | 'admin' | 'gudang' | 'kasir';
+
+export type Permission =
+  | 'dashboard:read'
+  | 'products:read'
+  | 'products:create'
+  | 'products:update'
+  | 'products:delete'
+  | 'products:view_buy_price'
+  | 'pricing:write'
+  | 'master:read'
+  | 'suppliers:read'
+  | 'master:write'
+  | 'master:delete'
+  | 'stock:read'
+  | 'stock:adjust'
+  | 'users:read'
+  | 'users:manage'
+  | 'users:delete';
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  email: string | null;
+  full_name: string;
+  role: UserRole;
+  is_active: boolean;
+  must_change_password: boolean;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface AuthSessionPayload {
+  access_token: string;
+  refresh_token: string;
+  token_type: 'Bearer';
+  expires_in: number;
+  user: AuthUser;
+  permissions: Permission[];
+}
+
+export interface AuthMePayload {
+  user: AuthUser;
+  permissions: Permission[];
+}
+
+export interface UsersSummaryMetrics {
+  total: number;
+  active: number;
+  inactive: number;
+  by_role: Record<UserRole, number>;
+}
+
+export interface PaginatedUsersResponse {
+  items: AuthUser[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+  summary: UsersSummaryMetrics;
 }

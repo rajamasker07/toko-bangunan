@@ -1,6 +1,7 @@
 import React from 'react';
-import { DashboardSummary, ProductVariant } from '../types';
+import { DashboardSummary } from '../types';
 import { formatStock, formatDate } from '../utils/format';
+import { useAuth } from '../context/AuthContext';
 import { 
   Package, 
   Layers, 
@@ -11,8 +12,7 @@ import {
   Clock, 
   SlidersHorizontal,
   PlusCircle,
-  CheckCircle,
-  FileSpreadsheet
+  CheckCircle
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -32,6 +32,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateToProducts,
   onNavigateToMovements,
 }) => {
+  const { can } = useAuth();
+  const canCreateProduct = can('products:create');
+  const canAdjustStock = can('stock:adjust');
+  const canReadMovements = can('stock:read');
   if (loading || !summary) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -93,20 +97,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
         <div className="flex items-center gap-2.5 shrink-0">
-          <button
-            onClick={() => onOpenStockAdjust()}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20 transition-all shadow-sm"
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-            <span>Stock Opname</span>
-          </button>
-          <button
-            onClick={onOpenCreateProduct}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-white text-slate-900 hover:bg-amber-50 transition-all shadow-md"
-          >
-            <PlusCircle className="w-4 h-4 text-amber-600" />
-            <span>Tambah Produk</span>
-          </button>
+          {canAdjustStock && (
+            <button
+              onClick={() => onOpenStockAdjust()}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20 transition-all shadow-sm"
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+              <span>Stock Opname</span>
+            </button>
+          )}
+          {canCreateProduct && (
+            <button
+              onClick={onOpenCreateProduct}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-white text-slate-900 hover:bg-amber-50 transition-all shadow-md"
+            >
+              <PlusCircle className="w-4 h-4 text-amber-600" />
+              <span>Tambah Produk</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -205,12 +213,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </span>
                     </div>
                   </div>
-                  <button
-                    onClick={() => onOpenStockAdjust(item.variant_id)}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-sm"
-                  >
-                    Adjust
-                  </button>
+                  {canAdjustStock && (
+                    <button
+                      onClick={() => onOpenStockAdjust(item.variant_id)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-sm"
+                    >
+                      Adjust
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -233,12 +243,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </p>
               </div>
             </div>
-            <button
-              onClick={onNavigateToMovements}
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
-            >
-              Semua Log Mutasi
-            </button>
+            {canReadMovements && (
+              <button
+                onClick={onNavigateToMovements}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+              >
+                Semua Log Mutasi
+              </button>
+            )}
           </div>
 
           {summary.recent_movements.length === 0 ? (

@@ -1,9 +1,9 @@
 import React from 'react';
-import { 
-  LayoutDashboard, 
-  Package, 
-  SlidersHorizontal, 
-  FolderTree, 
+import {
+  LayoutDashboard,
+  Package,
+  SlidersHorizontal,
+  FolderTree,
   BookOpen,
   Sparkles,
   AlertTriangle,
@@ -13,8 +13,11 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Award,
-  Truck
+  Truck,
+  Users,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { AppTab } from '../utils/rbac';
 
 /** Format angka badge: tampilkan "99+" jika melebihi 99 agar badge tetap ringkas */
 const formatBadgeCount = (count: number): string => (count > 99 ? '99+' : String(count));
@@ -34,7 +37,7 @@ interface NavSection {
   items: NavItem[];
 }
 
-export type ActiveTab = 'dashboard' | 'products' | 'adjust' | 'categories' | 'brands' | 'suppliers' | 'docs';
+export type ActiveTab = AppTab;
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -44,14 +47,16 @@ interface SidebarProps {
   onToggleCollapse?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ 
-  activeTab, 
-  setActiveTab, 
+export const Sidebar: React.FC<SidebarProps> = ({
+  activeTab,
+  setActiveTab,
   lowStockCount = 0,
   isCollapsed = false,
   onToggleCollapse,
 }) => {
-  const navSections: NavSection[] = [
+  const { can, canAccess } = useAuth();
+
+  const rawSections: NavSection[] = [
     {
       title: 'Menu Utama',
       items: [
@@ -72,7 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         {
           id: 'adjust',
-          label: 'Penyesuaian Stok',
+          label: can('stock:adjust') ? 'Penyesuaian Stok' : 'Riwayat Mutasi Stok',
           icon: SlidersHorizontal,
           badge: null,
         },
@@ -102,6 +107,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ],
     },
     {
+      title: 'Administrasi',
+      items: [
+        {
+          id: 'users',
+          label: 'Manajemen Pengguna',
+          icon: Users,
+          badge: null,
+        },
+      ],
+    },
+    {
       title: 'Sistem & Bantuan',
       items: [
         {
@@ -115,8 +131,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
+  const navSections = rawSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => canAccess(item.id)),
+    }))
+    .filter((section) => section.items.length > 0);
+
   return (
-    <aside 
+    <aside
       className={`${
         isCollapsed ? 'w-20' : 'w-64'
       } bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between shrink-0 h-full overflow-hidden transition-all duration-300 ease-in-out select-none z-20`}
@@ -124,7 +147,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Top Navigation Items */}
       <div className={`flex-1 overflow-y-auto ${isCollapsed ? 'p-2' : 'p-3.5'} space-y-1`}>
         {/* Section Header with quick toggle */}
-        <div className={`flex items-center mb-2 ${isCollapsed ? 'justify-center py-1' : 'justify-between px-3 py-1'}`}>
+        <div
+          className={`flex items-center mb-2 ${
+            isCollapsed ? 'justify-center py-1' : 'justify-between px-3 py-1'
+          }`}
+        >
           {!isCollapsed ? (
             <>
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
@@ -181,8 +208,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         onClick={() => setActiveTab(item.id)}
                         title={isCollapsed ? item.label : undefined}
                         className={`w-full flex items-center rounded-xl font-medium text-sm transition-all text-left relative ${
-                          isCollapsed 
-                            ? 'justify-center p-3' 
+                          isCollapsed
+                            ? 'justify-center p-3'
                             : 'justify-between px-3.5 py-2.5'
                         } ${
                           isActive
@@ -190,15 +217,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
-                        <div className={`flex items-center min-w-0 ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
-                          <Icon 
+                        <div
+                          className={`flex items-center min-w-0 ${
+                            isCollapsed ? 'justify-center' : 'gap-3'
+                          }`}
+                        >
+                          <Icon
                             className={`shrink-0 transition-transform ${
                               isCollapsed ? 'w-5 h-5' : 'w-4 h-4'
                             } ${
-                              isActive 
-                                ? 'text-white dark:text-slate-950' 
+                              isActive
+                                ? 'text-white dark:text-slate-950'
                                 : 'text-slate-400 group-hover:text-slate-700 dark:text-slate-400 dark:group-hover:text-slate-200'
-                            }`} 
+                            }`}
                           />
                           {!isCollapsed && <span className="truncate">{item.label}</span>}
                         </div>
@@ -208,7 +239,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           <span
                             title={item.badgeTitle}
                             className={`ml-2 shrink-0 inline-flex items-center gap-0.5 text-[10px] leading-none px-1.5 py-1 rounded-full font-bold tabular-nums ${
-                              isActive ? 'bg-white/20 text-white dark:bg-slate-950/30 dark:text-slate-950' : item.badgeColor
+                              isActive
+                                ? 'bg-white/20 text-white dark:bg-slate-950/30 dark:text-slate-950'
+                                : item.badgeColor
                             }`}
                           >
                             {item.badgeIcon && <item.badgeIcon className="w-3 h-3" />}
@@ -278,7 +311,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </>
         ) : (
           <div className="flex flex-col items-center gap-2">
-            <div 
+            <div
               className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 cursor-help"
               title="UUIDv7 Architecture: Database terindeks berbasis waktu untuk efisiensi tinggi"
             >

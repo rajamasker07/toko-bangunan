@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Product, Category, Brand } from '../types';
 import { formatRupiah, formatStock } from '../utils/format';
+import { useAuth } from '../context/AuthContext';
 import { Pagination } from './common/Pagination';
 import { 
   Search, 
@@ -48,6 +49,12 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   onToggleProductStatus,
   initialStockFilter = 'all',
 }) => {
+  const { can } = useAuth();
+  const canCreate = can('products:create');
+  const canUpdate = can('products:update');
+  const canDelete = can('products:delete');
+  const canAdjust = can('stock:adjust');
+
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
@@ -170,13 +177,15 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
             <Download className="w-3.5 h-3.5" />
             <span>Export CSV</span>
           </button>
-          <button
-            onClick={onOpenCreate}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Produk</span>
-          </button>
+          {canCreate && (
+            <button
+              onClick={onOpenCreate}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Produk</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -372,12 +381,14 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                 Reset Filter
               </button>
             )}
-            <button
-              onClick={onOpenCreate}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700"
-            >
-              <Plus className="w-4 h-4" /> Tambah Produk Baru
-            </button>
+            {canCreate && (
+              <button
+                onClick={onOpenCreate}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700"
+              >
+                <Plus className="w-4 h-4" /> Tambah Produk Baru
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -519,7 +530,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {onToggleProductStatus && (
+                          {canUpdate && onToggleProductStatus && (
                             <button
                               type="button"
                               onClick={() => onToggleProductStatus(product)}
@@ -546,7 +557,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                             <Eye className="w-4 h-4" />
                           </button>
 
-                          {onEditProduct && (
+                          {canUpdate && onEditProduct && (
                             <button
                               onClick={() => onEditProduct(product)}
                               className="p-1.5 rounded-lg text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
@@ -556,22 +567,26 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                             </button>
                           )}
 
-                          <button
-                            onClick={() => onOpenAdjust(firstVariant?.id || '')}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500 text-white hover:bg-amber-600 shadow-sm"
-                            title="Penyesuaian Stok Cepat"
-                          >
-                            <SlidersHorizontal className="w-3 h-3" />
-                            <span>Adjust</span>
-                          </button>
+                          {canAdjust && (
+                            <button
+                              onClick={() => onOpenAdjust(firstVariant?.id || '')}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500 text-white hover:bg-amber-600 shadow-sm"
+                              title="Penyesuaian Stok Cepat"
+                            >
+                              <SlidersHorizontal className="w-3 h-3" />
+                              <span>Adjust</span>
+                            </button>
+                          )}
 
-                          <button
-                            onClick={() => onDeleteProduct(product.id, product.name)}
-                            className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                            title="Hapus Produk"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canDelete && (
+                            <button
+                              onClick={() => onDeleteProduct(product.id, product.name)}
+                              className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                              title="Hapus Produk"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

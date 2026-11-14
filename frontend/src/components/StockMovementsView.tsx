@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StockMovement } from '../types';
+import { api } from '../services/api';
+import { useToast } from './Toast';
 import { formatStock, formatDate } from '../utils/format';
 import { Pagination } from './common/Pagination';
 import { 
@@ -12,6 +14,7 @@ import {
 } from 'lucide-react';
 
 export const StockMovementsView: React.FC = () => {
+  const { showToast } = useToast();
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [totalMovements, setTotalMovements] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -24,20 +27,17 @@ export const StockMovementsView: React.FC = () => {
     try {
       setLoading(true);
       const offset = (currentPage - 1) * pageSize;
-      const params = new URLSearchParams();
-      if (selectedType !== 'ALL') params.append('type', selectedType);
-      if (search) params.append('search', search);
-      params.append('limit', String(pageSize));
-      params.append('offset', String(offset));
-
-      const res = await fetch(`/api/stock/movements?${params.toString()}`);
-      const json = await res.json();
-      if (json.success) {
-        setMovements(json.data.items || []);
-        setTotalMovements(json.data.total || 0);
-      }
-    } catch (err) {
+      const data = await api.getStockMovements({
+        type: selectedType,
+        search: search.trim() || undefined,
+        limit: pageSize,
+        offset,
+      });
+      setMovements(data.items || []);
+      setTotalMovements(data.total || 0);
+    } catch (err: any) {
       console.error(err);
+      showToast(err?.message || 'Gagal memuat riwayat mutasi stok', 'error');
     } finally {
       setLoading(false);
     }
@@ -219,9 +219,16 @@ export const StockMovementsView: React.FC = () => {
                         </td>
 
                         <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
-                          <span className="flex items-center gap-1 text-[11px]">
+                          <span
+                            className="flex items-center gap-1 text-[11px]"
+                            title={
+                              m.created_by_username
+                                ? `@${m.created_by_username}`
+                                : undefined
+                            }
+                          >
                             <User className="w-3 h-3 text-slate-400" />
-                            {m.created_by || 'Admin'}
+                            {m.created_by || 'Sistem'}
                           </span>
                         </td>
                       </tr>

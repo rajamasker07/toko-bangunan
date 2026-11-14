@@ -1,17 +1,27 @@
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
+import { env } from './config/env.js';
 import apiRouter from './routes/api.js';
 import { initializeDatabase } from './db/init.js';
 
-dotenv.config();
-
 const app = express();
-const port = process.env.PORT || 5000;
+const port = env.port;
 
 // Middlewares
-app.use(cors());
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || env.corsOrigins.includes('*') || env.corsOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`Origin ${origin} tidak diizinkan oleh kebijakan CORS`));
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 app.use(express.json());
 app.use(morgan('dev'));
 
@@ -46,7 +56,13 @@ app.use((_req, res) => {
 // Error handling middleware
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Unhandled server error:', err);
-  res.status(500).json({
+  const statusCode =
+    typeof err?.statusCode === 'number'
+      ? err.statusCode
+      : typeof err?.message === 'string' && err.message.includes('CORS')
+        ? 403
+        : 500;
+  res.status(statusCode).json({
     success: false,
     message: err.message || 'Terjadi kesalahan internal server'
   });
