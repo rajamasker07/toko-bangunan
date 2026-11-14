@@ -216,13 +216,16 @@ export const api = {
   },
 
   // Stock Reservations (Titip Simpan Barang / Ambil Nanti)
-  getReservations: (params?: {
-    status?: string;
-    search?: string;
-    deadlineStatus?: string;
-    limit?: number;
-    offset?: number;
-  }) => {
+  getReservations: (
+    params?: {
+      status?: string;
+      search?: string;
+      deadlineStatus?: string;
+      limit?: number;
+      offset?: number;
+    },
+    options?: RequestInit
+  ) => {
     const query = new URLSearchParams();
     if (params?.status && params.status !== 'ALL') query.append('status', params.status);
     if (params?.search) query.append('search', params.search);
@@ -230,12 +233,14 @@ export const api = {
     if (params?.limit) query.append('limit', String(params.limit));
     if (params?.offset !== undefined) query.append('offset', String(params.offset));
     const queryStr = query.toString() ? `?${query.toString()}` : '';
-    return fetchJson<{ items: StockReservation[]; total: number }>(`/reservations${queryStr}`);
+    return fetchJson<{ items: StockReservation[]; total: number }>(`/reservations${queryStr}`, options);
   },
 
-  getReservationById: (id: string) => fetchJson<StockReservation>(`/reservations/${id}`),
+  getReservationById: (id: string, options?: RequestInit) =>
+    fetchJson<StockReservation>(`/reservations/${id}`, options),
 
-  getReservationAlerts: () => fetchJson<ReservationAlertSummary>('/reservations/alerts'),
+  getReservationAlerts: (options?: RequestInit) =>
+    fetchJson<ReservationAlertSummary>('/reservations/alerts', options),
 
   createReservation: (data: {
     customer_name: string;

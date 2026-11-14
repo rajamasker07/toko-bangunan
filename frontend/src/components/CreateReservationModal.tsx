@@ -475,7 +475,7 @@ export const CreateReservationModal: React.FC<CreateReservationModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                Buat Titip Simpan Stok Baru
+                Buat Reservasi Baru
                 <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300">
                   Tahap {step} dari 3
                 </span>

@@ -81,11 +81,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         {
           id: 'reservations',
-          label: 'Titip Ambil (Reservasi)',
+          label: 'Reservasi',
           icon: ShoppingBag,
           badge: alertCount > 0 ? formatBadgeCount(alertCount) : null,
           badgeIcon: AlertTriangle,
-          badgeTitle: `${alertCount} titipan butuh perhatian (jatuh tempo/lewat batas)`,
+          badgeTitle: `${alertCount} reservasi butuh perhatian (jatuh tempo/lewat batas)`,
           badgeColor: 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400',
         },
       ],

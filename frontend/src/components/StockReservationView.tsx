@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useDeferredValue, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue, useCallback, useRef } from 'react';
 import {
   StockReservation,
   ReservationAlertSummary,
@@ -36,6 +36,7 @@ import {
   History,
   ShieldAlert,
   Users,
+  ChevronDown,
 } from 'lucide-react';
 
 interface StockReservationViewProps {
@@ -68,6 +69,9 @@ export interface CustomerGroup {
   urgencyLabel: string;
 }
 
+const PAGE_SIZE = 100;
+const CHUNK_SIZE = 12;
+
 export const StockReservationView: React.FC<StockReservationViewProps> = ({
   products,
   showToast,
@@ -77,15 +81,36 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
   const [reservations, setReservations] = useState<StockReservation[]>([]);
   const [alerts, setAlerts] = useState<ReservationAlertSummary | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const [totalServerCount, setTotalServerCount] = useState<number>(0);
+
+  // Progressive DOM rendering chunk limit (Lazy load windowing)
+  const [displayLimit, setDisplayLimit] = useState<number>(CHUNK_SIZE);
 
   // Level 1 states (Pilih Pelanggan)
   const [searchQuery, setSearchQuery] = useState<string>('');
   const deferredSearch = useDeferredValue(searchQuery);
-  const [customerFilter, setCustomerFilter] = useState<CustomerFilterTab>('ALL');
+  // Default filter: Belum diambil (PENDING)
+  const [customerFilter, setCustomerFilter] = useState<CustomerFilterTab>('PENDING');
 
   // Level 2 states (Detail Reservasi Pelanggan)
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
-  const [customerOrderFilter, setCustomerOrderFilter] = useState<CustomerOrderFilterTab>('ALL');
+  const [customerOrderFilter, setCustomerOrderFilter] = useState<CustomerOrderFilterTab>('ACTIVE');
+
+  // Lifecycle & Cancellation refs (Anti-memory-leak)
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState<boolean>(false);
@@ -113,25 +138,74 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
   const [settlementReason, setSettlementReason] = useState<string>('');
   const [savingClosePartial, setSavingClosePartial] = useState<boolean>(false);
 
-  // Load reservations and alert metrics
+  // Load reservations and alert metrics with AbortController to prevent memory leaks
   const loadData = useCallback(async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     try {
       const [resList, resAlerts] = await Promise.all([
-        api.getReservations({ limit: 150 }),
-        api.getReservationAlerts().catch(() => null),
+        api.getReservations({ limit: PAGE_SIZE, offset: 0 }, { signal: controller.signal }),
+        api.getReservationAlerts({ signal: controller.signal }).catch(() => null),
       ]);
+
+      if (!isMountedRef.current || controller.signal.aborted) return;
+
       setReservations(resList.items || []);
+      setTotalServerCount(resList.total || (resList.items?.length || 0));
       if (resAlerts) {
         setAlerts(resAlerts);
       }
     } catch (err: any) {
+      if (err.name === 'AbortError' || controller.signal.aborted) {
+        return; // aborted intentionally, prevent memory leak and toast spam
+      }
       console.error('Failed to load reservations:', err);
-      showToast(err.message || 'Gagal memuat data reservasi stok.', 'error');
+      if (isMountedRef.current) {
+        showToast(err.message || 'Gagal memuat data reservasi stok.', 'error');
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current && !controller.signal.aborted) {
+        setLoading(false);
+      }
     }
   }, [showToast]);
+
+  // Lazy load next page from server if database has more records
+  const loadMoreServer = useCallback(async () => {
+    if (loadingMore || loading || reservations.length >= totalServerCount) return;
+
+    setLoadingMore(true);
+    try {
+      const resList = await api.getReservations({
+        limit: PAGE_SIZE,
+        offset: reservations.length,
+      });
+
+      if (!isMountedRef.current) return;
+
+      if (resList.items && resList.items.length > 0) {
+        setReservations((prev) => {
+          const existingIds = new Set(prev.map((r) => r.id));
+          const newItems = resList.items.filter((r) => !existingIds.has(r.id));
+          return [...prev, ...newItems];
+        });
+        setTotalServerCount(resList.total);
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError' && isMountedRef.current) {
+        console.error('Failed to load more reservations:', err);
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setLoadingMore(false);
+      }
+    }
+  }, [loadingMore, loading, reservations.length, totalServerCount]);
 
   useEffect(() => {
     loadData();
@@ -408,6 +482,49 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
     });
   }, [customerGroups, customerFilter, deferredSearch]);
 
+  // Reset lazy render slice when search or filter changes
+  useEffect(() => {
+    setDisplayLimit(CHUNK_SIZE);
+  }, [deferredSearch, customerFilter]);
+
+  // Visible sliced customer groups for progressive DOM rendering
+  const visibleCustomerGroups = useMemo(() => {
+    return filteredCustomerGroups.slice(0, displayLimit);
+  }, [filteredCustomerGroups, displayLimit]);
+
+  // Lazy-load chunk observer for DOM virtualization and infinite scrolling
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          if (displayLimit < filteredCustomerGroups.length) {
+            setDisplayLimit((prev) => Math.min(prev + CHUNK_SIZE, filteredCustomerGroups.length));
+          } else if (reservations.length < totalServerCount && !loadingMore && !loading) {
+            loadMoreServer();
+          }
+        }
+      },
+      { rootMargin: '300px' }
+    );
+
+    observer.observe(sentinel);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [
+    displayLimit,
+    filteredCustomerGroups.length,
+    reservations.length,
+    totalServerCount,
+    loadingMore,
+    loading,
+    loadMoreServer,
+  ]);
+
   // Filtered orders for LEVEL 2 (selected customer)
   const currentCustomerOrders = useMemo(() => {
     if (!currentCustomer) return [];
@@ -423,9 +540,22 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
     });
   }, [currentCustomer, customerOrderFilter]);
 
-  // If selected customer has reservations missing pickup history, fetch on-demand
+  // Progressive render limit for customer orders in LEVEL 2
+  const [orderDisplayLimit, setOrderDisplayLimit] = useState<number>(10);
+  useEffect(() => {
+    setOrderDisplayLimit(10);
+  }, [selectedCustomer, customerOrderFilter]);
+
+  const visibleCustomerOrders = useMemo(() => {
+    return currentCustomerOrders.slice(0, orderDisplayLimit);
+  }, [currentCustomerOrders, orderDisplayLimit]);
+
+  // If selected customer has reservations missing pickup history, fetch on-demand with abort cleanup
   useEffect(() => {
     if (!currentCustomer) return;
+
+    const controller = new AbortController();
+    let isCancelled = false;
 
     const needsDetailFetch = currentCustomer.reservations.filter(
       (r) =>
@@ -434,17 +564,25 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
     );
 
     if (needsDetailFetch.length > 0) {
-      Promise.all(needsDetailFetch.map((r) => api.getReservationById(r.id).catch(() => null))).then(
-        (results) => {
-          setReservations((prev) =>
-            prev.map((res) => {
-              const fresh = results.find((d) => d && d.id === res.id);
-              return fresh ? fresh : res;
-            })
-          );
-        }
-      );
+      Promise.all(
+        needsDetailFetch.map((r) =>
+          api.getReservationById(r.id, { signal: controller.signal }).catch(() => null)
+        )
+      ).then((results) => {
+        if (isCancelled || !isMountedRef.current) return;
+        setReservations((prev) =>
+          prev.map((res) => {
+            const fresh = results.find((d) => d && d.id === res.id);
+            return fresh ? fresh : res;
+          })
+        );
+      });
     }
+
+    return () => {
+      isCancelled = true;
+      controller.abort();
+    };
   }, [currentCustomer]);
 
   // Helpers for Avatar
@@ -891,7 +1029,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
               className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-md flex items-center gap-2 transition-all"
             >
               <Plus className="w-4 h-4" />
-              <span>Buat Titip Ambil Baru</span>
+              <span>Buat Reservasi</span>
             </button>
           </div>
         </div>
@@ -1043,7 +1181,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
           </div>
         ) : (
           <div className="space-y-5">
-            {currentCustomerOrders.map((r) => {
+            {visibleCustomerOrders.map((r) => {
               const isActive = r.status === 'PENDING' || r.status === 'PARTIAL';
 
               return (
@@ -1336,6 +1474,21 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
                 </div>
               );
             })}
+
+            {orderDisplayLimit < currentCustomerOrders.length && (
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={() => setOrderDisplayLimit((prev) => prev + 10)}
+                  className="px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 shadow-2xs inline-flex items-center gap-2 transition-all"
+                >
+                  <ChevronDown className="w-4 h-4 text-amber-600" />
+                  <span>
+                    Muat Nota Lainnya ({visibleCustomerOrders.length} dari {currentCustomerOrders.length} Nota)
+                  </span>
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -1791,7 +1944,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
             className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-md flex items-center gap-2 transition-all"
           >
             <Plus className="w-4 h-4" />
-            <span>Buat Titip Ambil Baru</span>
+            <span>Buat Reservasi</span>
           </button>
         </div>
       </div>
@@ -1800,10 +1953,10 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Card 1: Total Titipan Aktif */}
         <div
-          onClick={() => setCustomerFilter('ALL')}
+          onClick={() => setCustomerFilter('PENDING')}
           className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-            customerFilter === 'ALL'
-              ? 'bg-blue-50/80 dark:bg-blue-950/30 border-blue-300 dark:border-blue-800 ring-2 ring-blue-500/20'
+            customerFilter === 'PENDING'
+              ? 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 ring-2 ring-amber-500/20'
               : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300'
           }`}
         >
@@ -1920,18 +2073,19 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
             )}
           </div>
 
-          {/* Filter Tabs */}
+          {/* Filter Tabs - Default: Belum Diambil (PENDING) */}
           <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto pb-1">
             <button
               type="button"
-              onClick={() => setCustomerFilter('ALL')}
+              onClick={() => setCustomerFilter('PENDING')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                customerFilter === 'ALL'
-                  ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-xs'
+                customerFilter === 'PENDING'
+                  ? 'bg-amber-600 text-white shadow-xs'
                   : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
               }`}
             >
-              Semua Pelanggan ({customerGroups.length})
+              Belum Diambil (PENDING) (
+              {customerGroups.filter((c) => c.reservations.some((r) => r.status === 'PENDING')).length})
             </button>
 
             <button
@@ -1946,19 +2100,6 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
               <AlertTriangle className="w-3.5 h-3.5" />
               Perlu Tindak Lanjut (
               {customerGroups.filter((c) => c.isOverdue || c.isDueSoon).length})
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setCustomerFilter('PENDING')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                customerFilter === 'PENDING'
-                  ? 'bg-amber-600 text-white shadow-xs'
-                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
-              }`}
-            >
-              Belum Diambil (PENDING) (
-              {customerGroups.filter((c) => c.reservations.some((r) => r.status === 'PENDING')).length})
             </button>
 
             <button
@@ -1986,6 +2127,18 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
               Selesai (
               {customerGroups.filter((c) => c.reservations.some((r) => r.status === 'COMPLETED' || r.status === 'CLOSED_PARTIAL')).length})
             </button>
+
+            <button
+              type="button"
+              onClick={() => setCustomerFilter('ALL')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                customerFilter === 'ALL'
+                  ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-xs'
+                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+              }`}
+            >
+              Semua Pelanggan ({customerGroups.length})
+            </button>
           </div>
         </div>
       </div>
@@ -1994,7 +2147,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
       {loading && customerGroups.length === 0 ? (
         <div className="p-16 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
           <RefreshCw className="w-8 h-8 animate-spin text-amber-500" />
-          <span className="font-semibold text-sm">Memuat direktori titip simpan pelanggan...</span>
+          <span className="font-semibold text-sm">Memuat data reservasi pelanggan...</span>
         </div>
       ) : filteredCustomerGroups.length === 0 ? (
         <div className="p-16 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
@@ -2005,116 +2158,145 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
           <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
             {deferredSearch
               ? `Tidak ada pelanggan atau nota yang cocok dengan pencarian "${deferredSearch}".`
-              : 'Belum ada data titip simpan pada filter yang dipilih saat ini.'}
+              : customerFilter === 'PENDING'
+              ? 'Tidak ada pesanan reservasi dengan status belum diambil (PENDING) saat ini.'
+              : 'Belum ada data reservasi pada filter yang dipilih saat ini.'}
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCustomerGroups.map((c) => {
-            return (
-              <div
-                key={c.id}
-                onClick={() => setSelectedCustomer(c.id)}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-amber-400 dark:hover:border-amber-500 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between space-y-4"
-              >
-                {/* Top Section: Avatar, Customer Name & Urgency Badge */}
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${getAvatarGradient(
-                          c.name
-                        )} flex items-center justify-center font-black text-base shadow-xs shrink-0`}
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {visibleCustomerGroups.map((c) => {
+              return (
+                <div
+                  key={c.id}
+                  onClick={() => setSelectedCustomer(c.id)}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-amber-400 dark:hover:border-amber-500 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between space-y-4"
+                >
+                  {/* Top Section: Avatar, Customer Name & Urgency Badge */}
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${getAvatarGradient(
+                            c.name
+                          )} flex items-center justify-center font-black text-base shadow-xs shrink-0`}
+                        >
+                          {getInitials(c.name)}
+                        </div>
+
+                        <div className="min-w-0">
+                          <h3 className="font-bold text-base text-slate-900 dark:text-white truncate group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                            {c.name}
+                          </h3>
+                          {c.phone ? (
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-xs text-slate-500 flex items-center gap-1">
+                                <Phone className="w-3 h-3 text-slate-400" />
+                                {c.phone}
+                              </span>
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCustomerWhatsAppAll(c);
+                                }}
+                                className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.2 rounded hover:bg-emerald-100 transition-colors"
+                                title="Kirim pesan WhatsApp"
+                              >
+                                <MessageCircle className="w-2.5 h-2.5" />
+                                WA
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">No. HP tidak dicatat</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0">{renderCustomerUrgencyBadge(c)}</div>
+                    </div>
+
+                    {/* Customer Address / Project location */}
+                    {c.address ? (
+                      <p
+                        className="text-xs text-slate-500 dark:text-slate-400 truncate flex items-center gap-1 bg-slate-50 dark:bg-slate-800/40 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-slate-800"
+                        title={c.address}
                       >
-                        {getInitials(c.name)}
+                        <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span className="truncate">{c.address}</span>
+                      </p>
+                    ) : (
+                      <div className="h-2" />
+                    )}
+
+                    {/* Stat Metrics Row */}
+                    <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                      <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
+                          Pesanan Aktif
+                        </span>
+                        <p className="font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-blue-500" />
+                          <span>{c.activeCount} Nota Aktif</span>
+                        </p>
                       </div>
 
-                      <div className="min-w-0">
-                        <h3 className="font-bold text-base text-slate-900 dark:text-white truncate group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
-                          {c.name}
-                        </h3>
-                        {c.phone ? (
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-xs text-slate-500 flex items-center gap-1">
-                              <Phone className="w-3 h-3 text-slate-400" />
-                              {c.phone}
-                            </span>
-                            <span
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleCustomerWhatsAppAll(c);
-                              }}
-                              className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.2 rounded hover:bg-emerald-100 transition-colors"
-                              title="Kirim pesan WhatsApp"
-                            >
-                              <MessageCircle className="w-2.5 h-2.5" />
-                              WA
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-slate-400 italic">No. HP tidak dicatat</span>
-                        )}
+                      <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
+                          Barang Diamankan
+                        </span>
+                        <p className="font-extrabold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                          <Package className="w-3.5 h-3.5" />
+                          <span>{formatStock(c.totalItemsHeld)} Unit</span>
+                        </p>
                       </div>
                     </div>
-
-                    <div className="shrink-0">{renderCustomerUrgencyBadge(c)}</div>
                   </div>
 
-                  {/* Customer Address / Project location */}
-                  {c.address ? (
-                    <p
-                      className="text-xs text-slate-500 dark:text-slate-400 truncate flex items-center gap-1 bg-slate-50 dark:bg-slate-800/40 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-slate-800"
-                      title={c.address}
-                    >
-                      <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                      <span className="truncate">{c.address}</span>
-                    </p>
-                  ) : (
-                    <div className="h-2" />
-                  )}
+                  {/* Footer Action Bar */}
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                    <span className="text-[11px] text-slate-400 font-medium">
+                      Total {c.totalOrders} Nota Reservasi
+                    </span>
 
-                  {/* Stat Metrics Row */}
-                  <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                    <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-                        Pesanan Aktif
-                      </span>
-                      <p className="font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-blue-500" />
-                        <span>{c.activeCount} Nota Aktif</span>
-                      </p>
-                    </div>
-
-                    <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-                        Barang Diamankan
-                      </span>
-                      <p className="font-extrabold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                        <Package className="w-3.5 h-3.5" />
-                        <span>{formatStock(c.totalItemsHeld)} Unit</span>
-                      </p>
-                    </div>
+                    <span className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                      <span>Pilih Pelanggan & Lihat Detail</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </span>
                   </div>
                 </div>
+              );
+            })}
+          </div>
 
-                {/* Footer Action Bar */}
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                  <span className="text-[11px] text-slate-400 font-medium">
-                    Total {c.totalOrders} Nota Reservasi
-                  </span>
+          {/* Lazy-Loading Progressive Sentinel & Load More Trigger */}
+          <div className="pt-2 flex flex-col items-center justify-center gap-2">
+            <div ref={sentinelRef} className="h-4 w-full pointer-events-none" />
 
-                  <span className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-                    <span>Pilih Pelanggan & Lihat Detail</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </span>
-                </div>
+            {loadingMore && (
+              <div className="flex items-center gap-2 text-xs font-semibold text-amber-600 bg-amber-50 dark:bg-amber-950/60 px-3.5 py-1.5 rounded-full border border-amber-200 dark:border-amber-800">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Memuat data reservasi berikutnya dari server...</span>
               </div>
-            );
-          })}
+            )}
+
+            {displayLimit < filteredCustomerGroups.length && (
+              <button
+                type="button"
+                onClick={() => setDisplayLimit((prev) => Math.min(prev + CHUNK_SIZE, filteredCustomerGroups.length))}
+                className="px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 shadow-2xs flex items-center gap-2 transition-all"
+              >
+                <ChevronDown className="w-4 h-4 text-amber-600" />
+                <span>
+                  Tampilkan Lebih Banyak ({visibleCustomerGroups.length} dari {filteredCustomerGroups.length} Pelanggan)
+                </span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Modal: Buat Titip Ambil Baru */}
+      {/* Modal: Buat Reservasi */}
       <CreateReservationModal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}

@@ -133,7 +133,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-extrabold text-slate-900 dark:text-white text-sm sm:text-base">
-                  Peringatan Titip Ambil Barang (Reservasi)
+                  Peringatan Reservasi Barang
                 </h3>
                 {(reservationAlerts?.overdue_count || 0) > 0 && (
                   <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-sm">
@@ -157,7 +157,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onClick={onNavigateToReservations}
               className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/25 transition-all shrink-0 whitespace-nowrap"
             >
-              <span>Kelola Titip Ambil</span>
+              <span>Kelola Reservasi</span>
               <ArrowUpRight className="w-4 h-4" />
             </button>
           )}
