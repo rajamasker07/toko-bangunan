@@ -52,9 +52,17 @@ export interface Supplier {
   created_at: string;
   updated_at: string;
   product_count?: number;
+  active_product_count?: number;
   sales?: SupplierSales[];
   sales_count?: number;
   active_sales_count?: number;
+  invoice_summary?: {
+    total_invoices: number;
+    unpaid_count: number;
+    overdue_count: number;
+    due_soon_count: number;
+    total_debt_amount: number;
+  };
 }
 
 export interface CreateSupplierInput {
@@ -149,6 +157,7 @@ export class SupplierService {
       SELECT 
         s.*,
         COUNT(DISTINCT p.id)::int AS product_count,
+        COUNT(DISTINCT CASE WHEN p.is_active = TRUE THEN p.id END)::int AS active_product_count,
         COALESCE(
           (
             SELECT json_agg(
@@ -168,7 +177,21 @@ export class SupplierService {
             WHERE ss.supplier_id = s.id
           ),
           '[]'::json
-        ) AS sales
+        ) AS sales,
+        COALESCE(
+          (
+            SELECT json_build_object(
+              'total_invoices', COUNT(si.id)::int,
+              'unpaid_count', COUNT(CASE WHEN si.status = 'UNPAID' OR si.status = 'OVERDUE' OR si.status = 'PARTIAL' THEN 1 END)::int,
+              'overdue_count', COUNT(CASE WHEN (si.total_amount - si.paid_amount) > 0 AND si.due_date < CURRENT_DATE THEN 1 END)::int,
+              'due_soon_count', COUNT(CASE WHEN (si.total_amount - si.paid_amount) > 0 AND si.due_date >= CURRENT_DATE AND si.due_date <= (CURRENT_DATE + INTERVAL '7 days') THEN 1 END)::int,
+              'total_debt_amount', COALESCE(SUM(si.total_amount - si.paid_amount), 0)::numeric
+            )
+            FROM supplier_invoices si
+            WHERE si.supplier_id = s.id
+          ),
+          '{}'::json
+        ) AS invoice_summary
       FROM suppliers s
       LEFT JOIN products p ON p.supplier_id = s.id
       ${whereClause}
@@ -182,6 +205,13 @@ export class SupplierService {
       sales: row.sales || [],
       sales_count: (row.sales || []).length,
       active_sales_count: (row.sales || []).filter((s: SupplierSales) => s.is_active).length,
+      invoice_summary: row.invoice_summary || {
+        total_invoices: 0,
+        unpaid_count: 0,
+        overdue_count: 0,
+        due_soon_count: 0,
+        total_debt_amount: 0,
+      },
     }));
   }
 
@@ -193,6 +223,7 @@ export class SupplierService {
       `SELECT 
         s.*,
         COUNT(DISTINCT p.id)::int AS product_count,
+        COUNT(DISTINCT CASE WHEN p.is_active = TRUE THEN p.id END)::int AS active_product_count,
         COALESCE(
           (
             SELECT json_agg(
@@ -212,7 +243,21 @@ export class SupplierService {
             WHERE ss.supplier_id = s.id
           ),
           '[]'::json
-        ) AS sales
+        ) AS sales,
+        COALESCE(
+          (
+            SELECT json_build_object(
+              'total_invoices', COUNT(si.id)::int,
+              'unpaid_count', COUNT(CASE WHEN si.status = 'UNPAID' OR si.status = 'OVERDUE' OR si.status = 'PARTIAL' THEN 1 END)::int,
+              'overdue_count', COUNT(CASE WHEN (si.total_amount - si.paid_amount) > 0 AND si.due_date < CURRENT_DATE THEN 1 END)::int,
+              'due_soon_count', COUNT(CASE WHEN (si.total_amount - si.paid_amount) > 0 AND si.due_date >= CURRENT_DATE AND si.due_date <= (CURRENT_DATE + INTERVAL '7 days') THEN 1 END)::int,
+              'total_debt_amount', COALESCE(SUM(si.total_amount - si.paid_amount), 0)::numeric
+            )
+            FROM supplier_invoices si
+            WHERE si.supplier_id = s.id
+          ),
+          '{}'::json
+        ) AS invoice_summary
        FROM suppliers s
        LEFT JOIN products p ON p.supplier_id = s.id
        WHERE s.id = $1
@@ -227,6 +272,13 @@ export class SupplierService {
       sales: row.sales || [],
       sales_count: (row.sales || []).length,
       active_sales_count: (row.sales || []).filter((s: SupplierSales) => s.is_active).length,
+      invoice_summary: row.invoice_summary || {
+        total_invoices: 0,
+        unpaid_count: 0,
+        overdue_count: 0,
+        due_soon_count: 0,
+        total_debt_amount: 0,
+      },
     };
   }
 

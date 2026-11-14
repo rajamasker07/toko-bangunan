@@ -10,6 +10,8 @@ import {
   StockMovement,
   Supplier,
   SupplierSales,
+  SupplierInvoice,
+  SupplierInvoiceSummary,
   UnitMaster,
   UserRole,
   StockReservation,
@@ -375,6 +377,58 @@ export const api = {
     }),
   deleteSupplierSales: (id: string) =>
     fetchJson<void>(`/sales/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Supplier Invoices & Due Dates (Nota Hutang & Jatuh Tempo)
+  getSupplierInvoices: (supplierId: string, filters?: { status?: string; search?: string }) => {
+    const params = new URLSearchParams();
+    if (filters?.status && filters.status !== 'all') params.append('status', filters.status);
+    if (filters?.search) params.append('search', filters.search);
+    const queryStr = params.toString() ? `?${params.toString()}` : '';
+    return fetchJson<SupplierInvoice[]>(`/suppliers/${supplierId}/invoices${queryStr}`);
+  },
+  getSupplierInvoiceSummary: (supplierId: string) =>
+    fetchJson<SupplierInvoiceSummary>(`/suppliers/${supplierId}/invoices/summary`),
+  createSupplierInvoice: (
+    supplierId: string,
+    data: {
+      invoice_number: string;
+      purchase_order_no?: string | null;
+      invoice_date: string;
+      due_date: string;
+      total_amount: number;
+      paid_amount?: number;
+      notes?: string | null;
+    }
+  ) =>
+    fetchJson<SupplierInvoice>(`/suppliers/${supplierId}/invoices`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateSupplierInvoice: (
+    id: string,
+    data: {
+      invoice_number?: string;
+      purchase_order_no?: string | null;
+      invoice_date?: string;
+      due_date?: string;
+      total_amount?: number;
+      paid_amount?: number;
+      notes?: string | null;
+    }
+  ) =>
+    fetchJson<SupplierInvoice>(`/supplier-invoices/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  recordSupplierInvoicePayment: (id: string, amount: number) =>
+    fetchJson<SupplierInvoice>(`/supplier-invoices/${id}/payment`, {
+      method: 'POST',
+      body: JSON.stringify({ amount }),
+    }),
+  deleteSupplierInvoice: (id: string) =>
+    fetchJson<void>(`/supplier-invoices/${id}`, {
       method: 'DELETE',
     }),
 
