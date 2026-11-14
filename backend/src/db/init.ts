@@ -273,6 +273,7 @@ export async function initializeDatabase() {
         sku VARCHAR(100) UNIQUE NOT NULL,
         barcode VARCHAR(100),
         current_stock NUMERIC(12, 2) DEFAULT 0 NOT NULL,
+        reserved_stock NUMERIC(12, 2) DEFAULT 0 NOT NULL,
         min_stock NUMERIC(12, 2) DEFAULT 5 NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -282,6 +283,11 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_product_variants_sku ON product_variants(sku);
       CREATE INDEX IF NOT EXISTS idx_product_variants_active ON product_variants(is_active);
     `);
+
+    // 3e. Kolom reserved_stock jika belum ada
+    if (!(await columnExists(client, 'product_variants', 'reserved_stock'))) {
+      await client.query('ALTER TABLE product_variants ADD COLUMN reserved_stock NUMERIC(12, 2) DEFAULT 0 NOT NULL;');
+    }
 
     // 4. Variant Units (Satuan Harga bertingkat / multi-unit)
     await client.query(`
@@ -553,7 +559,80 @@ export async function initializeDatabase() {
       }
     }
 
-    // 8. Bootstrap akun Owner awal jika tabel users masih kosong
+    // 8. Stock Reservations (Sistem Titip Barang & Reservasi Stok Pelanggan)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stock_reservations (
+        id UUID PRIMARY KEY,
+        reservation_code VARCHAR(50) UNIQUE NOT NULL,
+        invoice_no VARCHAR(100),
+        customer_name VARCHAR(150) NOT NULL,
+        customer_phone VARCHAR(50),
+        customer_address TEXT,
+        status VARCHAR(30) DEFAULT 'PENDING' NOT NULL,
+        pickup_deadline TIMESTAMPTZ NOT NULL,
+        notes TEXT,
+        created_by VARCHAR(100) DEFAULT 'Admin',
+        completed_at TIMESTAMPTZ,
+        cancelled_at TIMESTAMPTZ,
+        cancel_reason TEXT,
+        settlement_type VARCHAR(50),
+        settlement_notes TEXT,
+        closed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_stock_reservations_status ON stock_reservations(status);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservations_deadline ON stock_reservations(pickup_deadline);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservations_code ON stock_reservations(reservation_code);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservations_created ON stock_reservations(created_at DESC);
+    `);
+
+    // 8a. Kolom settlement_type, settlement_notes, closed_at jika belum ada
+    if (!(await columnExists(client, 'stock_reservations', 'settlement_type'))) {
+      await client.query('ALTER TABLE stock_reservations ADD COLUMN settlement_type VARCHAR(50);');
+    }
+    if (!(await columnExists(client, 'stock_reservations', 'settlement_notes'))) {
+      await client.query('ALTER TABLE stock_reservations ADD COLUMN settlement_notes TEXT;');
+    }
+    if (!(await columnExists(client, 'stock_reservations', 'closed_at'))) {
+      await client.query('ALTER TABLE stock_reservations ADD COLUMN closed_at TIMESTAMPTZ;');
+    }
+
+    // 8b. Stock Reservation Items (Rincian barang & unit yang ditahan)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stock_reservation_items (
+        id UUID PRIMARY KEY,
+        reservation_id UUID NOT NULL REFERENCES stock_reservations(id) ON DELETE CASCADE,
+        product_id UUID NOT NULL REFERENCES products(id),
+        variant_id UUID NOT NULL REFERENCES product_variants(id),
+        unit_name VARCHAR(50) NOT NULL,
+        conversion_factor NUMERIC(12, 4) DEFAULT 1 NOT NULL,
+        qty_ordered_unit NUMERIC(12, 2) NOT NULL,
+        qty_reserved_base NUMERIC(12, 2) NOT NULL,
+        qty_picked_up_base NUMERIC(12, 2) DEFAULT 0 NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_stock_reservation_items_res ON stock_reservation_items(reservation_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservation_items_variant ON stock_reservation_items(variant_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservation_items_product ON stock_reservation_items(product_id);
+    `);
+
+    // 8c. Stock Reservation Pickups (Log Riwayat Pengambilan Barang Bertahap / Penuh)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stock_reservation_pickups (
+        id UUID PRIMARY KEY,
+        reservation_id UUID NOT NULL REFERENCES stock_reservations(id) ON DELETE CASCADE,
+        receiver_name VARCHAR(150) NOT NULL,
+        vehicle_plate VARCHAR(50),
+        notes TEXT,
+        handed_by VARCHAR(100) DEFAULT 'Admin',
+        items JSONB NOT NULL,
+        picked_up_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_stock_reservation_pickups_res ON stock_reservation_pickups(reservation_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservation_pickups_date ON stock_reservation_pickups(picked_up_at DESC);
+    `);
+
+    // 9. Bootstrap akun Owner awal jika tabel users masih kosong
     await ensureBootstrapOwner(client);
 
     await client.query('COMMIT');

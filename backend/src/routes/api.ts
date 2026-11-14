@@ -7,6 +7,7 @@ import { ProductController } from '../controllers/productController.js';
 import { StockController } from '../controllers/stockController.js';
 import { SupplierController } from '../controllers/supplierController.js';
 import { UnitController } from '../controllers/unitController.js';
+import { ReservationController } from '../controllers/reservationController.js';
 import { UserController } from '../controllers/userController.js';
 import { VariantController } from '../controllers/variantController.js';
 import {
@@ -152,5 +153,15 @@ router.delete('/units/:id', requirePermission('pricing:write'), VariantControlle
 // Stock Adjustments & Movement Logs
 router.post('/stock/adjust', requirePermission('stock:adjust'), StockController.adjust);
 router.get('/stock/movements', requirePermission('stock:read'), StockController.movements);
+
+// Stock Reservations (Titip Barang & Alert Pengambilan Pelanggan)
+router.get('/reservations', ReservationController.list);
+router.get('/reservations/alerts', ReservationController.getAlertStats);
+router.get('/reservations/:id', ReservationController.getById);
+router.post('/reservations', ReservationController.create);
+router.post('/reservations/:id/pickup', ReservationController.pickup);
+router.patch('/reservations/:id/extend-deadline', ReservationController.extendDeadline);
+router.post('/reservations/:id/cancel', ReservationController.cancel);
+router.post('/reservations/:id/close-partial', ReservationController.closePartial);
 
 export default router;

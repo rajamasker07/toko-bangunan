@@ -15,6 +15,7 @@ import {
   Award,
   Truck,
   Users,
+  ShoppingBag,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { AppTab } from '../utils/rbac';
@@ -43,6 +44,7 @@ interface SidebarProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   lowStockCount?: number;
+  alertCount?: number;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -51,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
   lowStockCount = 0,
+  alertCount = 0,
   isCollapsed = false,
   onToggleCollapse,
 }) => {
@@ -80,6 +83,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: can('stock:adjust') ? 'Penyesuaian Stok' : 'Riwayat Mutasi Stok',
           icon: SlidersHorizontal,
           badge: null,
+        },
+        {
+          id: 'reservations',
+          label: 'Reservasi',
+          icon: ShoppingBag,
+          badge: alertCount > 0 ? formatBadgeCount(alertCount) : null,
+          badgeIcon: AlertTriangle,
+          badgeTitle: `${alertCount} reservasi butuh perhatian (jatuh tempo/lewat batas)`,
+          badgeColor: 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400',
         },
       ],
     },

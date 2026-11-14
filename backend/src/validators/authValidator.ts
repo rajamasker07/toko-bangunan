@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { USER_ROLES } from '../types/auth.js';
 
 export const usernameSchema = z
-  .string('Username wajib diisi')
+  .string({ required_error: 'Username wajib diisi', invalid_type_error: 'Username wajib berupa string' })
   .trim()
   .toLowerCase()
   .min(3, 'Username minimal 3 karakter')
@@ -13,7 +13,7 @@ export const usernameSchema = z
   );
 
 export const fullNameSchema = z
-  .string('Nama lengkap wajib diisi')
+  .string({ required_error: 'Nama lengkap wajib diisi', invalid_type_error: 'Nama lengkap wajib berupa string' })
   .trim()
   .min(2, 'Nama lengkap minimal 2 karakter')
   .max(100, 'Nama lengkap maksimal 100 karakter');
@@ -36,7 +36,7 @@ export const optionalEmailSchema = z
   });
 
 export const passwordPolicySchema = z
-  .string('Password wajib diisi')
+  .string({ required_error: 'Password wajib diisi', invalid_type_error: 'Password wajib berupa string' })
   .min(8, 'Password minimal 8 karakter')
   .max(128, 'Password maksimal 128 karakter')
   .refine(
@@ -46,14 +46,14 @@ export const passwordPolicySchema = z
 
 export const roleSchema = z.enum(
   USER_ROLES,
-  'Peran (role) harus salah satu dari: owner, admin, gudang, kasir'
+  { errorMap: () => ({ message: 'Peran (role) harus salah satu dari: owner, admin, gudang, kasir' }) }
 );
 
 export const loginSchema = z
   .object({
     identifier: z.string().trim().optional(),
     username: z.string().trim().optional(),
-    password: z.string('Password wajib diisi').min(1, 'Password wajib diisi'),
+    password: z.string({ required_error: 'Password wajib diisi' }).min(1, 'Password wajib diisi'),
   })
   .transform((data) => ({
     identifier: (data.identifier || data.username || '').trim().toLowerCase(),
@@ -66,7 +66,7 @@ export const loginSchema = z
 
 export const refreshTokenSchema = z.object({
   refresh_token: z
-    .string('Refresh token wajib dikirim')
+    .string({ required_error: 'Refresh token wajib dikirim' })
     .trim()
     .min(1, 'Refresh token wajib dikirim'),
 });
@@ -83,7 +83,7 @@ export const updateProfileSchema = z
 export const changePasswordSchema = z
   .object({
     current_password: z
-      .string('Password saat ini wajib diisi')
+      .string({ required_error: 'Password saat ini wajib diisi' })
       .min(1, 'Password saat ini wajib diisi'),
     new_password: passwordPolicySchema,
   })

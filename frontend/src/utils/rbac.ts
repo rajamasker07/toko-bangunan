@@ -4,6 +4,7 @@ export type AppTab =
   | 'dashboard'
   | 'products'
   | 'adjust'
+  | 'reservations'
   | 'categories'
   | 'brands'
   | 'suppliers'
@@ -175,6 +176,8 @@ export function canAccessTab(
       return hasPermission(permissions, role, 'products:read');
     case 'adjust':
       return hasAnyPermission(permissions, role, ['stock:adjust', 'stock:read']);
+    case 'reservations':
+      return hasAnyPermission(permissions, role, ['stock:adjust', 'stock:read', 'products:read']);
     case 'categories':
     case 'brands':
       return hasAnyPermission(permissions, role, ['master:write', 'products:create']);

@@ -81,6 +81,8 @@ export interface ProductVariant {
   sku: string;
   barcode?: string | null;
   current_stock: number | string;
+  reserved_stock?: number | string;
+  available_stock?: number | string;
   min_stock: number | string;
   is_active?: boolean;
   units: VariantUnit[];
@@ -108,6 +110,8 @@ export interface Product {
   is_active: boolean;
   has_variants: boolean;
   total_stock: number | string;
+  total_reserved_stock?: number | string;
+  total_available_stock?: number | string;
   variant_count: number;
   has_low_stock?: boolean;
   has_out_of_stock?: boolean;
@@ -220,4 +224,76 @@ export interface PaginatedUsersResponse {
   limit: number;
   total_pages: number;
   summary: UsersSummaryMetrics;
+}
+
+export interface ReservationItem {
+  id: string;
+  reservation_id: string;
+  product_id: string;
+  variant_id: string;
+  product_name: string;
+  variant_name: string;
+  sku: string;
+  unit_name: string;
+  conversion_factor: number;
+  qty_ordered_unit: number;
+  qty_reserved_base: number;
+  qty_picked_up_base: number;
+  qty_remaining_base: number;
+  base_unit_name?: string;
+}
+
+export interface ReservationPickupItem {
+  item_id: string;
+  qty_picked_up: number;
+  product_name?: string;
+  variant_name?: string;
+  unit_name?: string;
+  [key: string]: any;
+}
+
+export interface ReservationPickup {
+  id: string;
+  reservation_id: string;
+  receiver_name: string;
+  vehicle_plate?: string | null;
+  notes?: string | null;
+  handed_by: string;
+  items: ReservationPickupItem[] | any[];
+  picked_up_at: string;
+}
+
+export interface StockReservation {
+  id: string;
+  reservation_code: string;
+  invoice_no?: string | null;
+  customer_name: string;
+  customer_phone?: string | null;
+  customer_address?: string | null;
+  status: 'PENDING' | 'PARTIAL' | 'COMPLETED' | 'CANCELLED' | 'CLOSED_PARTIAL';
+  pickup_deadline: string;
+  notes?: string | null;
+  created_by: string;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
+  cancel_reason?: string | null;
+  settlement_type?: 'REFUND' | 'EXCHANGE' | 'DEPOSIT' | 'OTHER' | null;
+  settlement_notes?: string | null;
+  closed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  items: ReservationItem[];
+  pickups?: ReservationPickup[];
+  is_overdue?: boolean;
+  is_due_soon?: boolean;
+  days_remaining?: number;
+  days_overdue?: number;
+  total_items_count?: number;
+}
+
+export interface ReservationAlertSummary {
+  total_active: number;
+  overdue_count: number;
+  due_soon_count: number;
+  total_items_held: number;
 }
