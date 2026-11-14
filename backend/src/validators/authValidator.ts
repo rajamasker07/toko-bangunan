@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { USER_ROLES } from '../types/auth.js';
+import { isValidRole } from '../config/rbac.js';
 
 export const usernameSchema = z
   .string({ required_error: 'Username wajib diisi', invalid_type_error: 'Username wajib berupa string' })
@@ -44,10 +44,16 @@ export const passwordPolicySchema = z
     'Password harus mengandung minimal 1 huruf dan 1 angka'
   );
 
-export const roleSchema = z.enum(
-  USER_ROLES,
-  { errorMap: () => ({ message: 'Peran (role) harus salah satu dari: owner, admin, gudang, kasir' }) }
-);
+export const roleSchema = z
+  .string({ required_error: 'Peran (role) wajib diisi', invalid_type_error: 'Peran (role) wajib berupa string' })
+  .trim()
+  .toLowerCase()
+  .min(2, 'Kode peran minimal 2 karakter')
+  .max(50, 'Kode peran maksimal 50 karakter')
+  .refine(
+    (val) => isValidRole(val),
+    { message: 'Peran (role) tidak valid atau belum terdaftar dalam sistem' }
+  );
 
 export const loginSchema = z
   .object({

@@ -66,6 +66,9 @@ export class ReservationController {
         });
       }
 
+      const finalCreatedBy =
+        (created_by && String(created_by).trim()) || req.user?.full_name || 'Admin';
+
       const result = await ReservationService.createReservation({
         customer_name,
         customer_phone,
@@ -73,7 +76,7 @@ export class ReservationController {
         invoice_no,
         pickup_deadline,
         notes,
-        created_by,
+        created_by: finalCreatedBy,
         items
       });
 
@@ -99,11 +102,14 @@ export class ReservationController {
         });
       }
 
+      const finalHandedBy =
+        (handed_by && String(handed_by).trim()) || req.user?.full_name || 'Admin';
+
       const result = await ReservationService.pickupReservation(id, {
         receiver_name,
         vehicle_plate,
         notes,
-        handed_by,
+        handed_by: finalHandedBy,
         items
       });
 
@@ -145,7 +151,9 @@ export class ReservationController {
     try {
       const id = String(req.params.id);
       const cancel_reason = req.body.cancel_reason || req.body.reason;
-      const cancelled_by = req.body.cancelled_by || req.body.cancelledBy;
+      const rawCancelledBy = req.body.cancelled_by || req.body.cancelledBy;
+      const finalCancelledBy =
+        (rawCancelledBy && String(rawCancelledBy).trim()) || req.user?.full_name || 'Admin';
 
       if (!cancel_reason || !String(cancel_reason).trim()) {
         return res.status(400).json({
@@ -154,7 +162,7 @@ export class ReservationController {
         });
       }
 
-      const result = await ReservationService.cancelReservation(id, String(cancel_reason).trim(), cancelled_by);
+      const result = await ReservationService.cancelReservation(id, String(cancel_reason).trim(), finalCancelledBy);
       res.json({
         success: true,
         data: result,
@@ -170,7 +178,9 @@ export class ReservationController {
       const id = String(req.params.id);
       const settlement_type = req.body.settlement_type;
       const reason = req.body.reason || req.body.settlement_notes || req.body.notes;
-      const closed_by = req.body.closed_by || req.body.closedBy;
+      const rawClosedBy = req.body.closed_by || req.body.closedBy;
+      const finalClosedBy =
+        (rawClosedBy && String(rawClosedBy).trim()) || req.user?.full_name || 'Admin';
 
       if (!settlement_type) {
         return res.status(400).json({
@@ -189,7 +199,7 @@ export class ReservationController {
       const result = await ReservationService.closePartialReservation(id, {
         settlement_type,
         reason: String(reason).trim(),
-        closed_by
+        closed_by: finalClosedBy
       });
 
       res.json({

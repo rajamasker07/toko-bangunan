@@ -163,7 +163,7 @@ export interface DashboardSummary {
   }>;
 }
 
-export type UserRole = 'owner' | 'admin' | 'gudang' | 'kasir';
+export type UserRole = 'owner' | 'admin' | 'gudang' | 'kasir' | string;
 
 export type Permission =
   | 'dashboard:read'
@@ -181,7 +181,46 @@ export type Permission =
   | 'stock:adjust'
   | 'users:read'
   | 'users:manage'
-  | 'users:delete';
+  | 'users:delete'
+  | 'reservations:read'
+  | 'reservations:create'
+  | 'reservations:pickup'
+  | 'reservations:cancel'
+  | 'roles:manage';
+
+export interface RoleDefinition {
+  id: string;
+  code: string;
+  name: string;
+  short_name: string;
+  description?: string | null;
+  badge_color: string;
+  hierarchy_level: number;
+  is_system: boolean;
+  permissions: Permission[];
+  user_count?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PermissionCatalogItem {
+  id?: string;
+  code: Permission;
+  name?: string;
+  label: string;
+  description?: string;
+  module?: string;
+  category?: string;
+}
+
+export interface PermissionGroup {
+  id?: string;
+  module?: string;
+  category?: string;
+  label: string;
+  description?: string;
+  permissions: PermissionCatalogItem[];
+}
 
 export interface AuthUser {
   id: string;
@@ -214,7 +253,7 @@ export interface UsersSummaryMetrics {
   total: number;
   active: number;
   inactive: number;
-  by_role: Record<UserRole, number>;
+  by_role: Record<string, number>;
 }
 
 export interface PaginatedUsersResponse {

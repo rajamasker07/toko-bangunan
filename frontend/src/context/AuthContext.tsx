@@ -9,19 +9,21 @@ import {
   setTokensRefreshedHandler,
   setUnauthorizedHandler,
 } from '../services/api';
-import { AuthSessionPayload, AuthUser, Permission } from '../types';
+import { AuthSessionPayload, AuthUser, Permission, RoleDefinition } from '../types';
 import { AppTab, canAccessTab, hasAnyPermission, hasPermission } from '../utils/rbac';
 import { useToast } from '../components/Toast';
 
 interface AuthContextValue {
   user: AuthUser | null;
   permissions: Permission[];
+  roles: RoleDefinition[];
   isAuthenticated: boolean;
   isHydrating: boolean;
   hydrationError: string | null;
   login: (identifier: string, password: string) => Promise<AuthSessionPayload>;
   logout: (options?: { allDevices?: boolean; silent?: boolean }) => Promise<void>;
   refreshUser: () => Promise<void>;
+  refreshRoles: () => Promise<RoleDefinition[]>;
   retryHydration: () => Promise<void>;
   applyAuthSession: (session: AuthSessionPayload) => void;
   updateLocalUser: (updatedUser: AuthUser) => void;
@@ -37,6 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [isHydrating, setIsHydrating] = useState<boolean>(true);
   const [hydrationError, setHydrationError] = useState<string | null>(null);
 
@@ -44,7 +47,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     clearAuthTokens();
     setUser(null);
     setPermissions([]);
+    setRoles([]);
     setHydrationError(null);
+  }, []);
+
+  const refreshRoles = useCallback(async (): Promise<RoleDefinition[]> => {
+    try {
+      const data = await api.getRoles();
+      setRoles(data || []);
+      return data || [];
+    } catch {
+      return [];
+    }
   }, []);
 
   const applyAuthSession = useCallback((session: AuthSessionPayload) => {
@@ -72,9 +86,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const me = await api.getMe();
         setUser(me.user);
         setPermissions(me.permissions);
+        try {
+          const rolesData = await api.getRoles();
+          setRoles(rolesData || []);
+        } catch {
+          // ignore if user lacks permission to list roles
+        }
       } else if (refreshToken) {
         const refreshed = await api.refresh(refreshToken);
         applyAuthSession(refreshed);
+        try {
+          const rolesData = await api.getRoles();
+          setRoles(rolesData || []);
+        } catch {
+          // ignore
+        }
       }
     } catch (err: unknown) {
       if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
@@ -100,6 +126,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUnauthorizedHandler((message) => {
       setUser(null);
       setPermissions([]);
+      setRoles([]);
       setHydrationError(null);
       showToast(message || 'Sesi Anda telah berakhir. Silakan login kembali.', 'error');
     });
@@ -118,6 +145,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     async (identifier: string, password: string): Promise<AuthSessionPayload> => {
       const session = await api.login({ identifier, password });
       applyAuthSession(session);
+      try {
+        const rolesData = await api.getRoles();
+        setRoles(rolesData || []);
+      } catch {
+        // ignore
+      }
       return session;
     },
     [applyAuthSession]
@@ -154,6 +187,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const me = await api.getMe();
     setUser(me.user);
     setPermissions(me.permissions);
+    try {
+      const rolesData = await api.getRoles();
+      setRoles(rolesData || []);
+    } catch {
+      // ignore
+    }
   }, []);
 
   const updateLocalUser = useCallback((updatedUser: AuthUser) => {
@@ -180,12 +219,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         user,
         permissions,
+        roles,
         isAuthenticated: Boolean(user),
         isHydrating,
         hydrationError,
         login,
         logout,
         refreshUser,
+        refreshRoles,
         retryHydration: hydrateSession,
         applyAuthSession,
         updateLocalUser,

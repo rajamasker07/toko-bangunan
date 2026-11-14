@@ -14,7 +14,7 @@ import {
 import { AuthUser, UserRole } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { ROLE_META, getAssignableRoles } from '../utils/rbac';
+import { ROLE_META, getAssignableRoles, getRoleMeta } from '../utils/rbac';
 import { validatePasswordStrength, validateUsernameFormat } from '../utils/validation';
 
 export type UserFormModalMode = 'create' | 'edit' | 'reset-password';
@@ -36,7 +36,7 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({
   onSuccess,
   showToast,
 }) => {
-  const { user: currentUser, updateLocalUser } = useAuth();
+  const { user: currentUser, updateLocalUser, roles } = useAuth();
 
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
@@ -51,7 +51,7 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const assignableRoles = getAssignableRoles(currentUser?.role);
+  const assignableRoles = getAssignableRoles(currentUser?.role, roles);
   const isSelf = Boolean(currentUser && targetUser && targetUser.id === currentUser.id);
 
   useEffect(() => {
@@ -201,7 +201,7 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({
               </h2>
               {targetUser && mode !== 'create' && (
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  @{targetUser.username} &bull; {ROLE_META[targetUser.role].shortLabel}
+                  @{targetUser.username} &bull; {getRoleMeta(targetUser.role, roles).shortLabel}
                 </p>
               )}
             </div>
@@ -283,15 +283,18 @@ export const UserFormModal: React.FC<UserFormModalProps> = ({
                   title={isSelf ? 'Tidak dapat mengubah role akun sendiri' : undefined}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {(isSelf && targetUser ? [targetUser.role] : assignableRoles).map((r) => (
-                    <option key={r} value={r}>
-                      {ROLE_META[r].label}
-                    </option>
-                  ))}
+                  {(isSelf && targetUser ? [targetUser.role] : assignableRoles).map((r) => {
+                    const meta = getRoleMeta(r, roles);
+                    return (
+                      <option key={r} value={r}>
+                        {meta.label}
+                      </option>
+                    );
+                  })}
                 </select>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1.5 pt-0.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                  <span>{ROLE_META[role].description}</span>
+                  <span>{getRoleMeta(role, roles).description}</span>
                 </p>
               </div>
             </>

@@ -8,6 +8,7 @@ import { StockController } from '../controllers/stockController.js';
 import { SupplierController } from '../controllers/supplierController.js';
 import { UnitController } from '../controllers/unitController.js';
 import { ReservationController } from '../controllers/reservationController.js';
+import { RoleController } from '../controllers/roleController.js';
 import { UserController } from '../controllers/userController.js';
 import { VariantController } from '../controllers/variantController.js';
 import {
@@ -53,6 +54,26 @@ router.post(
   UserController.resetPassword
 );
 router.delete('/users/:id', requirePermission('users:delete'), UserController.delete);
+
+// Role & Permission Management (Dynamic RBAC)
+router.get(
+  '/roles',
+  requireAnyPermission('roles:manage', 'users:read'),
+  RoleController.list
+);
+router.get(
+  '/roles/permissions',
+  requireAnyPermission('roles:manage', 'users:read'),
+  RoleController.getPermissions
+);
+router.get(
+  '/roles/:code',
+  requireAnyPermission('roles:manage', 'users:read'),
+  RoleController.getByCode
+);
+router.post('/roles', requirePermission('roles:manage'), RoleController.create);
+router.put('/roles/:code', requirePermission('roles:manage'), RoleController.update);
+router.delete('/roles/:code', requirePermission('roles:manage'), RoleController.delete);
 
 // Dashboard summary
 router.get('/dashboard/summary', requirePermission('dashboard:read'), DashboardController.summary);
@@ -155,13 +176,13 @@ router.post('/stock/adjust', requirePermission('stock:adjust'), StockController.
 router.get('/stock/movements', requirePermission('stock:read'), StockController.movements);
 
 // Stock Reservations (Titip Barang & Alert Pengambilan Pelanggan)
-router.get('/reservations', ReservationController.list);
-router.get('/reservations/alerts', ReservationController.getAlertStats);
-router.get('/reservations/:id', ReservationController.getById);
-router.post('/reservations', ReservationController.create);
-router.post('/reservations/:id/pickup', ReservationController.pickup);
-router.patch('/reservations/:id/extend-deadline', ReservationController.extendDeadline);
-router.post('/reservations/:id/cancel', ReservationController.cancel);
-router.post('/reservations/:id/close-partial', ReservationController.closePartial);
+router.get('/reservations', requirePermission('reservations:read'), ReservationController.list);
+router.get('/reservations/alerts', requirePermission('reservations:read'), ReservationController.getAlertStats);
+router.get('/reservations/:id', requirePermission('reservations:read'), ReservationController.getById);
+router.post('/reservations', requirePermission('reservations:create'), ReservationController.create);
+router.post('/reservations/:id/pickup', requirePermission('reservations:pickup'), ReservationController.pickup);
+router.patch('/reservations/:id/extend-deadline', requirePermission('reservations:pickup'), ReservationController.extendDeadline);
+router.post('/reservations/:id/cancel', requirePermission('reservations:cancel'), ReservationController.cancel);
+router.post('/reservations/:id/close-partial', requirePermission('reservations:cancel'), ReservationController.closePartial);
 
 export default router;

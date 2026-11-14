@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Edit2,
   KeyRound,
@@ -16,9 +16,10 @@ import { AuthUser, UserRole, UsersSummaryMetrics } from '../types';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Pagination } from './common/Pagination';
-import { ROLE_META, ROLE_ORDER, canManageTargetRole } from '../utils/rbac';
+import { ROLE_META, ROLE_ORDER, canManageTargetRole, getRoleMeta } from '../utils/rbac';
 import { formatDate } from '../utils/format';
 import { UserFormModal, UserFormModalMode } from './UserFormModal';
+import { RoleManagementPanel } from './RoleManagementPanel';
 
 interface UserManagementViewProps {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -32,13 +33,32 @@ const EMPTY_SUMMARY: UsersSummaryMetrics = {
 };
 
 export const UserManagementView: React.FC<UserManagementViewProps> = ({ showToast }) => {
-  const { user: currentUser, can } = useAuth();
+  const { user: currentUser, can, roles, refreshRoles } = useAuth();
+
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'roles'>('users');
+  const canViewRoles = can('roles:manage') || can('users:read');
 
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [summary, setSummary] = useState<UsersSummaryMetrics>(EMPTY_SUMMARY);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+
+  const activeRoles = useMemo(() => {
+    if (roles && roles.length > 0) {
+      return roles;
+    }
+    return ROLE_ORDER.map((code) => ({
+      code,
+      name: ROLE_META[code]?.label || code,
+      short_name: ROLE_META[code]?.shortLabel || code,
+      hierarchy_level: 0,
+      badge_color: 'slate',
+      is_system: true,
+      permissions: [],
+      id: code,
+    }));
+  }, [roles]);
 
   // Filters & pagination
   const [searchInput, setSearchInput] = useState('');
@@ -154,158 +174,208 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ showToas
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-            Manajemen Pengguna & Akses
+            {activeSubTab === 'roles' ? 'Posisi & Hak Akses (Role)' : 'Manajemen Pengguna & Akses'}
           </h2>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Kelola akun staf toko bangunan, pembagian peran RBAC, dan status keaktifan sesi.
+            {activeSubTab === 'roles'
+              ? 'Kelola struktur hierarki jabatan staf toko bangunan dan matriks hak akses per modul.'
+              : 'Kelola akun staf toko bangunan, pembagian peran RBAC, dan status keaktifan sesi.'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={loadUsers}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            Muat Ulang
-          </button>
-
-          {canManage && (
+        {activeSubTab === 'users' && (
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => openModal('create', null)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-amber-600/20 transition-all"
+              onClick={loadUsers}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
             >
-              <Plus className="w-4 h-4" />
-              Tambah Pengguna
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              Muat Ulang
             </button>
-          )}
-        </div>
-      </div>
 
-      {/* 4 Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Total Pengguna</p>
-            <p className="text-2xl font-extrabold text-slate-900 dark:text-white mt-1 tabular-nums">
-              {summary.total}
-            </p>
-          </div>
-          <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-            <Users className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Akun Aktif</p>
-            <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">
-              {summary.active}
-            </p>
-          </div>
-          <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
-            <UserCheck className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Akun Non-Aktif</p>
-            <p className="text-2xl font-extrabold text-rose-600 dark:text-rose-400 mt-1 tabular-nums">
-              {summary.inactive}
-            </p>
-          </div>
-          <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400">
-            <UserX className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Distribusi Peran</p>
-            <Shield className="w-4 h-4 text-amber-500" />
-          </div>
-          <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-            {ROLE_ORDER.map((r) => (
-              <div
-                key={r}
-                className="flex items-center justify-between px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/70"
+            {canManage && (
+              <button
+                type="button"
+                onClick={() => openModal('create', null)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-amber-600/20 transition-all"
               >
-                <span className="font-semibold text-slate-600 dark:text-slate-300">
-                  {ROLE_META[r].shortLabel}
-                </span>
-                <span className="font-extrabold text-slate-900 dark:text-white tabular-nums">
-                  {summary.by_role?.[r] ?? 0}
-                </span>
-              </div>
-            ))}
+                <Plus className="w-4 h-4" />
+                Tambah Pengguna
+              </button>
+            )}
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Filters & Table Card */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-        {/* Filter Bar */}
-        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-1">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Cari nama, username, atau email..."
-                className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500"
-              />
+      {/* Sub-tab Navigation */}
+      {canViewRoles && (
+        <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('users')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all border ${
+              activeSubTab === 'users'
+                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Daftar Akun Pengguna</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('roles')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all border ${
+              activeSubTab === 'roles'
+                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <Shield className="w-4 h-4" />
+            <span>Posisi & Hak Akses (Role)</span>
+          </button>
+        </div>
+      )}
+
+      {activeSubTab === 'roles' ? (
+        <RoleManagementPanel
+          showToast={showToast}
+          onRolesChanged={() => {
+            loadUsers();
+            refreshRoles();
+          }}
+        />
+      ) : (
+        <>
+          {/* 4 Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Total Pengguna</p>
+                <p className="text-2xl font-extrabold text-slate-900 dark:text-white mt-1 tabular-nums">
+                  {summary.total}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                <Users className="w-5 h-5" />
+              </div>
             </div>
 
-            <select
-              value={roleFilter}
-              onChange={(e) => {
-                setRoleFilter(e.target.value);
-                setPage(1);
-              }}
-              className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
-            >
-              <option value="all">Semua Peran</option>
-              {ROLE_ORDER.map((r) => (
-                <option key={r} value={r}>
-                  {ROLE_META[r].label}
-                </option>
-              ))}
-            </select>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Akun Aktif</p>
+                <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">
+                  {summary.active}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
+                <UserCheck className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Akun Non-Aktif</p>
+                <p className="text-2xl font-extrabold text-rose-600 dark:text-rose-400 mt-1 tabular-nums">
+                  {summary.inactive}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400">
+                <UserX className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Distribusi Peran</p>
+                <Shield className="w-4 h-4 text-amber-500" />
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px] max-h-24 overflow-y-auto pr-0.5">
+                {activeRoles.map((r) => {
+                  const meta = getRoleMeta(r.code, roles);
+                  return (
+                    <div
+                      key={r.code}
+                      className="flex items-center justify-between px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/70"
+                    >
+                      <span className="font-semibold text-slate-600 dark:text-slate-300 truncate pr-1">
+                        {meta.shortLabel}
+                      </span>
+                      <span className="font-extrabold text-slate-900 dark:text-white tabular-nums shrink-0">
+                        {summary.by_role?.[r.code] ?? 0}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
-          {/* Status Segmented Pills */}
-          <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/70 self-start lg:self-auto">
-            {(
-              [
-                { key: 'all', label: 'Semua' },
-                { key: 'true', label: 'Aktif' },
-                { key: 'false', label: 'Non-Aktif' },
-              ] as const
-            ).map((opt) => (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => {
-                  setStatusFilter(opt.key);
-                  setPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  statusFilter === opt.key
-                    ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
+          {/* Filters & Table Card */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+            {/* Filter Bar */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-1">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    placeholder="Cari nama, username, atau email..."
+                    className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500"
+                  />
+                </div>
+
+                <select
+                  value={roleFilter}
+                  onChange={(e) => {
+                    setRoleFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                >
+                  <option value="all">Semua Peran</option>
+                  {activeRoles.map((r) => {
+                    const meta = getRoleMeta(r.code, roles);
+                    return (
+                      <option key={r.code} value={r.code}>
+                        {meta.label}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* Status Segmented Pills */}
+              <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/70 self-start lg:self-auto">
+                {(
+                  [
+                    { key: 'all', label: 'Semua' },
+                    { key: 'true', label: 'Aktif' },
+                    { key: 'false', label: 'Non-Aktif' },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => {
+                      setStatusFilter(opt.key);
+                      setPage(1);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      statusFilter === opt.key
+                        ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
         {/* Table */}
         <div className="overflow-x-auto">
@@ -342,9 +412,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ showToas
               ) : (
                 users.map((u) => {
                   const isSelf = currentUser?.id === u.id;
-                  const roleMeta = ROLE_META[u.role as UserRole];
+                  const roleMeta = getRoleMeta(u.role, roles);
                   const canManageTarget =
-                    canManage && canManageTargetRole(currentUser?.role, u.role);
+                    canManage && canManageTargetRole(currentUser?.role, u.role, roles);
                   const isBusy = busyUserId === u.id;
 
                   return (
@@ -514,6 +584,8 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ showToas
           }}
         />
       </div>
+      </>
+      )}
 
       {/* Add / Edit / Reset Password Modal */}
       <UserFormModal

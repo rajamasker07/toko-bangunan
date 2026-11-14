@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool, query } from '../config/db.js';
-import { canManageTargetRole } from '../config/rbac.js';
+import { canManageTargetRole, getAllCachedRoles } from '../config/rbac.js';
 import type {
   AuthenticatedUser,
   UserListResult,
@@ -62,21 +62,21 @@ export class UserService {
       params.push(`%${filters.search.trim().toLowerCase()}%`);
       const idx = params.length;
       conditions.push(`(
-        LOWER(username) LIKE $${idx} OR
-        LOWER(full_name) LIKE $${idx} OR
-        LOWER(COALESCE(email, '')) LIKE $${idx}
+        LOWER(u.username) LIKE $${idx} OR
+        LOWER(u.full_name) LIKE $${idx} OR
+        LOWER(COALESCE(u.email, '')) LIKE $${idx}
       )`);
     }
 
     if (filters.role && filters.role !== 'all') {
       params.push(filters.role.trim().toLowerCase());
-      conditions.push(`role = $${params.length}`);
+      conditions.push(`LOWER(u.role) = LOWER($${params.length})`);
     }
 
     if (filters.isActive === 'true') {
-      conditions.push('is_active = TRUE');
+      conditions.push('u.is_active = TRUE');
     } else if (filters.isActive === 'false') {
-      conditions.push('is_active = FALSE');
+      conditions.push('u.is_active = FALSE');
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -95,47 +95,67 @@ export class UserService {
     const offsetIdx = params.length + 2;
 
     const listSql = `
-      SELECT ${USER_PUBLIC_COLUMNS}
-      FROM users
+      SELECT
+        u.id,
+        u.username,
+        u.email,
+        u.full_name,
+        u.role,
+        u.is_active,
+        u.must_change_password,
+        u.last_login_at,
+        u.created_at,
+        u.updated_at
+      FROM users u
+      LEFT JOIN roles r ON LOWER(r.code) = LOWER(u.role)
       ${whereClause}
       ORDER BY
-        CASE role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 WHEN 'gudang' THEN 3 ELSE 4 END ASC,
-        created_at DESC
+        COALESCE(r.hierarchy_level, 0) DESC,
+        u.created_at DESC
       LIMIT $${limitIdx} OFFSET $${offsetIdx}
     `;
 
-    const countSql = `SELECT COUNT(*)::int AS total FROM users ${whereClause}`;
+    const countSql = `SELECT COUNT(*)::int AS total FROM users u ${whereClause}`;
 
     const summarySql = `
       SELECT
         COUNT(*)::int AS total,
         COUNT(CASE WHEN is_active THEN 1 END)::int AS active,
-        COUNT(CASE WHEN NOT is_active THEN 1 END)::int AS inactive,
-        COUNT(CASE WHEN role = 'owner' THEN 1 END)::int AS role_owner,
-        COUNT(CASE WHEN role = 'admin' THEN 1 END)::int AS role_admin,
-        COUNT(CASE WHEN role = 'gudang' THEN 1 END)::int AS role_gudang,
-        COUNT(CASE WHEN role = 'kasir' THEN 1 END)::int AS role_kasir
+        COUNT(CASE WHEN NOT is_active THEN 1 END)::int AS inactive
       FROM users
     `;
+    const roleCountsSql = `
+      SELECT LOWER(role) AS role_code, COUNT(*)::int AS count
+      FROM users
+      GROUP BY LOWER(role)
+    `;
 
-    const [rowsRes, countRes, summaryRes] = await Promise.all([
+    const [rowsRes, countRes, summaryRes, roleCountsRes] = await Promise.all([
       query(listSql, listParams),
       query(countSql, params),
       query(summarySql),
+      query(roleCountsSql),
     ]);
 
     const total = Number(countRes.rows[0]?.total || 0);
     const sumRow = summaryRes.rows[0] || {};
+
+    const by_role: Record<string, number> = {};
+    for (const cached of getAllCachedRoles()) {
+      by_role[cached.code] = 0;
+    }
+    for (const d of ['owner', 'admin', 'gudang', 'kasir']) {
+      by_role[d] = by_role[d] ?? 0;
+    }
+    for (const row of roleCountsRes.rows as Array<{ role_code: string; count: number }>) {
+      by_role[row.role_code] = Number(row.count || 0);
+    }
+
     const summary: UsersSummaryMetrics = {
       total: Number(sumRow.total || 0),
       active: Number(sumRow.active || 0),
       inactive: Number(sumRow.inactive || 0),
-      by_role: {
-        owner: Number(sumRow.role_owner || 0),
-        admin: Number(sumRow.role_admin || 0),
-        gudang: Number(sumRow.role_gudang || 0),
-        kasir: Number(sumRow.role_kasir || 0),
-      },
+      by_role,
     };
 
     return {

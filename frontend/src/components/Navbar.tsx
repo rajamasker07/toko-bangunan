@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
-import { ROLE_META } from '../utils/rbac';
+import { getRoleMeta } from '../utils/rbac';
 import {
   Bell,
   ChevronDown,
@@ -34,7 +34,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onNavigateToUsers,
 }) => {
   const { theme, toggleTheme } = useTheme();
-  const { user, canAny, logout } = useAuth();
+  const { user, canAny, logout, roles } = useAuth();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -58,7 +58,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     };
   }, []);
 
-  const roleMeta = user ? ROLE_META[user.role] : null;
+  const roleMeta = user ? getRoleMeta(user.role, roles) : null;
   const initials = user ? user.full_name.trim().slice(0, 2).toUpperCase() : 'US';
   const canViewUsers = canAny(['users:read', 'users:manage']);
 
