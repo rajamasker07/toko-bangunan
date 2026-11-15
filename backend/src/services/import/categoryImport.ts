@@ -9,6 +9,7 @@ import type {
 import { normalizeWhitespace, parseTextCell } from '../../utils/spreadsheetParser.js';
 import {
   CategoryRegistry,
+  cleanRawSpreadsheetValues,
   deriveRowStatus,
   type Queryable,
 } from './shared.js';
@@ -117,7 +118,7 @@ export async function runCategoryImport(
         action: 'invalid',
         identifier: name || null,
         label: name || rawName,
-        raw: row.values,
+        raw: cleanRawSpreadsheetValues(row.values),
         messages,
       });
       continue;
@@ -197,7 +198,7 @@ export async function runCategoryImport(
         action: 'invalid',
         identifier: item.selfPathLower,
         label: item.name,
-        raw: item.row.values,
+        raw: cleanRawSpreadsheetValues(item.row.values),
         messages: [
           {
             severity: 'error',
@@ -236,7 +237,7 @@ export async function runCategoryImport(
           action: 'invalid',
           identifier: item.selfPathLower,
           label: item.name,
-          raw: item.row.values,
+          raw: cleanRawSpreadsheetValues(item.row.values),
           messages,
         });
         continue;
@@ -303,7 +304,7 @@ export async function runCategoryImport(
       action,
       identifier: fullPath,
       label: item.name,
-      raw: item.row.values,
+      raw: cleanRawSpreadsheetValues(item.row.values),
       normalized: {
         name: item.name,
         parent_id: parentId,

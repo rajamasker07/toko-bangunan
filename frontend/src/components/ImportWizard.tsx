@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useDeferredValue, useTransition } from 'react';
 import {
   ImportEntityType,
   ImportFileFormat,
@@ -10,6 +10,33 @@ import {
 import { api, ApiError } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Pagination } from './common/Pagination';
+
+export interface IndexedImportPreviewRow extends ImportPreviewRow {
+  _searchKey: string;
+  _rawEntries: Array<[string, unknown]>;
+}
+
+function indexPreviewRows(rows: ImportPreviewRow[]): IndexedImportPreviewRow[] {
+  return rows.map((row) => {
+    const rawVals = row.raw
+      ? Object.values(row.raw)
+          .filter((v) => v !== null && v !== undefined && String(v).trim() !== '')
+          .join(' ')
+      : '';
+    const msgVals = row.messages
+      ? row.messages.map((m) => `${m.field || ''} ${m.message}`).join(' ')
+      : '';
+    const rawEntries = Object.entries(row.raw || {})
+      .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
+      .slice(0, 6);
+
+    return {
+      ...row,
+      _searchKey: `${row.row_number} ${row.identifier || ''} ${row.label || ''} ${rawVals} ${msgVals}`.toLowerCase(),
+      _rawEntries: rawEntries,
+    };
+  });
+}
 import {
   Package,
   Truck,
@@ -234,13 +261,15 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
   const [isCommitting, setIsCommitting] = useState(false);
 
   // Results
-  const [previewResult, setPreviewResult] = useState<ImportPreviewResult | null>(null);
+  const [previewResult, setPreviewResult] = useState<(Omit<ImportPreviewResult, 'rows'> & { rows: IndexedImportPreviewRow[] }) | null>(null);
   const [commitResult, setCommitResult] = useState<ImportCommitResult | null>(null);
   const [commitErrorMessage, setCommitErrorMessage] = useState<string | null>(null);
 
   // Preview table filter & pagination
   const [previewFilter, setPreviewFilter] = useState<PreviewFilter>('all');
-  const [previewSearch, setPreviewSearch] = useState('');
+  const [previewSearchInput, setPreviewSearchInput] = useState('');
+  const deferredSearch = useDeferredValue(previewSearchInput);
+  const [isFilterPending, startFilterTransition] = useTransition();
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -367,11 +396,20 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
       setIsPreviewing(true);
       setCommitErrorMessage(null);
       const result = await api.previewImport(selectedEntity, selectedFile, effectiveMode);
-      setPreviewResult(result);
-      setPreviewFilter('all');
-      setPreviewSearch('');
-      setCurrentPage(1);
-      setCurrentStep(3);
+
+      // Pre-index rows untuk menjamin filtering & searching 60fps tanpa freeze di dataset besar
+      const indexedRows = indexPreviewRows(result.rows);
+
+      React.startTransition(() => {
+        setPreviewResult({
+          ...result,
+          rows: indexedRows,
+        });
+        setPreviewFilter('all');
+        setPreviewSearchInput('');
+        setCurrentPage(1);
+        setCurrentStep(3);
+      });
 
       if (result.summary.error_rows > 0) {
         showToast(
@@ -449,15 +487,15 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
     setCommitResult(null);
     setCommitErrorMessage(null);
     setPreviewFilter('all');
-    setPreviewSearch('');
+    setPreviewSearchInput('');
     setCurrentPage(1);
     setCurrentStep(goToStep);
   };
 
-  // Filtered preview rows
-  const filteredPreviewRows = useMemo<ImportPreviewRow[]>(() => {
+  // Filtered preview rows (dihitung secara instan dari _searchKey tanpa alokasi memori berulang)
+  const filteredPreviewRows = useMemo<IndexedImportPreviewRow[]>(() => {
     if (!previewResult) return [];
-    const q = previewSearch.trim().toLowerCase();
+    const q = deferredSearch.trim().toLowerCase();
 
     return previewResult.rows.filter((row) => {
       if (previewFilter === 'create' && row.action !== 'create') return false;
@@ -467,27 +505,13 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
       if (previewFilter === 'warning' && row.status !== 'warning') return false;
 
       if (!q) return true;
-
-      const matchBasic =
-        String(row.row_number).includes(q) ||
-        (row.identifier && row.identifier.toLowerCase().includes(q)) ||
-        (row.label && row.label.toLowerCase().includes(q));
-      const matchMsg = row.messages.some(
-        (m) =>
-          m.message.toLowerCase().includes(q) ||
-          (m.field && m.field.toLowerCase().includes(q))
-      );
-      const matchRaw = Object.values(row.raw || {}).some(
-        (val) => val !== null && val !== undefined && String(val).toLowerCase().includes(q)
-      );
-
-      return Boolean(matchBasic || matchMsg || matchRaw);
+      return row._searchKey.includes(q);
     });
-  }, [previewResult, previewFilter, previewSearch]);
+  }, [previewResult, previewFilter, deferredSearch]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [previewFilter, previewSearch]);
+  }, [previewFilter, deferredSearch]);
 
   const paginatedRows = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
@@ -1042,6 +1066,18 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
             )}
           </div>
 
+          {isPreviewing && (
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-center space-y-2">
+              <div className="flex items-center justify-center gap-2 text-amber-700 dark:text-amber-400 font-bold text-xs">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Sedang Menjalankan Simulasi & Validasi Dry-Run...</span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                Memvalidasi data di server secara non-blocking: mengecek format angka/mata uang, integritas relasi kategori, duplikasi SKU, dan aturan multi-satuan. Browser Anda tetap responsif.
+              </p>
+            </div>
+          )}
+
           {/* Step 2 Footer Actions */}
           <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
             <button
@@ -1287,11 +1323,26 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
               <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-400" />
               <input
                 type="text"
-                value={previewSearch}
-                onChange={(e) => setPreviewSearch(e.target.value)}
+                value={previewSearchInput}
+                onChange={(e) => setPreviewSearchInput(e.target.value)}
                 placeholder="Cari baris, SKU, nama, atau pesan validasi..."
-                className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                className="w-full pl-9 pr-9 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
               />
+              <div className="absolute right-3 top-2.5 flex items-center gap-1.5">
+                {(previewSearchInput !== deferredSearch || isFilterPending) && (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-500" />
+                )}
+                {previewSearchInput && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewSearchInput('')}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    title="Hapus pencarian"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -1324,7 +1375,11 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
                     <button
                       key={tab.id}
                       type="button"
-                      onClick={() => setPreviewFilter(tab.id)}
+                      onClick={() => {
+                        startFilterTransition(() => {
+                          setPreviewFilter(tab.id);
+                        });
+                      }}
                       className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
                         active
                           ? tab.id === 'error'
@@ -1373,9 +1428,7 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                       {paginatedRows.map((row) => {
-                        const rawEntries = Object.entries(row.raw || {})
-                          .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
-                          .slice(0, 6);
+                        const rawEntries = row._rawEntries || [];
 
                         return (
                           <tr

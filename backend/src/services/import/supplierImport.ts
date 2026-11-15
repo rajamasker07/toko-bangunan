@@ -15,7 +15,7 @@ import {
 } from '../../utils/spreadsheetParser.js';
 import { generateUUIDv7 } from '../../utils/uuid.js';
 import { isValidOptionalEmail } from '../../validators/importValidator.js';
-import { deriveRowStatus, type Queryable } from './shared.js';
+import { cleanRawSpreadsheetValues, deriveRowStatus, type Queryable } from './shared.js';
 
 interface ExistingSupplier {
   id: string;
@@ -394,7 +394,7 @@ export async function runSupplierImport(
         action: 'invalid',
         identifier: code || name || null,
         label: salesName ? `${name || '-'} (${salesName})` : name || code,
-        raw: row.values,
+        raw: cleanRawSpreadsheetValues(row.values),
         messages,
       });
       continue;
@@ -639,7 +639,7 @@ export async function runSupplierImport(
       action,
       identifier: targetSupplier?.code || code || name,
       label: salesName ? `${name} — ${salesName}` : name,
-      raw: row.values,
+      raw: cleanRawSpreadsheetValues(row.values),
       normalized: {
         supplier_code: targetSupplier?.code || code,
         supplier_name: name,

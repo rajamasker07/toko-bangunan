@@ -17,7 +17,12 @@ import {
 import { generateUUIDv7 } from '../../utils/uuid.js';
 import { BrandService } from '../brandService.js';
 import { normalizeUnitName, unitKey, UnitService } from '../unitService.js';
-import { CategoryRegistry, deriveRowStatus, type Queryable } from './shared.js';
+import {
+  CategoryRegistry,
+  cleanRawSpreadsheetValues,
+  deriveRowStatus,
+  type Queryable,
+} from './shared.js';
 
 interface ExistingProduct {
   id: string;
@@ -182,9 +187,60 @@ export async function runProductImport(
   const brandsRes = await db.query('SELECT id, name, name_key FROM brands');
   const unitsRes = await db.query('SELECT id, name, name_key FROM units');
   const suppliersRes = await db.query('SELECT id, name, code FROM suppliers');
-  const productsRes = await db.query('SELECT * FROM products');
-  const variantsRes = await db.query('SELECT * FROM product_variants');
-  const variantUnitsRes = await db.query('SELECT * FROM variant_units');
+
+  // Optimasi performa skala besar: Kumpulkan seluruh kandidat SKU dari baris import.
+  // Hindari query 'SELECT * FROM products' tanpa filter yang dapat menyebabkan memory leak/freeze pada DB besar.
+  const candidateSkus = Array.from(
+    new Set(
+      rows
+        .flatMap((r) => {
+          const pSku = parseTextCell(r.values.sku_produk)?.trim().toLowerCase();
+          const vSku = parseTextCell(r.values.sku_varian)?.trim().toLowerCase();
+          const list: string[] = [];
+          if (pSku) {
+            list.push(pSku);
+            list.push(`${pSku}-std`);
+          }
+          if (vSku) list.push(vSku);
+          return list;
+        })
+        .filter(Boolean) as string[]
+    )
+  );
+
+  let productsRes: { rows: any[] };
+  let variantsRes: { rows: any[] };
+  let variantUnitsRes: { rows: any[] };
+
+  if (candidateSkus.length > 0) {
+    productsRes = await db.query(
+      `SELECT * FROM products WHERE LOWER(sku) = ANY($1::text[])`,
+      [candidateSkus]
+    );
+
+    variantsRes = await db.query(
+      `SELECT pv.* FROM product_variants pv
+       WHERE LOWER(pv.sku) = ANY($1::text[])
+          OR pv.product_id IN (
+            SELECT p.id FROM products p WHERE LOWER(p.sku) = ANY($1::text[])
+          )`,
+      [candidateSkus]
+    );
+
+    const variantIds = (variantsRes.rows as ExistingVariant[]).map((v) => v.id);
+    if (variantIds.length > 0) {
+      variantUnitsRes = await db.query(
+        `SELECT * FROM variant_units WHERE variant_id = ANY($1::uuid[])`,
+        [variantIds]
+      );
+    } else {
+      variantUnitsRes = { rows: [] };
+    }
+  } else {
+    productsRes = { rows: [] };
+    variantsRes = { rows: [] };
+    variantUnitsRes = { rows: [] };
+  }
 
   const brandByKey = new Map<string, { id: string; name: string; name_key: string }>();
   for (const b of brandsRes.rows as Array<{ id: string; name: string; name_key: string }>) {
@@ -1274,7 +1330,7 @@ export async function runProductImport(
       : r.namaSatuan
         ? `${r.skuProduk || '-'} (${r.namaSatuan})`
         : r.skuProduk || null,
-    raw: r.row.values,
+    raw: cleanRawSpreadsheetValues(r.row.values),
     normalized:
       r.action !== 'invalid'
         ? {

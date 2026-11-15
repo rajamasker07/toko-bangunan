@@ -9,7 +9,7 @@ import type {
 import { brandKey, normalizeBrandName } from '../../utils/brand.js';
 import { parseTextCell } from '../../utils/spreadsheetParser.js';
 import { generateUUIDv7 } from '../../utils/uuid.js';
-import { deriveRowStatus, type Queryable } from './shared.js';
+import { cleanRawSpreadsheetValues, deriveRowStatus, type Queryable } from './shared.js';
 
 interface ExistingBrand {
   id: string;
@@ -158,7 +158,7 @@ export async function runBrandImport(
       action,
       identifier: key,
       label: normalizedName || rawName,
-      raw: row.values,
+      raw: cleanRawSpreadsheetValues(row.values),
       normalized: normalizedName ? { name: normalizedName, name_key: key } : undefined,
       messages,
     });
