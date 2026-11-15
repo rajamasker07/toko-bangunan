@@ -20,7 +20,8 @@ import {
   Edit2,
   Power,
   Folder,
-  Tag
+  Tag,
+  Upload
 } from 'lucide-react';
 
 interface ProductListViewProps {
@@ -30,6 +31,7 @@ interface ProductListViewProps {
   loading: boolean;
   onRefresh: () => void;
   onOpenCreate: () => void;
+  onOpenImport?: () => void;
   onOpenDetail: (product: Product) => void;
   onOpenAdjust: (variantId: string) => void;
   onEditProduct?: (product: Product) => void;
@@ -45,6 +47,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   loading,
   onRefresh,
   onOpenCreate,
+  onOpenImport,
   onOpenDetail,
   onOpenAdjust,
   onEditProduct,
@@ -54,6 +57,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 }) => {
   const { can } = useAuth();
   const canCreate = can('products:create');
+  const canImport = can('data:import') && canCreate;
   const canUpdate = can('products:update');
   const canDelete = can('products:delete');
   const canAdjust = can('stock:adjust');
@@ -203,14 +207,25 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <button
             onClick={exportCSV}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-sm transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Export CSV</span>
           </button>
+          {canImport && onOpenImport && (
+            <button
+              type="button"
+              onClick={onOpenImport}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-sm transition-colors"
+              title="Import Produk, Varian & Multi-Satuan dari Excel/CSV"
+            >
+              <Upload className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>Import</span>
+            </button>
+          )}
           {canCreate && (
             <button
               onClick={onOpenCreate}

@@ -1,7 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { HardHat, Loader2, RefreshCw, LogOut, WifiOff } from 'lucide-react';
 import { api } from './services/api';
-import { Product, ProductVariant, Category, Brand, Supplier, DashboardSummary, ReservationAlertSummary } from './types';
+import {
+  Product,
+  ProductVariant,
+  Category,
+  Brand,
+  Supplier,
+  DashboardSummary,
+  ReservationAlertSummary,
+  ImportEntityType,
+} from './types';
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
@@ -22,6 +31,7 @@ import { DocsView } from './components/DocsView';
 import { LoginView } from './components/LoginView';
 import { ProfileAccountModal } from './components/ProfileAccountModal';
 import { UserManagementView } from './components/UserManagementView';
+import { ImportDataView } from './components/ImportDataView';
 import { useToast } from './components/Toast';
 import { useAuth } from './context/AuthContext';
 
@@ -84,6 +94,10 @@ export const App: React.FC = () => {
   const [isEditVariantOpen, setIsEditVariantOpen] = useState<boolean>(false);
   const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
   const [editingVariantProductName, setEditingVariantProductName] = useState<string>('');
+
+  // Import Data context state (pre-selected entity & return target when opened via shortcut)
+  const [importInitialEntity, setImportInitialEntity] = useState<ImportEntityType | undefined>(undefined);
+  const [importReturnTab, setImportReturnTab] = useState<ActiveTab | null>(null);
 
   // Sidebar collapsed state with localStorage persistence
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -258,6 +272,8 @@ export const App: React.FC = () => {
       setIsEditVariantOpen(false);
       setEditingVariant(null);
       setIsProfileModalOpen(false);
+      setImportInitialEntity(undefined);
+      setImportReturnTab(null);
       setActiveTab('dashboard');
     }
   }, [isAuthenticated]);
@@ -338,7 +354,57 @@ export const App: React.FC = () => {
     if (tab === 'adjust') {
       setAdjustInitialTab(can('stock:adjust') ? 'form' : 'history');
     }
+    if (tab === 'import') {
+      setImportReturnTab(null);
+      setImportInitialEntity(undefined);
+    }
     setActiveTab(tab);
+  };
+
+  // Navigate to Import Data view from entity shortcut button
+  const handleOpenImport = (entity: ImportEntityType, fromTab: ActiveTab) => {
+    const hasEntityWrite =
+      entity === 'products' ? can('products:create') : can('master:write');
+    if (!canAccess('import') || !hasEntityWrite) {
+      showToast('Anda tidak memiliki izin mengimport data untuk modul ini.', 'error');
+      return;
+    }
+    setImportInitialEntity(entity);
+    setImportReturnTab(fromTab);
+    setActiveTab('import');
+  };
+
+  // Refresh affected states after bulk import commit
+  const handleImportSuccess = useCallback(
+    (entity: ImportEntityType) => {
+      loadSummary();
+      if (entity === 'products') {
+        loadProducts();
+        loadCategories();
+        loadBrands();
+      } else if (entity === 'categories') {
+        loadCategories();
+      } else if (entity === 'brands') {
+        loadBrands();
+      } else if (entity === 'suppliers') {
+        loadSuppliers();
+      }
+    },
+    [loadSummary, loadProducts, loadCategories, loadBrands, loadSuppliers]
+  );
+
+  const IMPORT_ENTITY_TAB_MAP: Record<ImportEntityType, ActiveTab> = {
+    products: 'products',
+    suppliers: 'suppliers',
+    categories: 'categories',
+    brands: 'brands',
+  };
+
+  const RETURN_TAB_LABELS: Partial<Record<ActiveTab, string>> = {
+    products: 'Katalog Produk',
+    suppliers: 'Master Supplier',
+    categories: 'Kategori Bertingkat',
+    brands: 'Master Merek',
   };
 
   // Handle delete product
@@ -577,6 +643,7 @@ export const App: React.FC = () => {
                   loading={loadingProducts}
                   onRefresh={loadProducts}
                   onOpenCreate={handleOpenCreateProduct}
+                  onOpenImport={() => handleOpenImport('products', 'products')}
                   onOpenDetail={(p) => {
                     setSelectedProduct(p);
                     setSelectedVariant(null);
@@ -623,6 +690,7 @@ export const App: React.FC = () => {
               categoriesTree={categoriesTree}
               loading={loadingCategories}
               onRefresh={loadCategories}
+              onOpenImport={() => handleOpenImport('categories', 'categories')}
               showToast={showToast}
             />
           )}
@@ -632,6 +700,7 @@ export const App: React.FC = () => {
               brands={brands}
               loading={loadingBrands}
               onRefresh={loadBrands}
+              onOpenImport={() => handleOpenImport('brands', 'brands')}
               showToast={showToast}
             />
           )}
@@ -641,6 +710,29 @@ export const App: React.FC = () => {
               suppliers={suppliers}
               loading={loadingSuppliers}
               onRefresh={loadSuppliers}
+              onOpenImport={() => handleOpenImport('suppliers', 'suppliers')}
+              showToast={showToast}
+            />
+          )}
+
+          {activeTab === 'import' && canAccess('import') && (
+            <ImportDataView
+              initialEntity={importInitialEntity}
+              returnTabLabel={importReturnTab ? RETURN_TAB_LABELS[importReturnTab] : undefined}
+              onBack={
+                importReturnTab
+                  ? () => {
+                      const target = importReturnTab;
+                      setImportReturnTab(null);
+                      setActiveTab(target);
+                    }
+                  : undefined
+              }
+              onImportSuccess={(entity) => handleImportSuccess(entity)}
+              onNavigateToEntity={(entity) => {
+                setImportReturnTab(null);
+                handleTabChange(IMPORT_ENTITY_TAB_MAP[entity]);
+              }}
               showToast={showToast}
             />
           )}

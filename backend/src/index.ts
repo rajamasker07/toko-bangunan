@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
+import multer from 'multer';
 import { env } from './config/env.js';
 import apiRouter from './routes/api.js';
 import { initializeDatabase } from './db/init.js';
@@ -20,6 +21,7 @@ app.use(
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Disposition'],
   })
 );
 app.use(express.json());
@@ -56,6 +58,32 @@ app.use((_req, res) => {
 // Error handling middleware
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Unhandled server error:', err);
+
+  if (err instanceof multer.MulterError || err?.name === 'MulterError') {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      res.status(413).json({
+        success: false,
+        code: 'FILE_TOO_LARGE',
+        message: 'Ukuran file melebihi batas maksimal 5 MB.',
+      });
+      return;
+    }
+    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+      res.status(400).json({
+        success: false,
+        code: 'INVALID_UPLOAD_FIELD',
+        message: 'Field upload tidak valid (gunakan field "file" untuk 1 file).',
+      });
+      return;
+    }
+    res.status(400).json({
+      success: false,
+      code: 'UPLOAD_ERROR',
+      message: err.message || 'Gagal mengunggah file import.',
+    });
+    return;
+  }
+
   const statusCode =
     typeof err?.statusCode === 'number'
       ? err.statusCode
@@ -64,7 +92,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
         : 500;
   res.status(statusCode).json({
     success: false,
-    message: err.message || 'Terjadi kesalahan internal server'
+    ...(typeof err?.code === 'string' ? { code: err.code } : {}),
+    message: err.message || 'Terjadi kesalahan internal server',
   });
 });
 

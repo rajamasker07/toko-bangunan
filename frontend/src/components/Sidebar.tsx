@@ -16,6 +16,7 @@ import {
   Truck,
   Users,
   ShoppingBag,
+  FileUp,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { AppTab } from '../utils/rbac';
@@ -114,6 +115,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           id: 'suppliers',
           label: 'Master Supplier',
           icon: Truck,
+          badge: null,
+        },
+        {
+          id: 'import',
+          label: 'Import Data',
+          icon: FileUp,
           badge: null,
         },
       ],

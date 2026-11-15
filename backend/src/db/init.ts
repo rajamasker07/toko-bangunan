@@ -357,7 +357,7 @@ export async function initializeDatabase() {
     // 2d. Supplier Invoices Table (Nota Hutang Pembelian & Jatuh Tempo Supplier)
     await client.query(`
       CREATE TABLE IF NOT EXISTS supplier_invoices (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY,
         supplier_id UUID NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
         invoice_number VARCHAR(100) NOT NULL,
         purchase_order_no VARCHAR(100),

@@ -18,6 +18,11 @@ import {
   ReservationAlertSummary,
   RoleDefinition,
   Permission,
+  ImportEntityType,
+  ImportFileFormat,
+  ImportDuplicateMode,
+  ImportPreviewResult,
+  ImportCommitResult,
 } from '../types';
 
 const BASE_URL = '/api';
@@ -136,25 +141,16 @@ async function tryRefreshSession(): Promise<boolean> {
   return refreshPromise;
 }
 
-async function fetchJson<T>(url: string, options?: RequestInit, _isRetry = false): Promise<T> {
+async function executeWithAuthRetry(
+  url: string,
+  buildRequestInit: (token: string | null) => RequestInit,
+  _isRetry = false
+): Promise<Response> {
   const token = getAuthToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options?.headers as Record<string, string> | undefined),
-  };
-
-  if (token && !headers.Authorization) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  const response = await fetch(`${BASE_URL}${url}`, {
-    ...options,
-    headers,
-  });
-
-  const json = await safeParseJson(response);
+  const response = await fetch(`${BASE_URL}${url}`, buildRequestInit(token));
 
   if (response.status === 401) {
+    const json = await safeParseJson(response);
     const code: string | undefined = json?.code;
     const message: string = json?.message || 'Sesi Anda telah berakhir. Silakan login kembali.';
     const isAuthCredentialEndpoint =
@@ -169,7 +165,7 @@ async function fetchJson<T>(url: string, options?: RequestInit, _isRetry = false
     if (!_isRetry && getRefreshToken()) {
       const refreshed = await tryRefreshSession();
       if (refreshed) {
-        return fetchJson<T>(url, options, true);
+        return executeWithAuthRetry(url, buildRequestInit, true);
       }
     }
 
@@ -177,20 +173,125 @@ async function fetchJson<T>(url: string, options?: RequestInit, _isRetry = false
     throw new ApiError(message, 401, code, json?.details);
   }
 
+  return response;
+}
+
+function throwApiErrorFromPayload(response: Response, json: any): never {
+  const fallbackMessage =
+    response.status === 403
+      ? 'Anda tidak memiliki izin untuk melakukan aksi ini.'
+      : 'Terjadi kesalahan saat memproses permintaan.';
+  throw new ApiError(
+    json?.message || fallbackMessage,
+    response.status,
+    json?.code,
+    json?.details
+  );
+}
+
+async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await executeWithAuthRetry(url, (token) => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+
+    if (token && !headers.Authorization) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    return {
+      ...options,
+      headers,
+    };
+  });
+
+  const json = await safeParseJson(response);
+
   if (!response.ok || json?.success === false) {
-    const fallbackMessage =
-      response.status === 403
-        ? 'Anda tidak memiliki izin untuk melakukan aksi ini.'
-        : 'Terjadi kesalahan saat memproses permintaan.';
-    throw new ApiError(
-      json?.message || fallbackMessage,
-      response.status,
-      json?.code,
-      json?.details
-    );
+    throwApiErrorFromPayload(response, json);
   }
 
   return json?.data as T;
+}
+
+async function fetchFormData<T>(
+  url: string,
+  formData: FormData,
+  options?: Omit<RequestInit, 'body'>
+): Promise<T> {
+  const response = await executeWithAuthRetry(url, (token) => {
+    const headers: Record<string, string> = {
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+    delete headers['Content-Type'];
+    delete headers['content-type'];
+
+    if (token && !headers.Authorization) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    return {
+      method: 'POST',
+      ...options,
+      body: formData,
+      headers,
+    };
+  });
+
+  const json = await safeParseJson(response);
+
+  if (!response.ok || json?.success === false) {
+    throwApiErrorFromPayload(response, json);
+  }
+
+  return json?.data as T;
+}
+
+function extractFilenameFromDisposition(headerValue: string | null): string | null {
+  if (!headerValue) return null;
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(headerValue);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim().replace(/^["']|["']$/g, ''));
+    } catch {
+      return utf8Match[1].trim();
+    }
+  }
+  const asciiMatch = /filename=([^;]+)/i.exec(headerValue);
+  if (asciiMatch?.[1]) {
+    return asciiMatch[1].trim().replace(/^["']|["']$/g, '');
+  }
+  return null;
+}
+
+async function fetchBlob(
+  url: string,
+  options?: RequestInit
+): Promise<{ blob: Blob; filename: string | null }> {
+  const response = await executeWithAuthRetry(url, (token) => {
+    const headers: Record<string, string> = {
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+
+    if (token && !headers.Authorization) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    return {
+      ...options,
+      headers,
+    };
+  });
+
+  if (!response.ok) {
+    const json = await safeParseJson(response);
+    throwApiErrorFromPayload(response, json);
+  }
+
+  const blob = await response.blob();
+  const filename = extractFilenameFromDisposition(response.headers.get('Content-Disposition'));
+  return { blob, filename };
 }
 
 export const api = {
@@ -676,4 +777,47 @@ export const api = {
     fetchJson<void>(`/roles/${code}`, {
       method: 'DELETE',
     }),
+
+  // Bulk Import Data (Excel & CSV)
+  downloadImportTemplate: async (
+    entity: ImportEntityType,
+    format: ImportFileFormat = 'xlsx',
+    options?: RequestInit
+  ) => {
+    const params = new URLSearchParams({ format });
+    const { blob, filename } = await fetchBlob(
+      `/import/templates/${entity}?${params.toString()}`,
+      options
+    );
+    return {
+      blob,
+      filename: filename || `template-import-${entity}.${format}`,
+    };
+  },
+
+  previewImport: (
+    entity: ImportEntityType,
+    file: File,
+    mode: ImportDuplicateMode = 'skip',
+    options?: Omit<RequestInit, 'body'>
+  ) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('mode', mode);
+    return fetchFormData<ImportPreviewResult>(`/import/${entity}/preview`, formData, options);
+  },
+
+  commitImport: (
+    entity: ImportEntityType,
+    file: File,
+    mode: ImportDuplicateMode = 'skip',
+    skipInvalidRows = false,
+    options?: Omit<RequestInit, 'body'>
+  ) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('mode', mode);
+    formData.append('skip_invalid_rows', String(skipInvalidRows));
+    return fetchFormData<ImportCommitResult>(`/import/${entity}/commit`, formData, options);
+  },
 };

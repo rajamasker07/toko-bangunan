@@ -3,6 +3,7 @@ import { AuthController } from '../controllers/authController.js';
 import { BrandController } from '../controllers/brandController.js';
 import { CategoryController } from '../controllers/categoryController.js';
 import { DashboardController } from '../controllers/dashboardController.js';
+import { ImportController } from '../controllers/importController.js';
 import { ProductController } from '../controllers/productController.js';
 import { StockController } from '../controllers/stockController.js';
 import { SupplierController } from '../controllers/supplierController.js';
@@ -18,6 +19,7 @@ import {
   requirePermission,
 } from '../middleware/auth.js';
 import { loginRateLimiter } from '../middleware/rateLimit.js';
+import { importFileUpload } from '../middleware/upload.js';
 
 const router = Router();
 
@@ -217,5 +219,24 @@ router.post('/reservations/:id/pickup', requirePermission('reservations:pickup')
 router.patch('/reservations/:id/extend-deadline', requirePermission('reservations:pickup'), ReservationController.extendDeadline);
 router.post('/reservations/:id/cancel', requirePermission('reservations:cancel'), ReservationController.cancel);
 router.post('/reservations/:id/close-partial', requirePermission('reservations:cancel'), ReservationController.closePartial);
+
+// Bulk Import Data (.xlsx / .csv)
+router.get(
+  '/import/templates/:entity',
+  requirePermission('data:import'),
+  ImportController.downloadTemplate
+);
+router.post(
+  '/import/:entity/preview',
+  requirePermission('data:import'),
+  importFileUpload.single('file'),
+  ImportController.preview
+);
+router.post(
+  '/import/:entity/commit',
+  requirePermission('data:import'),
+  importFileUpload.single('file'),
+  ImportController.commit
+);
 
 export default router;

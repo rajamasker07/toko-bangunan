@@ -136,6 +136,14 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
     description: 'Membuat, mengubah, dan menghapus peran serta konfigurasi hak akses pengguna',
     module: 'Peran & Hak Akses',
   },
+  // Import Data
+  {
+    id: 'data:import',
+    label: 'Import Data Massal (Excel / CSV)',
+    description:
+      'Mengunduh template, memvalidasi pratinjau, dan mengimpor data produk, supplier, kategori, serta merek secara massal',
+    module: 'Import Data',
+  },
 ];
 
 export function getPermissionGroups(): PermissionGroup[] {
