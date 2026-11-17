@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { AuthService } from '../services/authService.js';
 import { sendErrorResponse } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
 import {
   changePasswordSchema,
   formatZodError,
@@ -11,16 +12,22 @@ import {
 
 export class AuthController {
   static async login(req: Request, res: Response): Promise<void> {
-    try {
-      const parsed = loginSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ success: false, message: formatZodError(parsed.error) });
-        return;
-      }
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      logger.warn('AUTH', 'Login gagal: input data tidak valid', { error: formatZodError(parsed.error) });
+      res.status(400).json({ success: false, message: formatZodError(parsed.error) });
+      return;
+    }
 
+    try {
       const result = await AuthService.login(parsed.data.identifier, parsed.data.password, {
         userAgent: req.headers['user-agent'],
         ipAddress: req.ip || req.socket.remoteAddress,
+      });
+
+      logger.info('AUTH', `User "${result.user.username}" (${result.user.role}) berhasil login`, {
+        userId: result.user.id,
+        role: result.user.role,
       });
 
       res.json({
@@ -28,7 +35,11 @@ export class AuthController {
         message: 'Login berhasil',
         data: result,
       });
-    } catch (err) {
+    } catch (err: any) {
+      logger.warn('AUTH', `Percobaan login gagal untuk "${parsed.data.identifier}": ${err?.message || 'Unauthorized'}`, {
+        identifier: parsed.data.identifier,
+        ip: req.ip,
+      });
       sendErrorResponse(res, err);
     }
   }

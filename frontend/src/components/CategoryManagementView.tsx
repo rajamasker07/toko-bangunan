@@ -13,7 +13,8 @@ import {
   Search,
   GitFork,
   RefreshCw,
-  Eye
+  Eye,
+  Upload
 } from 'lucide-react';
 
 interface CategoryManagementViewProps {
@@ -21,18 +22,21 @@ interface CategoryManagementViewProps {
   categoriesTree?: Category[];
   loading?: boolean;
   onRefresh: () => void;
+  onOpenImport?: () => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
+const CategoryManagementViewComponent: React.FC<CategoryManagementViewProps> = ({
   categories = [],
   categoriesTree = [],
   loading = false,
   onRefresh,
+  onOpenImport,
   showToast,
 }) => {
   const { can } = useAuth();
   const canWrite = can('master:write');
+  const canImport = can('data:import') && canWrite;
   const canDelete = can('master:delete');
 
   const [search, setSearch] = useState('');
@@ -267,6 +271,17 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-500' : ''}`} />
             </button>
           )}
+          {canImport && onOpenImport && (
+            <button
+              type="button"
+              onClick={onOpenImport}
+              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-xs transition-colors"
+              title="Import Master Kategori dari Excel/CSV"
+            >
+              <Upload className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>Import</span>
+            </button>
+          )}
           {canWrite && (
             <button
               onClick={() => openCreateModal()}
@@ -443,3 +458,5 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
     </div>
   );
 };
+
+export const CategoryManagementView = React.memo(CategoryManagementViewComponent);

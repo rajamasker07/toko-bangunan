@@ -18,6 +18,11 @@ import {
   ReservationAlertSummary,
   RoleDefinition,
   Permission,
+  ImportEntityType,
+  ImportFileFormat,
+  ImportDuplicateMode,
+  ImportPreviewResult,
+  ImportCommitResult,
 } from '../types';
 
 const BASE_URL = '/api';
@@ -63,9 +68,62 @@ export function setAuthTokens(accessToken: string, refreshToken: string): void {
   isHandlingUnauthorized = false;
 }
 
+interface MasterDataCacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+const masterDataCache = new Map<string, MasterDataCacheEntry<any>>();
+const inFlightMasterRequests = new Map<string, Promise<any>>();
+
+export function getCachedMasterData<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttlMs = 120000,
+  force = false
+): Promise<T> {
+  if (!force) {
+    const cached = masterDataCache.get(key);
+    if (cached && Date.now() - cached.timestamp < ttlMs) {
+      return Promise.resolve(cached.data);
+    }
+  }
+
+  // Deduplicate in-flight requests to prevent parallel duplicate HTTP fetches
+  const existing = inFlightMasterRequests.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = fetcher()
+    .then((data) => {
+      masterDataCache.set(key, { data, timestamp: Date.now() });
+      return data;
+    })
+    .finally(() => {
+      inFlightMasterRequests.delete(key);
+    });
+
+  inFlightMasterRequests.set(key, promise);
+  return promise;
+}
+
+export function invalidateMasterDataCache(prefix?: string): void {
+  if (!prefix) {
+    masterDataCache.clear();
+    return;
+  }
+  for (const key of masterDataCache.keys()) {
+    if (key.startsWith(prefix)) {
+      masterDataCache.delete(key);
+    }
+  }
+}
+
 export function clearAuthTokens(): void {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+  invalidateMasterDataCache();
 }
 
 let unauthorizedHandler: ((message?: string) => void) | null = null;
@@ -136,25 +194,16 @@ async function tryRefreshSession(): Promise<boolean> {
   return refreshPromise;
 }
 
-async function fetchJson<T>(url: string, options?: RequestInit, _isRetry = false): Promise<T> {
+async function executeWithAuthRetry(
+  url: string,
+  buildRequestInit: (token: string | null) => RequestInit,
+  _isRetry = false
+): Promise<Response> {
   const token = getAuthToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options?.headers as Record<string, string> | undefined),
-  };
-
-  if (token && !headers.Authorization) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  const response = await fetch(`${BASE_URL}${url}`, {
-    ...options,
-    headers,
-  });
-
-  const json = await safeParseJson(response);
+  const response = await fetch(`${BASE_URL}${url}`, buildRequestInit(token));
 
   if (response.status === 401) {
+    const json = await safeParseJson(response);
     const code: string | undefined = json?.code;
     const message: string = json?.message || 'Sesi Anda telah berakhir. Silakan login kembali.';
     const isAuthCredentialEndpoint =
@@ -169,7 +218,7 @@ async function fetchJson<T>(url: string, options?: RequestInit, _isRetry = false
     if (!_isRetry && getRefreshToken()) {
       const refreshed = await tryRefreshSession();
       if (refreshed) {
-        return fetchJson<T>(url, options, true);
+        return executeWithAuthRetry(url, buildRequestInit, true);
       }
     }
 
@@ -177,20 +226,125 @@ async function fetchJson<T>(url: string, options?: RequestInit, _isRetry = false
     throw new ApiError(message, 401, code, json?.details);
   }
 
+  return response;
+}
+
+function throwApiErrorFromPayload(response: Response, json: any): never {
+  const fallbackMessage =
+    response.status === 403
+      ? 'Anda tidak memiliki izin untuk melakukan aksi ini.'
+      : 'Terjadi kesalahan saat memproses permintaan.';
+  throw new ApiError(
+    json?.message || fallbackMessage,
+    response.status,
+    json?.code,
+    json?.details
+  );
+}
+
+async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await executeWithAuthRetry(url, (token) => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+
+    if (token && !headers.Authorization) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    return {
+      ...options,
+      headers,
+    };
+  });
+
+  const json = await safeParseJson(response);
+
   if (!response.ok || json?.success === false) {
-    const fallbackMessage =
-      response.status === 403
-        ? 'Anda tidak memiliki izin untuk melakukan aksi ini.'
-        : 'Terjadi kesalahan saat memproses permintaan.';
-    throw new ApiError(
-      json?.message || fallbackMessage,
-      response.status,
-      json?.code,
-      json?.details
-    );
+    throwApiErrorFromPayload(response, json);
   }
 
   return json?.data as T;
+}
+
+async function fetchFormData<T>(
+  url: string,
+  formData: FormData,
+  options?: Omit<RequestInit, 'body'>
+): Promise<T> {
+  const response = await executeWithAuthRetry(url, (token) => {
+    const headers: Record<string, string> = {
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+    delete headers['Content-Type'];
+    delete headers['content-type'];
+
+    if (token && !headers.Authorization) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    return {
+      method: 'POST',
+      ...options,
+      body: formData,
+      headers,
+    };
+  });
+
+  const json = await safeParseJson(response);
+
+  if (!response.ok || json?.success === false) {
+    throwApiErrorFromPayload(response, json);
+  }
+
+  return json?.data as T;
+}
+
+function extractFilenameFromDisposition(headerValue: string | null): string | null {
+  if (!headerValue) return null;
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(headerValue);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim().replace(/^["']|["']$/g, ''));
+    } catch {
+      return utf8Match[1].trim();
+    }
+  }
+  const asciiMatch = /filename=([^;]+)/i.exec(headerValue);
+  if (asciiMatch?.[1]) {
+    return asciiMatch[1].trim().replace(/^["']|["']$/g, '');
+  }
+  return null;
+}
+
+async function fetchBlob(
+  url: string,
+  options?: RequestInit
+): Promise<{ blob: Blob; filename: string | null }> {
+  const response = await executeWithAuthRetry(url, (token) => {
+    const headers: Record<string, string> = {
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+
+    if (token && !headers.Authorization) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    return {
+      ...options,
+      headers,
+    };
+  });
+
+  if (!response.ok) {
+    const json = await safeParseJson(response);
+    throwApiErrorFromPayload(response, json);
+  }
+
+  const blob = await response.blob();
+  const filename = extractFilenameFromDisposition(response.headers.get('Content-Disposition'));
+  return { blob, filename };
 }
 
 export const api = {
@@ -299,62 +453,106 @@ export const api = {
     }),
 
   // Categories
-  getCategories: (asTree = false) => fetchJson<Category[]>(`/categories?tree=${asTree}`),
-  createCategory: (data: { name: string; parent_id?: string | null; description?: string }) =>
-    fetchJson<Category>('/categories', {
+  getCategories: (asTree = false, options?: { force?: boolean; signal?: AbortSignal }) =>
+    getCachedMasterData(
+      `categories:${asTree}`,
+      () => fetchJson<Category[]>(`/categories?tree=${asTree}`, { signal: options?.signal }),
+      120000,
+      options?.force
+    ),
+  createCategory: async (data: { name: string; parent_id?: string | null; description?: string }) => {
+    const res = await fetchJson<Category>('/categories', {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
-  updateCategory: (id: string, data: { name: string; parent_id?: string | null; description?: string }) =>
-    fetchJson<Category>(`/categories/${id}`, {
+    });
+    invalidateMasterDataCache('categories');
+    return res;
+  },
+  updateCategory: async (id: string, data: { name: string; parent_id?: string | null; description?: string }) => {
+    const res = await fetchJson<Category>(`/categories/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
-    }),
-  deleteCategory: (id: string) =>
-    fetchJson<void>(`/categories/${id}`, {
+    });
+    invalidateMasterDataCache('categories');
+    return res;
+  },
+  deleteCategory: async (id: string) => {
+    const res = await fetchJson<void>(`/categories/${id}`, {
       method: 'DELETE',
-    }),
+    });
+    invalidateMasterDataCache('categories');
+    return res;
+  },
 
   // Brands (Master Merek anti-duplikat)
-  getBrands: () => fetchJson<Brand[]>('/brands'),
-  createBrand: (data: { name: string }) =>
-    fetchJson<{ brand: Brand; created: boolean }>('/brands', {
+  getBrands: (options?: { force?: boolean; signal?: AbortSignal }) =>
+    getCachedMasterData(
+      'brands',
+      () => fetchJson<Brand[]>('/brands', { signal: options?.signal }),
+      120000,
+      options?.force
+    ),
+  createBrand: async (data: { name: string }) => {
+    const res = await fetchJson<{ brand: Brand; created: boolean }>('/brands', {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
-  updateBrand: (id: string, data: { name: string }) =>
-    fetchJson<Brand>(`/brands/${id}`, {
+    });
+    invalidateMasterDataCache('brands');
+    return res;
+  },
+  updateBrand: async (id: string, data: { name: string }) => {
+    const res = await fetchJson<Brand>(`/brands/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
-    }),
-  deleteBrand: (id: string) =>
-    fetchJson<void>(`/brands/${id}`, {
+    });
+    invalidateMasterDataCache('brands');
+    return res;
+  },
+  deleteBrand: async (id: string) => {
+    const res = await fetchJson<void>(`/brands/${id}`, {
       method: 'DELETE',
-    }),
+    });
+    invalidateMasterDataCache('brands');
+    return res;
+  },
 
   // Suppliers (Master Supplier / Pemasok)
-  getSuppliers: (filters?: { search?: string; isActive?: boolean }) => {
+  getSuppliers: (filters?: { search?: string; isActive?: boolean; force?: boolean; signal?: AbortSignal }) => {
     const params = new URLSearchParams();
     if (filters?.search) params.append('search', filters.search);
     if (filters?.isActive !== undefined) params.append('isActive', String(filters.isActive));
     const queryStr = params.toString() ? `?${params.toString()}` : '';
-    return fetchJson<Supplier[]>(`/suppliers${queryStr}`);
+    return getCachedMasterData(
+      `suppliers:${queryStr}`,
+      () => fetchJson<Supplier[]>(`/suppliers${queryStr}`, { signal: filters?.signal }),
+      120000,
+      filters?.force
+    );
   },
   getSupplierById: (id: string) => fetchJson<Supplier>(`/suppliers/${id}`),
-  createSupplier: (data: Partial<Supplier>) =>
-    fetchJson<Supplier>('/suppliers', {
+  createSupplier: async (data: Partial<Supplier>) => {
+    const res = await fetchJson<Supplier>('/suppliers', {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
-  updateSupplier: (id: string, data: Partial<Supplier>) =>
-    fetchJson<Supplier>(`/suppliers/${id}`, {
+    });
+    invalidateMasterDataCache('suppliers');
+    return res;
+  },
+  updateSupplier: async (id: string, data: Partial<Supplier>) => {
+    const res = await fetchJson<Supplier>(`/suppliers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
-    }),
-  deleteSupplier: (id: string) =>
-    fetchJson<void>(`/suppliers/${id}`, {
+    });
+    invalidateMasterDataCache('suppliers');
+    return res;
+  },
+  deleteSupplier: async (id: string) => {
+    const res = await fetchJson<void>(`/suppliers/${id}`, {
       method: 'DELETE',
-    }),
+    });
+    invalidateMasterDataCache('suppliers');
+    return res;
+  },
 
   // Supplier Sales (Tim Sales per Supplier)
   getSupplierSales: (supplierId: string, isActive?: boolean) => {
@@ -676,4 +874,49 @@ export const api = {
     fetchJson<void>(`/roles/${code}`, {
       method: 'DELETE',
     }),
+
+  // Bulk Import Data (Excel & CSV)
+  downloadImportTemplate: async (
+    entity: ImportEntityType,
+    format: ImportFileFormat = 'xlsx',
+    options?: RequestInit
+  ) => {
+    const params = new URLSearchParams({ format });
+    const { blob, filename } = await fetchBlob(
+      `/import/templates/${entity}?${params.toString()}`,
+      options
+    );
+    return {
+      blob,
+      filename: filename || `template-import-${entity}.${format}`,
+    };
+  },
+
+  previewImport: (
+    entity: ImportEntityType,
+    file: File,
+    mode: ImportDuplicateMode = 'skip',
+    options?: Omit<RequestInit, 'body'>
+  ) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('mode', mode);
+    return fetchFormData<ImportPreviewResult>(`/import/${entity}/preview`, formData, options);
+  },
+
+  commitImport: async (
+    entity: ImportEntityType,
+    file: File,
+    mode: ImportDuplicateMode = 'skip',
+    skipInvalidRows = false,
+    options?: Omit<RequestInit, 'body'>
+  ) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('mode', mode);
+    formData.append('skip_invalid_rows', String(skipInvalidRows));
+    const result = await fetchFormData<ImportCommitResult>(`/import/${entity}/commit`, formData, options);
+    invalidateMasterDataCache(); // Clear master data caches so subsequent views receive freshly imported data
+    return result;
+  },
 };

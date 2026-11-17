@@ -190,6 +190,19 @@ const PERMISSION_MODULES: ModuleDefinition[] = [
       },
     ],
   },
+  {
+    id: 'import',
+    name: 'Import Data Massal',
+    description: 'Mengunduh template dan mengimpor data produk, supplier, kategori, dan merek via Excel/CSV',
+    permissions: [
+      {
+        code: 'data:import',
+        label: 'Import Data (Excel / CSV)',
+        description:
+          'Mengakses halaman Import Data, mengunduh template, memvalidasi pratinjau, dan mengeksekusi import sesuai izin tulis entitas terkait',
+      },
+    ],
+  },
 ];
 
 const AVAILABLE_COLORS: { key: BadgeColor; label: string; previewClass: string }[] = [

@@ -3,6 +3,7 @@ import { AuthController } from '../controllers/authController.js';
 import { BrandController } from '../controllers/brandController.js';
 import { CategoryController } from '../controllers/categoryController.js';
 import { DashboardController } from '../controllers/dashboardController.js';
+import { ImportController } from '../controllers/importController.js';
 import { ProductController } from '../controllers/productController.js';
 import { StockController } from '../controllers/stockController.js';
 import { SupplierController } from '../controllers/supplierController.js';
@@ -12,12 +13,14 @@ import { RoleController } from '../controllers/roleController.js';
 import { SupplierInvoiceController } from '../controllers/supplierInvoiceController.js';
 import { UserController } from '../controllers/userController.js';
 import { VariantController } from '../controllers/variantController.js';
+import { LogController } from '../controllers/logController.js';
 import {
   requireAnyPermission,
   requireAuth,
   requirePermission,
 } from '../middleware/auth.js';
 import { loginRateLimiter } from '../middleware/rateLimit.js';
+import { importFileUpload } from '../middleware/upload.js';
 
 const router = Router();
 
@@ -217,5 +220,58 @@ router.post('/reservations/:id/pickup', requirePermission('reservations:pickup')
 router.patch('/reservations/:id/extend-deadline', requirePermission('reservations:pickup'), ReservationController.extendDeadline);
 router.post('/reservations/:id/cancel', requirePermission('reservations:cancel'), ReservationController.cancel);
 router.post('/reservations/:id/close-partial', requirePermission('reservations:cancel'), ReservationController.closePartial);
+
+// Bulk Import Data (.xlsx / .csv)
+router.get(
+  '/import/templates/:entity',
+  requirePermission('data:import'),
+  ImportController.downloadTemplate
+);
+router.post(
+  '/import/:entity/preview',
+  requirePermission('data:import'),
+  importFileUpload.single('file'),
+  ImportController.preview
+);
+router.post(
+  '/import/:entity/commit',
+  requirePermission('data:import'),
+  importFileUpload.single('file'),
+  ImportController.commit
+);
+
+// ==========================================
+// SYSTEM LOGS & AUDIT MANAGEMENT
+// ==========================================
+router.get(
+  '/system/logs',
+  requireAnyPermission('logs:read', 'users:manage', 'roles:manage'),
+  LogController.listLogs
+);
+router.get(
+  '/system/logs/stats',
+  requireAnyPermission('logs:read', 'users:manage', 'roles:manage'),
+  LogController.getStats
+);
+router.get(
+  '/system/logs/files',
+  requireAnyPermission('logs:read', 'users:manage', 'roles:manage'),
+  LogController.listFiles
+);
+router.get(
+  '/system/logs/files/:filename/download',
+  requireAnyPermission('logs:manage', 'users:manage', 'roles:manage'),
+  LogController.downloadFile
+);
+router.delete(
+  '/system/logs/buffer',
+  requireAnyPermission('logs:manage', 'users:manage', 'roles:manage'),
+  LogController.clearBuffer
+);
+router.post(
+  '/system/logs/rotate',
+  requireAnyPermission('logs:manage', 'users:manage', 'roles:manage'),
+  LogController.rotateFiles
+);
 
 export default router;

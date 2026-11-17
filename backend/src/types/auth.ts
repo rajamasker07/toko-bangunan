@@ -24,7 +24,10 @@ export type Permission =
   | 'users:read'
   | 'users:manage'
   | 'users:delete'
-  | 'roles:manage';
+  | 'roles:manage'
+  | 'data:import'
+  | 'logs:read'
+  | 'logs:manage';
 
 export const ALL_PERMISSIONS: readonly Permission[] = [
   'dashboard:read',
@@ -48,6 +51,9 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'users:manage',
   'users:delete',
   'roles:manage',
+  'data:import',
+  'logs:read',
+  'logs:manage',
 ] as const;
 
 export interface RoleDefinition {
