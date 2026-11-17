@@ -26,7 +26,7 @@ interface CategoryManagementViewProps {
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
+const CategoryManagementViewComponent: React.FC<CategoryManagementViewProps> = ({
   categories = [],
   categoriesTree = [],
   loading = false,
@@ -458,3 +458,5 @@ export const CategoryManagementView: React.FC<CategoryManagementViewProps> = ({
     </div>
   );
 };
+
+export const CategoryManagementView = React.memo(CategoryManagementViewComponent);

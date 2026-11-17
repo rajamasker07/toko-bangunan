@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState, useMemo } from 'react';
 import {
   ApiError,
   api,
@@ -214,27 +214,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [permissions, user?.role]
   );
 
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user,
+      permissions,
+      roles,
+      isAuthenticated: Boolean(user),
+      isHydrating,
+      hydrationError,
+      login,
+      logout,
+      refreshUser,
+      refreshRoles,
+      retryHydration: hydrateSession,
+      applyAuthSession,
+      updateLocalUser,
+      can,
+      canAny,
+      canAccess,
+    }),
+    [
+      user,
+      permissions,
+      roles,
+      isHydrating,
+      hydrationError,
+      login,
+      logout,
+      refreshUser,
+      refreshRoles,
+      hydrateSession,
+      applyAuthSession,
+      updateLocalUser,
+      can,
+      canAny,
+      canAccess,
+    ]
+  );
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        permissions,
-        roles,
-        isAuthenticated: Boolean(user),
-        isHydrating,
-        hydrationError,
-        login,
-        logout,
-        refreshUser,
-        refreshRoles,
-        retryHydration: hydrateSession,
-        applyAuthSession,
-        updateLocalUser,
-        can,
-        canAny,
-        canAccess,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

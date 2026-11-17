@@ -64,7 +64,6 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       setDescription(product.description || '');
       setMinStockAlert(Number(product.min_stock_alert) || 5);
       setIsActive(product.is_active !== false);
-      setLocalCategories(categories);
 
       // Load brands and suppliers
       api.getBrands().then((data) => {
@@ -77,7 +76,11 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
 
       api.getSuppliers().then(setSuppliers).catch(console.error);
     }
-  }, [isOpen, product, categories]);
+  }, [isOpen, product]);
+
+  useEffect(() => {
+    setLocalCategories(categories);
+  }, [categories]);
 
   if (!isOpen || !product) return null;
 

@@ -325,13 +325,15 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           if (!isMounted) return;
           console.error('Failed to preload master data:', err);
         });
-
-      setLocalCategories(categories);
     }
     return () => {
       isMounted = false;
     };
-  }, [isOpen, categories]);
+  }, [isOpen]);
+
+  useEffect(() => {
+    setLocalCategories(categories);
+  }, [categories]);
 
   // Global keyboard shortcut: Ctrl+Enter or Cmd+Enter to quickly submit product from anywhere
   useEffect(() => {

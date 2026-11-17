@@ -68,9 +68,62 @@ export function setAuthTokens(accessToken: string, refreshToken: string): void {
   isHandlingUnauthorized = false;
 }
 
+interface MasterDataCacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+const masterDataCache = new Map<string, MasterDataCacheEntry<any>>();
+const inFlightMasterRequests = new Map<string, Promise<any>>();
+
+export function getCachedMasterData<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttlMs = 120000,
+  force = false
+): Promise<T> {
+  if (!force) {
+    const cached = masterDataCache.get(key);
+    if (cached && Date.now() - cached.timestamp < ttlMs) {
+      return Promise.resolve(cached.data);
+    }
+  }
+
+  // Deduplicate in-flight requests to prevent parallel duplicate HTTP fetches
+  const existing = inFlightMasterRequests.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = fetcher()
+    .then((data) => {
+      masterDataCache.set(key, { data, timestamp: Date.now() });
+      return data;
+    })
+    .finally(() => {
+      inFlightMasterRequests.delete(key);
+    });
+
+  inFlightMasterRequests.set(key, promise);
+  return promise;
+}
+
+export function invalidateMasterDataCache(prefix?: string): void {
+  if (!prefix) {
+    masterDataCache.clear();
+    return;
+  }
+  for (const key of masterDataCache.keys()) {
+    if (key.startsWith(prefix)) {
+      masterDataCache.delete(key);
+    }
+  }
+}
+
 export function clearAuthTokens(): void {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+  invalidateMasterDataCache();
 }
 
 let unauthorizedHandler: ((message?: string) => void) | null = null;
@@ -400,62 +453,106 @@ export const api = {
     }),
 
   // Categories
-  getCategories: (asTree = false) => fetchJson<Category[]>(`/categories?tree=${asTree}`),
-  createCategory: (data: { name: string; parent_id?: string | null; description?: string }) =>
-    fetchJson<Category>('/categories', {
+  getCategories: (asTree = false, options?: { force?: boolean; signal?: AbortSignal }) =>
+    getCachedMasterData(
+      `categories:${asTree}`,
+      () => fetchJson<Category[]>(`/categories?tree=${asTree}`, { signal: options?.signal }),
+      120000,
+      options?.force
+    ),
+  createCategory: async (data: { name: string; parent_id?: string | null; description?: string }) => {
+    const res = await fetchJson<Category>('/categories', {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
-  updateCategory: (id: string, data: { name: string; parent_id?: string | null; description?: string }) =>
-    fetchJson<Category>(`/categories/${id}`, {
+    });
+    invalidateMasterDataCache('categories');
+    return res;
+  },
+  updateCategory: async (id: string, data: { name: string; parent_id?: string | null; description?: string }) => {
+    const res = await fetchJson<Category>(`/categories/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
-    }),
-  deleteCategory: (id: string) =>
-    fetchJson<void>(`/categories/${id}`, {
+    });
+    invalidateMasterDataCache('categories');
+    return res;
+  },
+  deleteCategory: async (id: string) => {
+    const res = await fetchJson<void>(`/categories/${id}`, {
       method: 'DELETE',
-    }),
+    });
+    invalidateMasterDataCache('categories');
+    return res;
+  },
 
   // Brands (Master Merek anti-duplikat)
-  getBrands: () => fetchJson<Brand[]>('/brands'),
-  createBrand: (data: { name: string }) =>
-    fetchJson<{ brand: Brand; created: boolean }>('/brands', {
+  getBrands: (options?: { force?: boolean; signal?: AbortSignal }) =>
+    getCachedMasterData(
+      'brands',
+      () => fetchJson<Brand[]>('/brands', { signal: options?.signal }),
+      120000,
+      options?.force
+    ),
+  createBrand: async (data: { name: string }) => {
+    const res = await fetchJson<{ brand: Brand; created: boolean }>('/brands', {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
-  updateBrand: (id: string, data: { name: string }) =>
-    fetchJson<Brand>(`/brands/${id}`, {
+    });
+    invalidateMasterDataCache('brands');
+    return res;
+  },
+  updateBrand: async (id: string, data: { name: string }) => {
+    const res = await fetchJson<Brand>(`/brands/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
-    }),
-  deleteBrand: (id: string) =>
-    fetchJson<void>(`/brands/${id}`, {
+    });
+    invalidateMasterDataCache('brands');
+    return res;
+  },
+  deleteBrand: async (id: string) => {
+    const res = await fetchJson<void>(`/brands/${id}`, {
       method: 'DELETE',
-    }),
+    });
+    invalidateMasterDataCache('brands');
+    return res;
+  },
 
   // Suppliers (Master Supplier / Pemasok)
-  getSuppliers: (filters?: { search?: string; isActive?: boolean }) => {
+  getSuppliers: (filters?: { search?: string; isActive?: boolean; force?: boolean; signal?: AbortSignal }) => {
     const params = new URLSearchParams();
     if (filters?.search) params.append('search', filters.search);
     if (filters?.isActive !== undefined) params.append('isActive', String(filters.isActive));
     const queryStr = params.toString() ? `?${params.toString()}` : '';
-    return fetchJson<Supplier[]>(`/suppliers${queryStr}`);
+    return getCachedMasterData(
+      `suppliers:${queryStr}`,
+      () => fetchJson<Supplier[]>(`/suppliers${queryStr}`, { signal: filters?.signal }),
+      120000,
+      filters?.force
+    );
   },
   getSupplierById: (id: string) => fetchJson<Supplier>(`/suppliers/${id}`),
-  createSupplier: (data: Partial<Supplier>) =>
-    fetchJson<Supplier>('/suppliers', {
+  createSupplier: async (data: Partial<Supplier>) => {
+    const res = await fetchJson<Supplier>('/suppliers', {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
-  updateSupplier: (id: string, data: Partial<Supplier>) =>
-    fetchJson<Supplier>(`/suppliers/${id}`, {
+    });
+    invalidateMasterDataCache('suppliers');
+    return res;
+  },
+  updateSupplier: async (id: string, data: Partial<Supplier>) => {
+    const res = await fetchJson<Supplier>(`/suppliers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
-    }),
-  deleteSupplier: (id: string) =>
-    fetchJson<void>(`/suppliers/${id}`, {
+    });
+    invalidateMasterDataCache('suppliers');
+    return res;
+  },
+  deleteSupplier: async (id: string) => {
+    const res = await fetchJson<void>(`/suppliers/${id}`, {
       method: 'DELETE',
-    }),
+    });
+    invalidateMasterDataCache('suppliers');
+    return res;
+  },
 
   // Supplier Sales (Tim Sales per Supplier)
   getSupplierSales: (supplierId: string, isActive?: boolean) => {
@@ -807,7 +904,7 @@ export const api = {
     return fetchFormData<ImportPreviewResult>(`/import/${entity}/preview`, formData, options);
   },
 
-  commitImport: (
+  commitImport: async (
     entity: ImportEntityType,
     file: File,
     mode: ImportDuplicateMode = 'skip',
@@ -818,6 +915,8 @@ export const api = {
     formData.append('file', file);
     formData.append('mode', mode);
     formData.append('skip_invalid_rows', String(skipInvalidRows));
-    return fetchFormData<ImportCommitResult>(`/import/${entity}/commit`, formData, options);
+    const result = await fetchFormData<ImportCommitResult>(`/import/${entity}/commit`, formData, options);
+    invalidateMasterDataCache(); // Clear master data caches so subsequent views receive freshly imported data
+    return result;
   },
 };

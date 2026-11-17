@@ -29,7 +29,7 @@ interface BrandManagementViewProps {
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-export const BrandManagementView: React.FC<BrandManagementViewProps> = ({
+const BrandManagementViewComponent: React.FC<BrandManagementViewProps> = ({
   brands = [],
   loading = false,
   onRefresh,
@@ -467,3 +467,5 @@ export const BrandManagementView: React.FC<BrandManagementViewProps> = ({
     </div>
   );
 };
+
+export const BrandManagementView = React.memo(BrandManagementViewComponent);

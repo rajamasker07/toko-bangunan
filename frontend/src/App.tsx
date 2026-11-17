@@ -131,6 +131,19 @@ export const App: React.FC = () => {
   // FOCUSED ON-DEMAND DATA LOADERS (Prevents production freezing and bloat)
   // =========================================================================
 
+  // Stable references to state to prevent callback recreation and cyclic re-render loops
+  const categoriesRef = useRef(categories);
+  categoriesRef.current = categories;
+
+  const brandsRef = useRef(brands);
+  brandsRef.current = brands;
+
+  const suppliersRef = useRef(suppliers);
+  suppliersRef.current = suppliers;
+
+  const productsRef = useRef(products);
+  productsRef.current = products;
+
   const loadSummary = useCallback(async () => {
     try {
       setLoadingSummary(true);
@@ -143,12 +156,12 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  const loadCategories = useCallback(async () => {
+  const loadCategories = useCallback(async (force = false) => {
     try {
       setLoadingCategories(true);
       const [catFlat, catTree] = await Promise.all([
-        api.getCategories(false),
-        api.getCategories(true),
+        api.getCategories(false, { force }),
+        api.getCategories(true, { force }),
       ]);
       setCategories(catFlat);
       setCategoriesTree(catTree);
@@ -160,10 +173,10 @@ export const App: React.FC = () => {
     }
   }, [showToast]);
 
-  const loadBrands = useCallback(async () => {
+  const loadBrands = useCallback(async (force = false) => {
     try {
       setLoadingBrands(true);
-      const brandData = await api.getBrands();
+      const brandData = await api.getBrands({ force });
       setBrands(brandData);
     } catch (err: any) {
       console.error(err);
@@ -173,10 +186,10 @@ export const App: React.FC = () => {
     }
   }, [showToast]);
 
-  const loadSuppliers = useCallback(async () => {
+  const loadSuppliers = useCallback(async (force = false) => {
     try {
       setLoadingSuppliers(true);
-      const supplierData = await api.getSuppliers();
+      const supplierData = await api.getSuppliers({ force });
       setSuppliers(supplierData);
     } catch (err: any) {
       console.error(err);
@@ -211,17 +224,21 @@ export const App: React.FC = () => {
 
     try {
       setLoadingProducts(true);
+
+      const needCategories = categoriesRef.current.length === 0;
+      const needBrands = brandsRef.current.length === 0;
+
       const [prodData, catFlat, brandData] = await Promise.all([
         api.getProducts(undefined, { signal: controller.signal }),
-        categories.length === 0 ? api.getCategories(false) : Promise.resolve(categories),
-        brands.length === 0 ? api.getBrands() : Promise.resolve(brands),
+        needCategories ? api.getCategories(false, { signal: controller.signal }) : Promise.resolve(categoriesRef.current),
+        needBrands ? api.getBrands({ signal: controller.signal }) : Promise.resolve(brandsRef.current),
       ]);
 
       if (controller.signal.aborted) return;
 
       setProducts(prodData);
-      if (categories.length === 0) setCategories(catFlat);
-      if (brands.length === 0) setBrands(brandData);
+      if (needCategories && catFlat) setCategories(catFlat);
+      if (needBrands && brandData) setBrands(brandData);
 
       // Keep selected product & variant in sync if currently viewing them
       setSelectedProduct((prevProd) => {
@@ -247,7 +264,7 @@ export const App: React.FC = () => {
         setLoadingProducts(false);
       }
     }
-  }, [categories, brands, showToast]);
+  }, [showToast]);
 
   // Clear cached application data on logout / 401
   useEffect(() => {
@@ -284,37 +301,70 @@ export const App: React.FC = () => {
     loadSummary();
   }, [isAuthenticated, loadSummary]);
 
-  // Route guard + tab switch listener: lazy load data for the active page
+  // Keep latest loader and permission helpers in ref so the tab-switch effect has stable minimal dependencies
+  const tabHandlersRef = useRef({
+    loadSummary,
+    loadReservationAlerts,
+    loadProducts,
+    loadCategories,
+    loadBrands,
+    loadSuppliers,
+    canAccess,
+    showToast,
+  });
+  tabHandlersRef.current = {
+    loadSummary,
+    loadReservationAlerts,
+    loadProducts,
+    loadCategories,
+    loadBrands,
+    loadSuppliers,
+    canAccess,
+    showToast,
+  };
+
+  // Route guard + tab switch listener: lazy load data for the active page ONCE per tab change
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    if (!canAccess(activeTab)) {
-      showToast('Anda tidak memiliki izin mengakses halaman tersebut.', 'error');
+    const {
+      canAccess: checkAccess,
+      showToast: notify,
+      loadSummary: fetchSummary,
+      loadReservationAlerts: fetchAlerts,
+      loadProducts: fetchProducts,
+      loadCategories: fetchCategories,
+      loadBrands: fetchBrands,
+      loadSuppliers: fetchSuppliers,
+    } = tabHandlersRef.current;
+
+    if (!checkAccess(activeTab)) {
+      notify('Anda tidak memiliki izin mengakses halaman tersebut.', 'error');
       setActiveTab('dashboard');
       return;
     }
 
     if (activeTab === 'dashboard') {
-      loadSummary();
-      loadReservationAlerts();
+      fetchSummary();
+      fetchAlerts();
     } else if (activeTab === 'products') {
-      loadProducts();
+      fetchProducts();
     } else if (activeTab === 'categories') {
-      loadCategories();
+      fetchCategories();
     } else if (activeTab === 'adjust') {
-      loadProducts();
-      loadSummary();
+      fetchProducts();
+      fetchSummary();
     } else if (activeTab === 'brands') {
-      loadBrands();
+      fetchBrands();
     } else if (activeTab === 'suppliers') {
-      loadSuppliers();
+      fetchSuppliers();
     } else if (activeTab === 'reservations') {
-      if (products.length === 0) {
-        loadProducts();
+      if (productsRef.current.length === 0) {
+        fetchProducts();
       }
-      loadReservationAlerts();
+      fetchAlerts();
     }
-  }, [activeTab, isAuthenticated, canAccess, can, products.length, loadSummary, loadReservationAlerts, loadProducts, loadCategories, loadBrands, loadSuppliers]);
+  }, [activeTab, isAuthenticated]);
 
   // Handle open adjust stock modal
   const handleOpenAdjust = (variantId?: string) => {
@@ -380,14 +430,14 @@ export const App: React.FC = () => {
       loadSummary();
       if (entity === 'products') {
         loadProducts();
-        loadCategories();
-        loadBrands();
+        loadCategories(true);
+        loadBrands(true);
       } else if (entity === 'categories') {
-        loadCategories();
+        loadCategories(true);
       } else if (entity === 'brands') {
-        loadBrands();
+        loadBrands(true);
       } else if (entity === 'suppliers') {
-        loadSuppliers();
+        loadSuppliers(true);
       }
     },
     [loadSummary, loadProducts, loadCategories, loadBrands, loadSuppliers]
@@ -689,7 +739,7 @@ export const App: React.FC = () => {
               categories={categories}
               categoriesTree={categoriesTree}
               loading={loadingCategories}
-              onRefresh={loadCategories}
+              onRefresh={() => loadCategories(true)}
               onOpenImport={() => handleOpenImport('categories', 'categories')}
               showToast={showToast}
             />
@@ -699,7 +749,7 @@ export const App: React.FC = () => {
             <BrandManagementView
               brands={brands}
               loading={loadingBrands}
-              onRefresh={loadBrands}
+              onRefresh={() => loadBrands(true)}
               onOpenImport={() => handleOpenImport('brands', 'brands')}
               showToast={showToast}
             />
@@ -709,7 +759,7 @@ export const App: React.FC = () => {
             <SupplierManagementView
               suppliers={suppliers}
               loading={loadingSuppliers}
-              onRefresh={loadSuppliers}
+              onRefresh={() => loadSuppliers(true)}
               onOpenImport={() => handleOpenImport('suppliers', 'suppliers')}
               showToast={showToast}
             />
