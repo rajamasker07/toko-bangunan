@@ -13,6 +13,7 @@ import { RoleController } from '../controllers/roleController.js';
 import { SupplierInvoiceController } from '../controllers/supplierInvoiceController.js';
 import { UserController } from '../controllers/userController.js';
 import { VariantController } from '../controllers/variantController.js';
+import { LogController } from '../controllers/logController.js';
 import {
   requireAnyPermission,
   requireAuth,
@@ -237,6 +238,40 @@ router.post(
   requirePermission('data:import'),
   importFileUpload.single('file'),
   ImportController.commit
+);
+
+// ==========================================
+// SYSTEM LOGS & AUDIT MANAGEMENT
+// ==========================================
+router.get(
+  '/system/logs',
+  requireAnyPermission('logs:read', 'users:manage', 'roles:manage'),
+  LogController.listLogs
+);
+router.get(
+  '/system/logs/stats',
+  requireAnyPermission('logs:read', 'users:manage', 'roles:manage'),
+  LogController.getStats
+);
+router.get(
+  '/system/logs/files',
+  requireAnyPermission('logs:read', 'users:manage', 'roles:manage'),
+  LogController.listFiles
+);
+router.get(
+  '/system/logs/files/:filename/download',
+  requireAnyPermission('logs:manage', 'users:manage', 'roles:manage'),
+  LogController.downloadFile
+);
+router.delete(
+  '/system/logs/buffer',
+  requireAnyPermission('logs:manage', 'users:manage', 'roles:manage'),
+  LogController.clearBuffer
+);
+router.post(
+  '/system/logs/rotate',
+  requireAnyPermission('logs:manage', 'users:manage', 'roles:manage'),
+  LogController.rotateFiles
 );
 
 export default router;

@@ -144,6 +144,21 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
       'Mengunduh template, memvalidasi pratinjau, dan mengimpor data produk, supplier, kategori, serta merek secara massal',
     module: 'Import Data',
   },
+  // Sistem & Log
+  {
+    id: 'logs:read',
+    label: 'Lihat Log Sistem & Aktivitas',
+    description:
+      'Melihat riwayat log server, request HTTP, database, dan peringatan error untuk monitoring & debugging',
+    module: 'Sistem & Log',
+  },
+  {
+    id: 'logs:manage',
+    label: 'Kelola & Unduh Log Sistem',
+    description:
+      'Mengunduh file log fisik server, merotasi log file, dan membersihkan buffer log memori',
+    module: 'Sistem & Log',
+  },
 ];
 
 export function getPermissionGroups(): PermissionGroup[] {

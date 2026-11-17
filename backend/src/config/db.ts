@@ -1,5 +1,6 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { logger } from '../utils/logger.js';
 
 dotenv.config();
 
@@ -13,8 +14,26 @@ export const pool = new Pool({
 });
 
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle PostgreSQL client:', err);
+  logger.fatal('DATABASE', 'Unexpected error on idle PostgreSQL client', {}, err);
   process.exit(-1);
 });
 
-export const query = (text: string, params?: any[]) => pool.query(text, params);
+export const query = async (text: string, params?: any[]) => {
+  const start = Date.now();
+  try {
+    const res = await pool.query(text, params);
+    const duration = Date.now() - start;
+    if (duration > 500) {
+      logger.warn('DATABASE', `Slow query detected (${duration}ms)`, {
+        durationMs: duration,
+        query: text.replace(/\s+/g, ' ').trim().slice(0, 300),
+      });
+    }
+    return res;
+  } catch (err: any) {
+    logger.error('DATABASE', `Query error: ${err.message}`, {
+      query: text.replace(/\s+/g, ' ').trim().slice(0, 300),
+    }, err);
+    throw err;
+  }
+};

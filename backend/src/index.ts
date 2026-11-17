@@ -1,10 +1,11 @@
 import express from 'express';
 import cors from 'cors';
-import morgan from 'morgan';
 import multer from 'multer';
 import { env } from './config/env.js';
 import apiRouter from './routes/api.js';
 import { initializeDatabase } from './db/init.js';
+import { requestLogger } from './middleware/requestLogger.js';
+import { logger } from './utils/logger.js';
 
 const app = express();
 const port = env.port;
@@ -20,12 +21,14 @@ app.use(
       callback(new Error(`Origin ${origin} tidak diizinkan oleh kebijakan CORS`));
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    exposedHeaders: ['Content-Disposition'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
+    exposedHeaders: ['Content-Disposition', 'X-Request-Id'],
   })
 );
 app.use(express.json());
-app.use(morgan('dev'));
+
+// Production-ready correlated request logger with ANSI terminal output, file storage & ring-buffer
+app.use(requestLogger);
 
 // API Routes
 app.use('/api', apiRouter);
@@ -56,11 +59,10 @@ app.use((_req, res) => {
 });
 
 // Error handling middleware
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('Unhandled server error:', err);
-
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof multer.MulterError || err?.name === 'MulterError') {
     if (err.code === 'LIMIT_FILE_SIZE') {
+      logger.warn('HTTP', 'Upload rejected: file size exceeds 5 MB limit', { ip: req.ip });
       res.status(413).json({
         success: false,
         code: 'FILE_TOO_LARGE',
@@ -69,6 +71,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
       return;
     }
     if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+      logger.warn('HTTP', 'Upload rejected: invalid upload field', { ip: req.ip });
       res.status(400).json({
         success: false,
         code: 'INVALID_UPLOAD_FIELD',
@@ -76,6 +79,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
       });
       return;
     }
+    logger.warn('HTTP', `Upload error: ${err.message}`, { ip: req.ip });
     res.status(400).json({
       success: false,
       code: 'UPLOAD_ERROR',
@@ -90,10 +94,38 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
       : typeof err?.message === 'string' && err.message.includes('CORS')
         ? 403
         : 500;
+
+  if (statusCode >= 500) {
+    logger.error('SYSTEM', `Unhandled server error: ${err.message || 'Internal error'}`, {
+      statusCode,
+      method: req.method,
+      url: req.originalUrl,
+    }, err);
+  } else {
+    logger.warn('HTTP', `Client error rejected (${statusCode}): ${err.message}`, {
+      statusCode,
+      method: req.method,
+      url: req.originalUrl,
+    });
+  }
+
   res.status(statusCode).json({
     success: false,
     ...(typeof err?.code === 'string' ? { code: err.code } : {}),
     message: err.message || 'Terjadi kesalahan internal server',
+  });
+});
+
+// Process crash & unhandled exception guards
+process.on('uncaughtException', (err) => {
+  logger.fatal('SYSTEM', `Uncaught Exception detected: ${err.message}`, {}, err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('SYSTEM', 'Unhandled Promise Rejection detected', {
+    reason: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
   });
 });
 
@@ -102,10 +134,10 @@ async function startServer() {
   try {
     await initializeDatabase();
     app.listen(port, () => {
-      console.log(`🚀 Toko Bangunan API server running on http://localhost:${port}`);
+      logger.info('SYSTEM', `🚀 Toko Bangunan API server running on http://localhost:${port}`);
     });
   } catch (err) {
-    console.error('Failed to start server:', err);
+    logger.fatal('SYSTEM', 'Failed to start server during initialization', {}, err);
     process.exit(1);
   }
 }
