@@ -26,6 +26,7 @@ export type Permission =
   | 'users:delete'
   | 'roles:manage'
   | 'data:import'
+  | 'data:export'
   | 'logs:read'
   | 'logs:manage';
 
@@ -52,6 +53,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'users:delete',
   'roles:manage',
   'data:import',
+  'data:export',
   'logs:read',
   'logs:manage',
 ] as const;

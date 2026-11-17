@@ -229,7 +229,8 @@ export type Permission =
   | 'reservations:pickup'
   | 'reservations:cancel'
   | 'roles:manage'
-  | 'data:import';
+  | 'data:import'
+  | 'data:export';
 
 export interface RoleDefinition {
   id: string;
@@ -461,3 +462,38 @@ export interface ImportCommitResult {
   summary: ImportCommitSummary;
   errors: ImportCommitErrorItem[];
 }
+
+export type ExportEntityType =
+  | 'products'
+  | 'suppliers'
+  | 'categories'
+  | 'brands'
+  | 'units'
+  | 'supplier_invoices'
+  | 'stock_movements'
+  | 'reservations';
+
+export type ExportFileFormat = 'xlsx' | 'csv' | 'json';
+
+export interface TableRecordCount {
+  tableName: string;
+  displayName: string;
+  count: number;
+  description: string;
+}
+
+export interface ExportStatsResponse {
+  tables: TableRecordCount[];
+  databaseSize: string;
+  generatedAt: string;
+  postgresVersion: string;
+}
+
+export interface RestoreDatabaseResult {
+  success: boolean;
+  message: string;
+  tablesRestored: number;
+  recordsRestored: number;
+  executedAt: string;
+}
+

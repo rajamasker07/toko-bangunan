@@ -9,6 +9,7 @@ export type AppTab =
   | 'brands'
   | 'suppliers'
   | 'import'
+  | 'export'
   | 'users'
   | 'docs';
 
@@ -35,6 +36,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'reservations:cancel',
   'roles:manage',
   'data:import',
+  'data:export',
 ];
 
 export const ROLE_ORDER: readonly UserRole[] = ['owner', 'admin', 'gudang', 'kasir'];
@@ -162,6 +164,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'reservations:cancel',
     'roles:manage',
     'data:import',
+    'data:export',
   ],
   admin: [
     'dashboard:read',
@@ -185,6 +188,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'reservations:cancel',
     'roles:manage',
     'data:import',
+    'data:export',
   ],
   gudang: [
     'dashboard:read',
@@ -364,6 +368,8 @@ export function canAccessTab(
         hasPermission(permissions, role, 'data:import') &&
         hasAnyPermission(permissions, role, ['products:create', 'master:write'])
       );
+    case 'export':
+      return hasPermission(permissions, role, 'data:export');
     case 'users':
       return hasAnyPermission(permissions, role, ['users:read', 'users:manage', 'roles:manage']);
     case 'docs':

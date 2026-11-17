@@ -14,7 +14,8 @@ import {
   GitFork,
   RefreshCw,
   Eye,
-  Upload
+  Upload,
+  Download,
 } from 'lucide-react';
 
 interface CategoryManagementViewProps {
@@ -37,8 +38,10 @@ const CategoryManagementViewComponent: React.FC<CategoryManagementViewProps> = (
   const { can } = useAuth();
   const canWrite = can('master:write');
   const canImport = can('data:import') && canWrite;
+  const canExport = can('data:export');
   const canDelete = can('master:delete');
 
+  const [isExporting, setIsExporting] = useState(false);
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -269,6 +272,28 @@ const CategoryManagementViewComponent: React.FC<CategoryManagementViewProps> = (
               title="Segarkan Kategori"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-500' : ''}`} />
+            </button>
+          )}
+          {canExport && (
+            <button
+              type="button"
+              disabled={isExporting}
+              onClick={async () => {
+                setIsExporting(true);
+                try {
+                  await api.downloadEntityExport('categories', 'xlsx');
+                  showToast('Data kategori berhasil diekspor ke Excel', 'success');
+                } catch (e: any) {
+                  showToast(e.message || 'Gagal mengekspor kategori', 'error');
+                } finally {
+                  setIsExporting(false);
+                }
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-xs transition-colors disabled:opacity-50"
+              title="Unduh master kategori dalam format Excel"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>{isExporting ? 'Mengekspor...' : 'Export'}</span>
             </button>
           )}
           {canImport && onOpenImport && (

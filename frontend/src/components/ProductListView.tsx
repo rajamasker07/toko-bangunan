@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import { Product, Category, Brand } from '../types';
 import { formatRupiah, formatStock } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 import { Pagination } from './common/Pagination';
 import { SearchableSelect, SearchableOption } from './common/SearchableSelect';
 import { 
@@ -32,6 +33,7 @@ interface ProductListViewProps {
   onRefresh: () => void;
   onOpenCreate: () => void;
   onOpenImport?: () => void;
+  onOpenExport?: () => void;
   onOpenDetail: (product: Product) => void;
   onOpenAdjust: (variantId: string) => void;
   onEditProduct?: (product: Product) => void;
@@ -48,6 +50,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   onRefresh,
   onOpenCreate,
   onOpenImport,
+  onOpenExport,
   onOpenDetail,
   onOpenAdjust,
   onEditProduct,
@@ -58,9 +61,12 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   const { can } = useAuth();
   const canCreate = can('products:create');
   const canImport = can('data:import') && canCreate;
+  const canExport = can('data:export');
   const canUpdate = can('products:update');
   const canDelete = can('products:delete');
   const canAdjust = can('stock:adjust');
+
+  const [isExporting, setIsExporting] = useState(false);
 
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
@@ -167,31 +173,15 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
     );
   }, [filteredProducts, currentPage, pageSize]);
 
-  const exportCSV = () => {
-    const headers = ['ID (UUIDv7)', 'Nama Produk', 'SKU', 'Merk', 'Kategori', 'Total Stok', 'Batas Min', 'Varian', 'Harga Dasar'];
-    const rows = filteredProducts.map((p) => {
-      const baseUnit = p.variants?.[0]?.units?.find((u) => u.is_base_unit) || p.variants?.[0]?.units?.[0];
-      return [
-        `"${p.id}"`,
-        `"${p.name.replace(/"/g, '""')}"`,
-        `"${p.sku}"`,
-        `"${p.brand || ''}"`,
-        `"${p.category_name || ''}"`,
-        p.total_stock,
-        p.min_stock_alert,
-        p.variant_count || 1,
-        baseUnit ? Number(baseUnit.sell_price) : 0,
-      ].join(',');
-    });
-
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `produk_toko_bangunan_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleExportProducts = async (format: 'xlsx' | 'csv' = 'xlsx') => {
+    setIsExporting(true);
+    try {
+      await api.downloadEntityExport('products', format);
+    } catch (err: any) {
+      console.error('Export products failed:', err);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -208,13 +198,17 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
-          <button
-            onClick={exportCSV}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-sm transition-colors"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export CSV</span>
-          </button>
+          {canExport && (
+            <button
+              onClick={() => handleExportProducts('xlsx')}
+              disabled={isExporting}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-sm transition-colors disabled:opacity-50"
+              title="Unduh data katalog lengkap dalam format Excel yang siap di-import ulang"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>{isExporting ? 'Mengekspor...' : 'Export Excel'}</span>
+            </button>
+          )}
           {canImport && onOpenImport && (
             <button
               type="button"

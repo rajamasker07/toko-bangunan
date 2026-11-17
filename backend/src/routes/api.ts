@@ -3,6 +3,7 @@ import { AuthController } from '../controllers/authController.js';
 import { BrandController } from '../controllers/brandController.js';
 import { CategoryController } from '../controllers/categoryController.js';
 import { DashboardController } from '../controllers/dashboardController.js';
+import { ExportController } from '../controllers/exportController.js';
 import { ImportController } from '../controllers/importController.js';
 import { ProductController } from '../controllers/productController.js';
 import { StockController } from '../controllers/stockController.js';
@@ -20,7 +21,7 @@ import {
   requirePermission,
 } from '../middleware/auth.js';
 import { loginRateLimiter } from '../middleware/rateLimit.js';
-import { importFileUpload } from '../middleware/upload.js';
+import { importFileUpload, sqlFileUpload } from '../middleware/upload.js';
 
 const router = Router();
 
@@ -238,6 +239,36 @@ router.post(
   requirePermission('data:import'),
   importFileUpload.single('file'),
   ImportController.commit
+);
+
+// ==========================================
+// DATA EXPORT & DATABASE BACKUP / RESTORE
+// ==========================================
+router.get(
+  '/export/stats',
+  requirePermission('data:export'),
+  ExportController.getStats
+);
+router.get(
+  '/export/database/sql',
+  requirePermission('data:export'),
+  ExportController.exportDatabaseSql
+);
+router.get(
+  '/export/full-workbook',
+  requirePermission('data:export'),
+  ExportController.exportFullWorkbook
+);
+router.post(
+  '/export/database/restore',
+  requirePermission('data:export'),
+  sqlFileUpload.single('file'),
+  ExportController.restoreDatabase
+);
+router.get(
+  '/export/:entity',
+  requirePermission('data:export'),
+  ExportController.exportEntity
 );
 
 // ==========================================

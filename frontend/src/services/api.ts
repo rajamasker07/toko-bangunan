@@ -23,6 +23,10 @@ import {
   ImportDuplicateMode,
   ImportPreviewResult,
   ImportCommitResult,
+  ExportEntityType,
+  ExportFileFormat,
+  ExportStatsResponse,
+  RestoreDatabaseResult,
 } from '../types';
 
 const BASE_URL = '/api';
@@ -316,6 +320,24 @@ function extractFilenameFromDisposition(headerValue: string | null): string | nu
     return asciiMatch[1].trim().replace(/^["']|["']$/g, '');
   }
   return null;
+}
+
+export function triggerBrowserBlobDownload(
+  blob: Blob,
+  defaultFilename: string,
+  filenameHeader?: string | null
+): void {
+  const finalFilename = filenameHeader || defaultFilename;
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = finalFilename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  }, 250);
 }
 
 async function fetchBlob(
@@ -917,6 +939,38 @@ export const api = {
     formData.append('skip_invalid_rows', String(skipInvalidRows));
     const result = await fetchFormData<ImportCommitResult>(`/import/${entity}/commit`, formData, options);
     invalidateMasterDataCache(); // Clear master data caches so subsequent views receive freshly imported data
+    return result;
+  },
+
+  // Data Export & Database Backup
+  getExportStats: () => fetchJson<ExportStatsResponse>('/export/stats'),
+
+  downloadEntityExport: async (
+    entity: ExportEntityType,
+    format: ExportFileFormat = 'xlsx'
+  ) => {
+    const { blob, filename } = await fetchBlob(`/export/${entity}?format=${format}`);
+    triggerBrowserBlobDownload(blob, `bangunjaya-export-${entity}.${format}`, filename);
+  },
+
+  downloadFullWorkbook: async (format: 'xlsx' | 'json' = 'xlsx') => {
+    const { blob, filename } = await fetchBlob(`/export/full-workbook?format=${format}`);
+    triggerBrowserBlobDownload(blob, `bangunjaya-full-backup.${format}`, filename);
+  },
+
+  downloadDatabaseSql: async () => {
+    const { blob, filename } = await fetchBlob('/export/database/sql');
+    triggerBrowserBlobDownload(blob, 'bangunjaya-database-dump.sql', filename);
+  },
+
+  restoreDatabase: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const result = await fetchFormData<RestoreDatabaseResult>(
+      '/export/database/restore',
+      formData
+    );
+    invalidateMasterDataCache();
     return result;
   },
 };

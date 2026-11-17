@@ -80,6 +80,30 @@ export const importFileUpload = multer({
   },
 });
 
+export const MAX_SQL_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
+export const sqlFileUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_SQL_FILE_SIZE_BYTES,
+    files: 1,
+  },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (ext === '.sql') {
+      cb(null, true);
+      return;
+    }
+    cb(
+      new AppHttpError(
+        400,
+        'Hanya file SQL (.sql) yang diizinkan untuk restore database.',
+        'UNSUPPORTED_FILE_TYPE'
+      )
+    );
+  },
+});
+
 function isZipMagicBytes(buffer: Buffer): boolean {
   return (
     buffer.length >= 4 &&

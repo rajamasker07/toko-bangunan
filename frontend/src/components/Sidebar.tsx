@@ -17,6 +17,7 @@ import {
   Users,
   ShoppingBag,
   FileUp,
+  Download,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { AppTab } from '../utils/rbac';
@@ -121,6 +122,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           id: 'import',
           label: 'Import Data',
           icon: FileUp,
+          badge: null,
+        },
+        {
+          id: 'export',
+          label: 'Export & Backup',
+          icon: Download,
           badge: null,
         },
       ],

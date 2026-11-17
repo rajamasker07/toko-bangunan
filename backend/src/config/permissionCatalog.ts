@@ -142,7 +142,15 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
     label: 'Import Data Massal (Excel / CSV)',
     description:
       'Mengunduh template, memvalidasi pratinjau, dan mengimpor data produk, supplier, kategori, serta merek secara massal',
-    module: 'Import Data',
+    module: 'Import & Export Data',
+  },
+  // Export & Backup Data
+  {
+    id: 'data:export',
+    label: 'Export Data & Backup Database',
+    description:
+      'Mengekspor data master, transaksi mutasi, faktur, nota titipan ke Excel/CSV, serta mencadangkan (backup) dan memulihkan (restore) database PostgreSQL',
+    module: 'Import & Export Data',
   },
   // Sistem & Log
   {

@@ -10,6 +10,7 @@ import {
   DashboardSummary,
   ReservationAlertSummary,
   ImportEntityType,
+  ExportEntityType,
 } from './types';
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
@@ -32,6 +33,7 @@ import { LoginView } from './components/LoginView';
 import { ProfileAccountModal } from './components/ProfileAccountModal';
 import { UserManagementView } from './components/UserManagementView';
 import { ImportDataView } from './components/ImportDataView';
+import { ExportDataView } from './components/ExportDataView';
 import { useToast } from './components/Toast';
 import { useAuth } from './context/AuthContext';
 
@@ -98,6 +100,7 @@ export const App: React.FC = () => {
   // Import Data context state (pre-selected entity & return target when opened via shortcut)
   const [importInitialEntity, setImportInitialEntity] = useState<ImportEntityType | undefined>(undefined);
   const [importReturnTab, setImportReturnTab] = useState<ActiveTab | null>(null);
+  const [exportInitialEntity, setExportInitialEntity] = useState<ExportEntityType | null>(null);
 
   // Sidebar collapsed state with localStorage persistence
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -784,6 +787,19 @@ export const App: React.FC = () => {
                 handleTabChange(IMPORT_ENTITY_TAB_MAP[entity]);
               }}
               showToast={showToast}
+            />
+          )}
+
+          {activeTab === 'export' && canAccess('export') && (
+            <ExportDataView
+              initialEntity={exportInitialEntity}
+              showToast={showToast}
+              onRefreshMasterData={() => {
+                loadProducts();
+                loadCategories(true);
+                loadBrands(true);
+                loadSuppliers(true);
+              }}
             />
           )}
 
