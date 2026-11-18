@@ -175,6 +175,16 @@ router.delete(
 
 // Products
 router.get('/products', requirePermission('products:read'), ProductController.list);
+router.get(
+  '/products/embedding-status',
+  requirePermission('products:read'),
+  ProductController.getEmbeddingStatus
+);
+router.post(
+  '/products/reindex-embeddings',
+  requireAnyPermission('products:update', 'products:create', 'master:write'),
+  ProductController.reindexEmbeddings
+);
 router.get('/products/:id', requirePermission('products:read'), ProductController.getById);
 router.post('/products', requirePermission('products:create'), ProductController.create);
 router.put('/products/:id', requirePermission('products:update'), ProductController.update);

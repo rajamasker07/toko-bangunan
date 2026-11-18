@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
-import { Product, Category, Brand } from '../types';
+import { Product, Category, Brand, ProductSearchMode, EmbeddingStatusResponse } from '../types';
 import { formatRupiah, formatStock } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
@@ -22,7 +22,11 @@ import {
   Power,
   Folder,
   Tag,
-  Upload
+  Upload,
+  Sparkles,
+  Brain,
+  RefreshCw,
+  X
 } from 'lucide-react';
 
 interface ProductListViewProps {
@@ -40,7 +44,16 @@ interface ProductListViewProps {
   onDeleteProduct: (id: string, name: string) => void;
   onToggleProductStatus?: (product: Product) => void;
   initialStockFilter?: string;
+  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
+
+const EXAMPLE_SEARCH_QUERIES = [
+  { label: 'nambal tembok rembes', emoji: '💧' },
+  { label: 'sambungan pipa belok', emoji: '🚰' },
+  { label: 'cat besi anti karat', emoji: '🎨' },
+  { label: 'perekat keramik lantai', emoji: '🧱' },
+  { label: 'atap bening kanopi', emoji: '🏠' },
+];
 
 export const ProductListView: React.FC<ProductListViewProps> = ({
   products,
@@ -57,6 +70,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   onDeleteProduct,
   onToggleProductStatus,
   initialStockFilter = 'all',
+  showToast,
 }) => {
   const { can } = useAuth();
   const canCreate = can('products:create');
@@ -65,15 +79,92 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   const canUpdate = can('products:update');
   const canDelete = can('products:delete');
   const canAdjust = can('stock:adjust');
+  const canManageAI = can('products:update') || can('products:create') || can('master:write');
 
   const [isExporting, setIsExporting] = useState(false);
 
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
+  const [searchMode, setSearchMode] = useState<ProductSearchMode>('hybrid');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [stockFilter, setStockFilter] = useState(initialStockFilter);
   const [saleFilter, setSaleFilter] = useState<'all' | 'active' | 'inactive'>('all');
+
+  // Server Hybrid Search State
+  const [serverSearchResults, setServerSearchResults] = useState<Product[] | null>(null);
+  const [isSearchingServer, setIsSearchingServer] = useState(false);
+  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatusResponse | null>(null);
+  const [isReindexing, setIsReindexing] = useState(false);
+
+  // Load Embedding Status
+  const fetchEmbeddingStatus = async () => {
+    try {
+      const res = await api.getEmbeddingStatus();
+      setEmbeddingStatus(res);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    fetchEmbeddingStatus();
+    const interval = setInterval(fetchEmbeddingStatus, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Trigger Reindexing
+  const handleReindex = async () => {
+    if (isReindexing) return;
+    setIsReindexing(true);
+    try {
+      const res = await api.reindexProductEmbeddings({ force: true });
+      await fetchEmbeddingStatus();
+      onRefresh();
+      showToast?.(
+        `Indeks AI berhasil disinkronkan: ${res.indexed} produk diindeks!`,
+        'success'
+      );
+    } catch (err: any) {
+      showToast?.(err.message || 'Gagal menyinkronkan indeks AI', 'error');
+    } finally {
+      setIsReindexing(false);
+    }
+  };
+
+  // Debounced server search with AbortController
+  useEffect(() => {
+    const query = search.trim();
+    if (!query) {
+      setServerSearchResults(null);
+      setIsSearchingServer(false);
+      return;
+    }
+
+    setIsSearchingServer(true);
+    const controller = new AbortController();
+
+    const timer = setTimeout(async () => {
+      try {
+        const results = await api.getProducts(
+          { search: query, mode: searchMode },
+          { signal: controller.signal }
+        );
+        setServerSearchResults(results);
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error('Hybrid search error:', err);
+        }
+      } finally {
+        setIsSearchingServer(false);
+      }
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [search, searchMode]);
 
   // Extract unique brands list
   const brandList = useMemo(() => {
@@ -120,24 +211,30 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   // Reset to page 1 whenever filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [deferredSearch, selectedCategory, selectedBrand, stockFilter, saleFilter]);
+  }, [deferredSearch, searchMode, selectedCategory, selectedBrand, stockFilter, saleFilter]);
 
-  // Filter products client-side for ultra-responsive instant UX with useMemo to avoid re-calculating on unrelated renders
+  // Filter products client-side for ultra-responsive instant UX with useMemo
   const filteredProducts = useMemo(() => {
     const query = deferredSearch.trim().toLowerCase();
+    const baseList = serverSearchResults !== null ? serverSearchResults : products;
 
-    return products.filter((p) => {
-      const matchSearch =
-        !query ||
-        p.name.toLowerCase().includes(query) ||
-        p.sku.toLowerCase().includes(query) ||
-        (p.brand && p.brand.toLowerCase().includes(query)) ||
-        (p.category_name && p.category_name.toLowerCase().includes(query)) ||
-        p.variants?.some(
-          (v) =>
-            v.variant_name.toLowerCase().includes(query) ||
-            v.sku.toLowerCase().includes(query)
-        );
+    return baseList.filter((p) => {
+      let matchSearch = true;
+      if (serverSearchResults === null && query) {
+        matchSearch =
+          p.name.toLowerCase().includes(query) ||
+          p.sku.toLowerCase().includes(query) ||
+          (p.brand && p.brand.toLowerCase().includes(query)) ||
+          (p.category_name && p.category_name.toLowerCase().includes(query)) ||
+          (p.material && p.material.toLowerCase().includes(query)) ||
+          (p.specifications && p.specifications.toLowerCase().includes(query)) ||
+          (p.description && p.description.toLowerCase().includes(query)) ||
+          p.variants?.some(
+            (v) =>
+              v.variant_name.toLowerCase().includes(query) ||
+              v.sku.toLowerCase().includes(query)
+          );
+      }
 
       const matchCategory =
         !selectedCategory || p.category_id === selectedCategory;
@@ -163,7 +260,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
       return matchSearch && matchCategory && matchBrand && matchStock && matchSale;
     });
-  }, [products, deferredSearch, selectedCategory, selectedBrand, stockFilter, saleFilter]);
+  }, [products, serverSearchResults, deferredSearch, selectedCategory, selectedBrand, stockFilter, saleFilter]);
 
   // Paginated slice
   const paginatedProducts = useMemo(() => {
@@ -198,6 +295,26 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {canManageAI && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-violet-200 dark:border-violet-900/50 bg-violet-50/70 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 text-xs">
+              <Brain className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+              <span className="font-semibold text-[11px]">
+                {embeddingStatus?.status === 'downloading'
+                  ? '⏳ Mengunduh AI...'
+                  : `AI Lokal: Siap (${embeddingStatus?.indexed_products ?? products.length}/${embeddingStatus?.total_products ?? products.length})`}
+              </span>
+              <button
+                type="button"
+                onClick={handleReindex}
+                disabled={isReindexing}
+                className="ml-1 p-1 hover:bg-violet-200 dark:hover:bg-violet-900/60 rounded-md transition-colors"
+                title="Sinkronkan Indeks Vektor AI Produk"
+              >
+                <RefreshCw className={`w-3 h-3 text-violet-600 dark:text-violet-400 ${isReindexing ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          )}
+
           {canExport && (
             <button
               onClick={() => handleExportProducts('xlsx')}
@@ -234,6 +351,55 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
       {/* Filter and Search Bar */}
       <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+        {/* Search Mode Pills */}
+        <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-100 dark:border-slate-800/80 pb-2.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-400 font-semibold text-[11px] mr-1">Mode Pencarian:</span>
+            <button
+              type="button"
+              onClick={() => setSearchMode('hybrid')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                searchMode === 'hybrid'
+                  ? 'bg-violet-600 text-white shadow-sm shadow-violet-500/30'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              <Sparkles className="w-3 h-3 text-amber-300" />
+              <span>✨ Pintar (Hybrid AI)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSearchMode('keyword')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                searchMode === 'keyword'
+                  ? 'bg-slate-800 text-white dark:bg-white dark:text-slate-900 shadow-sm'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              <span>🔤 Kata Kunci Eksak</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSearchMode('semantic')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                searchMode === 'semantic'
+                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              <Brain className="w-3 h-3 text-cyan-300" />
+              <span>🧠 Makna AI</span>
+            </button>
+          </div>
+
+          {isSearchingServer && (
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-600 dark:text-violet-400 animate-pulse">
+              <div className="w-2.5 h-2.5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+              <span>Mencari secara semantik...</span>
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
           {/* Search Input */}
           <div className="sm:col-span-5 relative">
@@ -242,9 +408,18 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cari nama semen, pipa, cat, merk, atau SKU..."
-              className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              placeholder="Cari keluhan, makna, merek, nama, atau SKU..."
+              className="w-full pl-9 pr-9 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-2.5 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           {/* Category Filter */}
@@ -278,6 +453,22 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
               className="w-full"
             />
           </div>
+        </div>
+
+        {/* Quick Example Chips for Semantic Search */}
+        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+          <span className="text-[11px] text-slate-400 font-medium">Contoh kueri:</span>
+          {EXAMPLE_SEARCH_QUERIES.map((q) => (
+            <button
+              key={q.label}
+              type="button"
+              onClick={() => setSearch(q.label)}
+              className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-100 hover:bg-violet-100 hover:text-violet-700 dark:bg-slate-800 dark:hover:bg-violet-950/60 dark:hover:text-violet-300 text-slate-600 dark:text-slate-300 transition-colors border border-transparent hover:border-violet-300 dark:hover:border-violet-800"
+            >
+              <span>{q.emoji}</span>
+              <span>{q.label}</span>
+            </button>
+          ))}
         </div>
 
         {/* Quick status pills for Sale Status & Stock */}
@@ -506,6 +697,39 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                             UUID: {product.id.slice(0, 8)}...
                           </span>
                         </div>
+
+                        {/* Match Badges & AI Score */}
+                        {product.match_type && (
+                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                            {product.match_type === 'exact' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 dark:bg-emerald-950/70 dark:text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-300 dark:border-emerald-800">
+                                🎯 Cocok Eksak (SKU/Nama)
+                              </span>
+                            ) : product.match_type === 'hybrid' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-700 bg-purple-100 dark:bg-purple-950/70 dark:text-purple-300 px-2 py-0.5 rounded-full border border-purple-300 dark:border-purple-800">
+                                <Sparkles className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                                Cocok Pintar ({Math.round((product.similarity_score || 0.9) * 100)}%)
+                              </span>
+                            ) : product.match_type === 'semantic' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-100 dark:bg-blue-950/70 dark:text-blue-300 px-2 py-0.5 rounded-full border border-blue-300 dark:border-blue-800">
+                                <Brain className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                Cocok Makna AI ({Math.round((product.similarity_score || 0.85) * 100)}%)
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-700 bg-slate-100 dark:bg-slate-800 dark:text-slate-300 px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700">
+                                🔤 Kata Kunci
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Specs & Material Snippet Preview when searching */}
+                        {Boolean(search.trim()) && (product.material || product.specifications || product.description) && (
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-1 italic max-w-md">
+                            {product.material ? `Bahan: ${product.material}. ` : ''}
+                            {product.specifications || product.description}
+                          </p>
+                        )}
                       </td>
 
                       <td className="py-3.5 px-4">

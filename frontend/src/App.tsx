@@ -706,6 +706,7 @@ export const App: React.FC = () => {
                   onEditProduct={handleOpenEditProduct}
                   onToggleProductStatus={handleToggleProductStatus}
                   initialStockFilter={productStockFilter}
+                  showToast={showToast}
                 />
               )}
             </>

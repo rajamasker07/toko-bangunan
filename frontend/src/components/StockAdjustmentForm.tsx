@@ -227,8 +227,8 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
     for (const p of products) {
       const vars = p.variants || [];
       for (const v of vars) {
-        // Pre-normalize search tokens into a single lowercase index for O(1) matching
-        const searchIndex = `${p.name} ${v.variant_name} ${v.sku} ${p.sku} ${v.barcode || ''} ${p.category_name || ''} ${p.brand || ''}`.toLowerCase();
+        // Pre-normalize search tokens into a single lowercase index for O(1) matching including materials & specifications
+        const searchIndex = `${p.name} ${v.variant_name} ${v.sku} ${p.sku} ${v.barcode || ''} ${p.category_name || ''} ${p.brand || ''} ${p.material || ''} ${p.specifications || ''} ${p.description || ''}`.toLowerCase();
         list.push({
           id: v.id,
           variant_name: v.variant_name,

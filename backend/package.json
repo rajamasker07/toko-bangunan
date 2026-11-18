@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "db:init": "tsx src/db/init.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "embeddings:backfill": "tsx src/scripts/backfillEmbeddings.ts",
     "logs": "tsx src/scripts/viewLogs.ts"
   },
   "keywords": [
@@ -21,6 +22,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@huggingface/transformers": "^3.4.0",
     "cors": "^2.8.5",
     "csv-parse": "^7.0.3",
     "dotenv": "^16.4.7",

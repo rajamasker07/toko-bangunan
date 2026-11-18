@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, Database, Layers, SlidersHorizontal, Cpu, CheckCircle } from 'lucide-react';
+import { BookOpen, Database, Layers, SlidersHorizontal, Cpu, CheckCircle, Sparkles, Brain } from 'lucide-react';
 
 export const DocsView: React.FC = () => {
   return (
@@ -14,7 +14,8 @@ export const DocsView: React.FC = () => {
         </h2>
         <p className="text-slate-300 text-xs sm:text-sm leading-relaxed max-w-3xl">
           Dirancang khusus untuk karakteristik unik toko material: multi-varian (ukuran, ketebalan, warna),
-          multi-satuan harga (eceran, sak, dus, truk, batang), UUIDv7 time-ordered, dan audit log perubahan stok ketat.
+          multi-satuan harga (eceran, sak, dus, truk, batang), UUIDv7 time-ordered, audit log perubahan stok ketat,
+          serta <strong>Pencarian Berbasis Makna AI Lokal (Hybrid Semantic Search)</strong> berbiaya Rp 0.
         </p>
       </div>
 
@@ -62,17 +63,37 @@ export const DocsView: React.FC = () => {
 
         <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
           <div className="flex items-center gap-2.5 font-bold text-slate-900 dark:text-white text-sm">
-            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600">
-              <Database className="w-4 h-4" />
+            <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600">
+              <Sparkles className="w-4 h-4" />
             </div>
-            <span>3. Kategori Bertingkat (Hierarchical Tree)</span>
+            <span>3. Pencarian Makna Lokal (Hybrid AI Search)</span>
           </div>
           <ul className="text-xs text-slate-600 dark:text-slate-400 space-y-2 list-disc list-inside">
             <li>
-              <strong>Sub-Kategori Tak Terbatas:</strong> Kategori dapat memiliki anak (sub-kategori) hingga cucu (sub-sub-kategori) menggunakan relasi rekursif self-referential <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">parent_id</code>.
+              <strong>100% Offline di CPU Lokal:</strong> Menggunakan model kuantisasi INT8 <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">Xenova/multilingual-e5-small</code> (384 dimensi) tanpa biaya API external.
             </li>
             <li>
-              <strong>Filter Rekursif:</strong> Ketika memfilter kategori induk (misal: Bahan Bangunan Dasar), semua produk di sub-kategori di bawahnya otomatis disertakan via SQL CTE rekursif.
+              <strong>Pencarian Bahasa Keluhan Pelanggan:</strong> Mampu mencari berdasarkan fungsi atau masalah sehari-hari (contoh: <em>"nambal tembok rembes"</em> &rarr; Aquaproof, <em>"sambungan pipa belok"</em> &rarr; Keni PVC).
+            </li>
+            <li>
+              <strong>Reciprocal Rank Fusion (RRF):</strong> Menggabungkan kecocokan kata kunci eksak (SKU/Barcode) dan vektor kemiripan kosinus dengan batas Dual-Gate Cutoff.
+            </li>
+          </ul>
+        </div>
+
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+          <div className="flex items-center gap-2.5 font-bold text-slate-900 dark:text-white text-sm">
+            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600">
+              <Database className="w-4 h-4" />
+            </div>
+            <span>4. Kategori Bertingkat & RBAC Ketat</span>
+          </div>
+          <ul className="text-xs text-slate-600 dark:text-slate-400 space-y-2 list-disc list-inside">
+            <li>
+              <strong>Pohon Kategori Rekursif:</strong> Kategori dapat bertingkat tak terbatas via SQL CTE rekursif.
+            </li>
+            <li>
+              <strong>Perlindungan Harga Modal:</strong> Role Kasir & Staf Gudang otomatis menerima redaksi harga beli (<code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">buy_price: null</code>).
             </li>
           </ul>
         </div>
@@ -82,7 +103,7 @@ export const DocsView: React.FC = () => {
             <div className="p-2 rounded-xl bg-rose-500/10 text-rose-600">
               <CheckCircle className="w-4 h-4" />
             </div>
-            <span>4. Stock Adjustment & Log Mutasi Transaksional</span>
+            <span>5. Stock Adjustment & Log Mutasi Transaksional</span>
           </div>
           <ul className="text-xs text-slate-600 dark:text-slate-400 space-y-2 list-disc list-inside">
             <li>

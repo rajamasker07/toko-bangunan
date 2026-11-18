@@ -130,6 +130,28 @@ export interface ProductVariant {
   units: VariantUnit[];
 }
 
+export type ProductSearchMode = 'hybrid' | 'keyword' | 'semantic';
+export type ProductMatchType = 'exact' | 'hybrid' | 'semantic' | 'keyword';
+
+export interface EmbeddingStatusResponse {
+  status: 'ready' | 'initializing' | 'downloading' | 'error';
+  model_status: 'ready' | 'initializing' | 'downloading' | 'error';
+  indexed_products: number;
+  total_products: number;
+  dimensions: number;
+  model_name: string;
+  cache_size: number;
+  last_reindex_at: string | null;
+  error?: string | null;
+}
+
+export interface ReindexEmbeddingsResponse {
+  total: number;
+  indexed: number;
+  skipped: number;
+  errors: number;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -160,6 +182,11 @@ export interface Product {
   variants: ProductVariant[];
   created_at: string;
   updated_at: string;
+  // Metadata Pencarian Semantik & Hybrid
+  match_type?: ProductMatchType;
+  similarity_score?: number;
+  rrf_score?: number;
+  matched_terms?: string[];
 }
 
 export interface StockMovement {

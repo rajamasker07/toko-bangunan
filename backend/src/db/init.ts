@@ -426,6 +426,17 @@ export async function initializeDatabase() {
       await client.query('ALTER TABLE products ADD COLUMN specifications TEXT;');
     }
 
+    // 3e. Kolom semantic search & AI embeddings
+    if (!(await columnExists(client, 'products', 'embedding'))) {
+      await client.query('ALTER TABLE products ADD COLUMN embedding REAL[];');
+    }
+    if (!(await columnExists(client, 'products', 'embedding_text'))) {
+      await client.query('ALTER TABLE products ADD COLUMN embedding_text TEXT;');
+    }
+    if (!(await columnExists(client, 'products', 'embedding_updated_at'))) {
+      await client.query('ALTER TABLE products ADD COLUMN embedding_updated_at TIMESTAMPTZ;');
+    }
+
     // 3. Product Variants Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS product_variants (

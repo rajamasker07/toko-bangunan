@@ -27,6 +27,9 @@ import {
   ExportFileFormat,
   ExportStatsResponse,
   RestoreDatabaseResult,
+  ProductSearchMode,
+  EmbeddingStatusResponse,
+  ReindexEmbeddingsResponse,
 } from '../types';
 
 const BASE_URL = '/api';
@@ -655,20 +658,37 @@ export const api = {
   // Products
   getProducts: (filters?: {
     search?: string;
+    mode?: ProductSearchMode;
+    searchMode?: ProductSearchMode;
     categoryId?: string;
     brand?: string;
     stockStatus?: string;
     saleStatus?: string;
+    limit?: number;
+    offset?: number;
+    minScore?: number;
   }, options?: RequestInit) => {
     const params = new URLSearchParams();
     if (filters?.search) params.append('search', filters.search);
+    const mode = filters?.searchMode || filters?.mode;
+    if (mode) params.append('mode', mode);
     if (filters?.categoryId) params.append('categoryId', filters.categoryId);
     if (filters?.brand) params.append('brand', filters.brand);
     if (filters?.stockStatus && filters.stockStatus !== 'all') params.append('stockStatus', filters.stockStatus);
     if (filters?.saleStatus && filters.saleStatus !== 'all') params.append('saleStatus', filters.saleStatus);
+    if (filters?.limit) params.append('limit', String(filters.limit));
+    if (filters?.offset) params.append('offset', String(filters.offset));
+    if (filters?.minScore) params.append('minScore', String(filters.minScore));
     const queryStr = params.toString() ? `?${params.toString()}` : '';
     return fetchJson<Product[]>(`/products${queryStr}`, options);
   },
+  getEmbeddingStatus: (options?: RequestInit) =>
+    fetchJson<EmbeddingStatusResponse>('/products/embedding-status', options),
+  reindexProductEmbeddings: (params?: { force?: boolean }) =>
+    fetchJson<ReindexEmbeddingsResponse>('/products/reindex-embeddings', {
+      method: 'POST',
+      body: JSON.stringify(params || {}),
+    }),
   getProductById: (id: string) => fetchJson<Product>(`/products/${id}`),
   createProduct: (data: any) =>
     fetchJson<Product>('/products', {

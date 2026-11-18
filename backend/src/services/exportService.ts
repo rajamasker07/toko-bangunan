@@ -12,6 +12,7 @@ import type {
 import { AppHttpError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { escapeCsvValue } from '../utils/spreadsheetParser.js';
+import { EmbeddingService } from './embeddingService.js';
 
 interface CategoryNode {
   id: string;
@@ -945,7 +946,7 @@ export class ExportService {
   /**
    * Helper untuk escape nilai literal SQL PostgreSQL secara aman
    */
-  private static escapeSqlLiteral(val: any): string {
+  private static escapeSqlLiteral(val: any, colName?: string): string {
     if (val === null || val === undefined) return 'NULL';
     if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
     if (typeof val === 'number') {
@@ -954,6 +955,10 @@ export class ExportService {
     }
     if (val instanceof Date) {
       return `'${val.toISOString()}'::timestamptz`;
+    }
+    if (Array.isArray(val) && (colName === 'embedding' || (val.length > 0 && typeof val[0] === 'number'))) {
+      const numbers = val.map((n) => (Number.isFinite(n) ? Number(n) : 0));
+      return `ARRAY[${numbers.join(', ')}]::real[]`;
     }
     if (typeof val === 'object') {
       const jsonStr = JSON.stringify(val).replace(/'/g, "''");
@@ -1044,7 +1049,7 @@ export class ExportService {
       for (let i = 0; i < res.rows.length; i += batchSize) {
         const chunk = res.rows.slice(i, i + batchSize);
         const valueTuples = chunk.map((row) => {
-          const rowVals = columns.map((col) => this.escapeSqlLiteral(row[col]));
+          const rowVals = columns.map((col) => this.escapeSqlLiteral(row[col], col));
           return `  (${rowVals.join(', ')})`;
         });
 
@@ -1100,6 +1105,10 @@ export class ExportService {
 
       // Sinkronkan cache in-memory peran & hak akses (Dynamic RBAC) setelah data roles pulih
       await syncRolesCacheFromDb();
+
+      // Muat ulang indeks vektor embedding AI lokal dari database yang dipulihkan
+      await EmbeddingService.reloadIndexFromDb();
+      EmbeddingService.initializeInBackground().catch(() => {});
 
       // Hitung total record setelah restore
       const stats = await this.getExportStats();

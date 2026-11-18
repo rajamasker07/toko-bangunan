@@ -1,7 +1,31 @@
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
+import { EmbeddingService } from './embeddingService.js';
 
 export class VariantService {
+  private static async syncProductByVariantId(variantId: string) {
+    try {
+      const res = await query('SELECT product_id FROM product_variants WHERE id = $1', [variantId]);
+      if (res.rows[0]?.product_id) {
+        EmbeddingService.syncProductEmbedding(res.rows[0].product_id).catch(() => {});
+      }
+    } catch {}
+  }
+
+  private static async syncProductByUnitId(unitId: string) {
+    try {
+      const res = await query(
+        `SELECT pv.product_id FROM variant_units vu 
+         JOIN product_variants pv ON vu.variant_id = pv.id 
+         WHERE vu.id = $1`,
+        [unitId]
+      );
+      if (res.rows[0]?.product_id) {
+        EmbeddingService.syncProductEmbedding(res.rows[0].product_id).catch(() => {});
+      }
+    } catch {}
+  }
+
   /**
    * Add variant to an existing product
    */
@@ -83,6 +107,8 @@ export class VariantService {
 
       await client.query('COMMIT');
 
+      EmbeddingService.syncProductEmbedding(productId).catch(() => {});
+
       const res = await query('SELECT * FROM product_variants WHERE id = $1', [variantId]);
       return res.rows[0];
     } catch (error) {
@@ -134,6 +160,7 @@ export class VariantService {
 
     const sql = `UPDATE product_variants SET ${fields.join(', ')} WHERE id = $${values.length} RETURNING *`;
     const res = await query(sql, values);
+    this.syncProductByVariantId(variantId);
     return res.rows[0];
   }
 
@@ -141,7 +168,13 @@ export class VariantService {
    * Delete variant
    */
   static async deleteVariant(variantId: string) {
+    const pRes = await query('SELECT product_id FROM product_variants WHERE id = $1', [variantId]);
+    const productId = pRes.rows[0]?.product_id;
+
     const res = await query('DELETE FROM product_variants WHERE id = $1 RETURNING *', [variantId]);
+    if (productId) {
+      EmbeddingService.syncProductEmbedding(productId).catch(() => {});
+    }
     return res.rows[0];
   }
 
@@ -157,6 +190,7 @@ export class VariantService {
       [variantId]
     );
     if (!res.rows[0]) throw new Error('Varian tidak ditemukan');
+    this.syncProductByVariantId(variantId);
     return res.rows[0];
   }
 
@@ -187,6 +221,7 @@ export class VariantService {
         unit.wholesale_price ? Number(unit.wholesale_price) : null
       ]
     );
+    this.syncProductByVariantId(variantId);
     return res.rows[0];
   }
 
@@ -236,6 +271,7 @@ export class VariantService {
 
     const sql = `UPDATE variant_units SET ${fields.join(', ')} WHERE id = $${values.length} RETURNING *`;
     const res = await query(sql, values);
+    this.syncProductByUnitId(unitId);
     return res.rows[0];
   }
 
@@ -243,7 +279,18 @@ export class VariantService {
    * Delete unit price
    */
   static async deleteUnit(unitId: string) {
+    const pRes = await query(
+      `SELECT pv.product_id FROM variant_units vu 
+       JOIN product_variants pv ON vu.variant_id = pv.id 
+       WHERE vu.id = $1`,
+      [unitId]
+    );
+    const productId = pRes.rows[0]?.product_id;
+
     const res = await query('DELETE FROM variant_units WHERE id = $1 RETURNING *', [unitId]);
+    if (productId) {
+      EmbeddingService.syncProductEmbedding(productId).catch(() => {});
+    }
     return res.rows[0];
   }
 }

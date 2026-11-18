@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { hasPermission } from '../config/rbac.js';
 import { ProductService } from '../services/productService.js';
+import { EmbeddingService } from '../services/embeddingService.js';
 
 export class ProductController {
   static async list(req: Request, res: Response) {
@@ -10,12 +11,40 @@ export class ProductController {
       const brand = req.query.brand as string;
       const stockStatus = req.query.stockStatus as any;
       const saleStatus = req.query.saleStatus as any;
+      const mode = (req.query.mode || req.query.searchMode) as any;
+      const limit = req.query.limit ? Number(req.query.limit) : undefined;
+      const offset = req.query.offset ? Number(req.query.offset) : undefined;
+      const minScore = req.query.minScore ? Number(req.query.minScore) : undefined;
+
       const includeBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
       const products = await ProductService.getProducts(
-        { search, categoryId, brand, stockStatus, saleStatus },
+        { search, searchMode: mode, categoryId, brand, stockStatus, saleStatus, limit, offset, minScore },
         { includeBuyPrice }
       );
       res.json({ success: true, data: products });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  static async getEmbeddingStatus(req: Request, res: Response) {
+    try {
+      const status = await EmbeddingService.getStatus();
+      res.json({ success: true, data: status });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  static async reindexEmbeddings(req: Request, res: Response) {
+    try {
+      const force = req.body?.force === true || req.query?.force === 'true';
+      const result = await EmbeddingService.reindexAllProducts({ force });
+      res.json({
+        success: true,
+        data: result,
+        message: `Sinkronisasi AI selesai: ${result.indexed} produk diindeks (${result.errors} gagal).`,
+      });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }

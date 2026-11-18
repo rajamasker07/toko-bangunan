@@ -2,6 +2,9 @@ import type { Pool, PoolClient } from 'pg';
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 import { BrandService } from './brandService.js';
+import { EmbeddingService } from './embeddingService.js';
+import { scoreKeywordMatch } from '../utils/searchSynonyms.js';
+import { logger } from '../utils/logger.js';
 
 type Queryable = Pool | PoolClient;
 
@@ -53,59 +56,63 @@ export interface CreateProductInput {
   variants?: CreateVariantInput[];
 }
 
-function redactProductBuyPrice<T extends { variants?: Array<{ units?: Array<Record<string, any>> }> }>(
-  product: T,
-  includeBuyPrice: boolean
-): T {
-  if (includeBuyPrice || !Array.isArray(product?.variants)) {
-    return product;
+/**
+ * Menyensor harga beli (buy_price: null) untuk role tanpa izin (kasir, gudang)
+ * dan menghapus array vektor mentah (embedding) & embedding_text dari HTTP response
+ */
+export function sanitizeAndRedactProduct<
+  T extends {
+    embedding?: any;
+    embedding_text?: any;
+    variants?: Array<{ units?: Array<Record<string, any>> }>;
+  }
+>(product: T, includeBuyPrice: boolean): T {
+  if (!product) return product;
+
+  // Hapus array vektor mentah (384 float) dan teks passage internal dari payload HTTP
+  const { embedding, embedding_text, ...sanitized } = product as any;
+
+  if (includeBuyPrice || !Array.isArray(sanitized?.variants)) {
+    return sanitized as T;
   }
 
   return {
-    ...product,
-    variants: product.variants.map((variant) => ({
+    ...sanitized,
+    variants: sanitized.variants.map((variant: any) => ({
       ...variant,
       units: Array.isArray(variant.units)
-        ? variant.units.map((unit) => ({ ...unit, buy_price: null }))
+        ? variant.units.map((unit: any) => ({ ...unit, buy_price: null }))
         : variant.units,
     })),
-  };
+  } as T;
 }
 
 export class ProductService {
   /**
    * List all products with variant counts, total stock, category info, and low stock status
+   * Mendukung Hybrid Semantic Search (BM25 Keyword + Xenova/multilingual-e5-small + RRF)
    */
   static async getProducts(
     filters?: {
       search?: string;
+      searchMode?: 'hybrid' | 'keyword' | 'semantic';
+      mode?: 'hybrid' | 'keyword' | 'semantic';
       categoryId?: string;
       brand?: string;
       stockStatus?: 'all' | 'low' | 'out' | 'normal';
       saleStatus?: 'all' | 'active' | 'inactive';
       limit?: number;
       offset?: number;
+      minScore?: number;
     },
     options?: { includeBuyPrice?: boolean }
   ) {
+    const searchMode = filters?.searchMode || filters?.mode || 'hybrid';
+    const rawSearch = (filters?.search || '').trim();
+    const isSearching = rawSearch.length > 0;
+
     const params: any[] = [];
     const conditions: string[] = [];
-
-    if (filters?.search) {
-      params.push(`%${filters.search.toLowerCase()}%`);
-      conditions.push(`(
-        LOWER(p.name) LIKE $${params.length} OR
-        LOWER(p.sku) LIKE $${params.length} OR
-        LOWER(COALESCE(b.name, '')) LIKE $${params.length} OR
-        EXISTS (
-          SELECT 1 FROM product_variants pv 
-          WHERE pv.product_id = p.id AND (
-            LOWER(pv.variant_name) LIKE $${params.length} OR 
-            LOWER(pv.sku) LIKE $${params.length}
-          )
-        )
-      )`);
-    }
 
     if (filters?.categoryId) {
       params.push(filters.categoryId);
@@ -201,8 +208,128 @@ export class ProductService {
       }
     }
 
+    // Jika ada parameter kueri pencarian, terapkan scoring & RRF
+    if (isSearching) {
+      const qLower = rawSearch.toLowerCase();
+      const productIds = rows.map((r) => r.id);
+
+      // 1. Keyword scoring
+      const kwMap = new Map<string, { score: number; matchedTerms: string[]; isExact: boolean }>();
+      let hasExactSkuMatch = false;
+
+      for (const p of rows) {
+        const kw = scoreKeywordMatch(p, rawSearch);
+        const pSku = (p.sku || '').toLowerCase();
+        const pBarcode = (p.barcode || '').toLowerCase();
+        const pName = (p.name || '').toLowerCase();
+        const isExact = pSku === qLower || pBarcode === qLower || pName === qLower;
+        if (isExact) hasExactSkuMatch = true;
+        kwMap.set(p.id, { score: kw.score, matchedTerms: kw.matchedTerms, isExact });
+      }
+
+      // 2. Semantic vector search (hanya jika mode !== 'keyword')
+      const semanticMap = new Map<string, { rawScore: number; similarityScore: number; rank: number }>();
+      if (searchMode !== 'keyword') {
+        try {
+          const semResults = await EmbeddingService.searchSimilarProducts(rawSearch, {
+            candidateIds: productIds,
+            topK: 25,
+            hasExactMatch: hasExactSkuMatch,
+          });
+          for (const s of semResults) {
+            semanticMap.set(s.productId, s);
+          }
+        } catch (err: any) {
+          logger.warn('AI_EMBEDDING', `Gagal pencarian semantik, melanjutkan dengan leksikal: ${err.message}`);
+        }
+      }
+
+      // 3. Peringkatkan urutan keyword (1-based rank)
+      const sortedByKw = [...rows]
+        .map((p) => ({ id: p.id, score: kwMap.get(p.id)?.score || 0 }))
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+      const kwRankMap = new Map<string, number>();
+      sortedByKw.forEach((item, index) => {
+        kwRankMap.set(item.id, index + 1);
+      });
+
+      // 4. Bobot RRF berdasarkan mode
+      const wKw = searchMode === 'semantic' ? 0.2 : 1.0;
+      const wSem = searchMode === 'keyword' ? 0.0 : 1.0;
+      const k = 60;
+
+      // 5. Hitung Skor RRF dan Filter Relevansi
+      const scoredProducts: Array<any> = [];
+
+      for (const p of rows) {
+        const kw = kwMap.get(p.id);
+        const sem = semanticMap.get(p.id);
+        const kwRank = kwRankMap.get(p.id);
+        const semRank = sem?.rank;
+
+        const kwScore = kw?.score || 0;
+        const isExact = Boolean(kw?.isExact);
+
+        // Abaikan produk yang sama sekali tidak cocok leksikal maupun semantik
+        if (kwScore <= 0 && !sem) {
+          continue;
+        }
+
+        // Reciprocal Rank Fusion
+        let rrfScore = 0;
+        if (kwRank) {
+          rrfScore += wKw * (1 / (k + kwRank));
+        }
+        if (semRank) {
+          rrfScore += wSem * (1 / (k + semRank));
+        }
+
+        // Exact match boost
+        if (isExact) {
+          rrfScore += 1000;
+        }
+
+        // Tentukan match_type & similarity_score
+        let matchType: 'exact' | 'hybrid' | 'semantic' | 'keyword' = 'keyword';
+        let displayScore = 0.70;
+
+        if (isExact) {
+          matchType = 'exact';
+          displayScore = 1.0;
+        } else if (kwScore > 0 && sem) {
+          matchType = 'hybrid';
+          displayScore = sem.similarityScore;
+        } else if (sem) {
+          matchType = 'semantic';
+          displayScore = sem.similarityScore;
+        } else {
+          matchType = 'keyword';
+          displayScore = Math.min(0.99, Math.round((0.70 + Math.min(kwScore, 300) / 1000) * 100) / 100);
+        }
+
+        scoredProducts.push({
+          ...p,
+          match_type: matchType,
+          similarity_score: displayScore,
+          rrf_score: Math.round(rrfScore * 10000) / 10000,
+          matched_terms: kw?.matchedTerms || [],
+        });
+      }
+
+      // Urutkan dari rrfScore tertinggi
+      scoredProducts.sort((a, b) => b.rrf_score - a.rrf_score);
+      rows = scoredProducts;
+    }
+
+    if (filters?.limit && filters.limit > 0) {
+      const offset = filters.offset && filters.offset > 0 ? filters.offset : 0;
+      rows = rows.slice(offset, offset + filters.limit);
+    }
+
     const includeBuyPrice = options?.includeBuyPrice ?? true;
-    return rows.map((row) => redactProductBuyPrice(row, includeBuyPrice));
+    return rows.map((row) => sanitizeAndRedactProduct(row, includeBuyPrice));
   }
 
   /**
@@ -256,7 +383,7 @@ export class ProductService {
     const res = await query(sql, [id]);
     const row = res.rows[0] || null;
     if (!row) return null;
-    return redactProductBuyPrice(row, options?.includeBuyPrice ?? true);
+    return sanitizeAndRedactProduct(row, options?.includeBuyPrice ?? true);
   }
 
   /**
@@ -452,6 +579,12 @@ export class ProductService {
       }
 
       await client.query('COMMIT');
+
+      // Sinkronisasi embedding AI di latar belakang (non-blocking)
+      EmbeddingService.syncProductEmbedding(productId).catch((err) => {
+        logger.warn('AI_EMBEDDING', `Sync embedding background createProduct error: ${err.message}`);
+      });
+
       return this.getProductById(productId, { includeBuyPrice: allowBuyPrice });
     } catch (error) {
       await client.query('ROLLBACK');
@@ -560,6 +693,12 @@ export class ProductService {
 
     const sql = `UPDATE products SET ${fields.join(', ')} WHERE id = $${values.length} RETURNING *`;
     await query(sql, values);
+
+    // Sinkronisasi embedding AI di latar belakang (non-blocking)
+    EmbeddingService.syncProductEmbedding(id).catch((err) => {
+      logger.warn('AI_EMBEDDING', `Sync embedding background updateProduct error: ${err.message}`);
+    });
+
     return this.getProductById(id, options);
   }
 
@@ -568,6 +707,7 @@ export class ProductService {
    */
   static async deleteProduct(id: string) {
     const res = await query('DELETE FROM products WHERE id = $1 RETURNING *', [id]);
+    EmbeddingService.removeProductFromIndex(id);
     return res.rows[0];
   }
 
@@ -583,6 +723,11 @@ export class ProductService {
       [id]
     );
     if (!res.rows[0]) throw new Error('Produk tidak ditemukan');
+
+    EmbeddingService.syncProductEmbedding(id).catch((err) => {
+      logger.warn('AI_EMBEDDING', `Sync embedding background toggleProductStatus error: ${err.message}`);
+    });
+
     return this.getProductById(id, options);
   }
 }

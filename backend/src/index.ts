@@ -6,6 +6,7 @@ import apiRouter from './routes/api.js';
 import { initializeDatabase } from './db/init.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { logger } from './utils/logger.js';
+import { EmbeddingService } from './services/embeddingService.js';
 
 const app = express();
 const port = env.port;
@@ -14,10 +15,32 @@ const port = env.port;
 app.use(
   cors({
     origin: (origin, callback) => {
+      // Izinkan jika tanpa origin (curl, server-to-server), wildcard '*', atau origin ada di daftar corsOrigins
       if (!origin || env.corsOrigins.includes('*') || env.corsOrigins.includes(origin)) {
         callback(null, true);
         return;
       }
+
+      // Dalam mode development: izinkan akses dari localhost atau IP LAN privat (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+      if (!env.isProduction) {
+        try {
+          const url = new URL(origin);
+          const hostname = url.hostname;
+          if (
+            hostname === 'localhost' ||
+            hostname === '127.0.0.1' ||
+            /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+            /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+            /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
+          ) {
+            callback(null, true);
+            return;
+          }
+        } catch {
+          // ignore parsing error
+        }
+      }
+
       callback(new Error(`Origin ${origin} tidak diizinkan oleh kebijakan CORS`));
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -135,6 +158,10 @@ async function startServer() {
     await initializeDatabase();
     app.listen(port, () => {
       logger.info('SYSTEM', `🚀 Toko Bangunan API server running on http://localhost:${port}`);
+      // Inisialisasi semantic search & embedding engine di latar belakang (non-blocking)
+      EmbeddingService.initializeInBackground().catch((err) => {
+        logger.warn('AI_EMBEDDING', `Inisialisasi embedding background gagal: ${err.message}`);
+      });
     });
   } catch (err) {
     logger.fatal('SYSTEM', 'Failed to start server during initialization', {}, err);
