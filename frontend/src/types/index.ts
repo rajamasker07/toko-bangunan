@@ -524,3 +524,46 @@ export interface RestoreDatabaseResult {
   executedAt: string;
 }
 
+export interface MoveVariantsPayload {
+  variant_ids: string[];
+  target_product_id: string;
+  rename_map?: Record<string, string>;
+  sku_map?: Record<string, string>;
+  source_empty_action?: 'delete' | 'deactivate' | 'keep';
+  notes?: string;
+}
+
+export interface MergeProductPayload {
+  target_product_id: string;
+  rename_map?: Record<string, string>;
+  sku_map?: Record<string, string>;
+  source_empty_action?: 'delete' | 'deactivate';
+  notes?: string;
+}
+
+export interface PromoteVariantPayload {
+  new_product_name: string;
+  new_product_sku?: string;
+  category_id?: string | null;
+  brand_id?: string | null;
+  brand?: string;
+  supplier_id?: string | null;
+  description?: string;
+  min_stock_alert?: number;
+  new_variant_name?: string;
+  source_empty_action?: 'delete' | 'deactivate' | 'keep';
+  notes?: string;
+}
+
+export interface RestructureResult {
+  success: boolean;
+  moved_count?: number;
+  target_product_id?: string;
+  target_product_name?: string;
+  new_product_id?: string;
+  new_product_name?: string;
+  variant_id?: string;
+  message: string;
+}
+
+

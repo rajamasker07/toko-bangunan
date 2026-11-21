@@ -30,6 +30,10 @@ import {
   ProductSearchMode,
   EmbeddingStatusResponse,
   ReindexEmbeddingsResponse,
+  MoveVariantsPayload,
+  MergeProductPayload,
+  PromoteVariantPayload,
+  RestructureResult,
 } from '../types';
 
 const BASE_URL = '/api';
@@ -742,6 +746,52 @@ export const api = {
     fetchJson<void>(`/units/${unitId}`, {
       method: 'DELETE',
     }),
+
+  // Restrukturisasi Katalog (Pindah Varian, Gabung Produk, Promosi Varian)
+  moveVariant: async (
+    variantId: string,
+    data: {
+      target_product_id: string;
+      new_variant_name?: string;
+      new_sku?: string;
+      source_empty_action?: 'delete' | 'deactivate' | 'keep';
+      notes?: string;
+    }
+  ) => {
+    const res = await fetchJson<RestructureResult>(`/variants/${variantId}/move`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    invalidateMasterDataCache();
+    return res;
+  },
+
+  moveVariants: async (productId: string, data: MoveVariantsPayload) => {
+    const res = await fetchJson<RestructureResult>(`/products/${productId}/move-variants`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    invalidateMasterDataCache();
+    return res;
+  },
+
+  mergeProduct: async (sourceProductId: string, data: MergeProductPayload) => {
+    const res = await fetchJson<RestructureResult>(`/products/${sourceProductId}/merge`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    invalidateMasterDataCache();
+    return res;
+  },
+
+  promoteVariant: async (variantId: string, data: PromoteVariantPayload) => {
+    const res = await fetchJson<RestructureResult>(`/variants/${variantId}/promote`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    invalidateMasterDataCache();
+    return res;
+  },
 
   // Stock Adjustments
   adjustStock: (data: {
