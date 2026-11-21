@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Product, ProductVariant } from '../types';
 import { formatRupiah, formatStock } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
@@ -24,7 +24,14 @@ import {
   GitMerge,
   FolderInput,
   CheckSquare,
-  Square
+  Square,
+  Search,
+  Grid,
+  List,
+  RotateCcw,
+  Filter,
+  Check,
+  X
 } from 'lucide-react';
 
 interface ProductDetailViewProps {
@@ -67,13 +74,120 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
   // Multi-selection for variants
   const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
 
-  // Pagination for variants list (in case product has many variants)
+  // Search & Faceted Filter states
+  const [variantSearch, setVariantSearch] = useState<string>('');
+  const [selectedAttributes, setSelectedAttributes] = useState<Record<string, string>>({});
+
+  // View Mode: 'list' (default) vs 'matrix' (2D Grid)
+  const [viewMode, setViewMode] = useState<'list' | 'matrix'>('list');
+
+  // Pagination for variants list
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(6);
 
-  const variants = product.variants || [];
-  const totalVariants = variants.length;
-  const paginatedVariants = variants.slice(
+  const rawVariants = useMemo(() => product.variants || [], [product.variants]);
+
+  // Compute all available attribute keys dynamically from product.variant_options and variants' attributes
+  const allAttributeKeys = useMemo(() => {
+    const keys = new Set<string>(product.variant_options || []);
+    rawVariants.forEach((v) => {
+      if (v.attributes && typeof v.attributes === 'object') {
+        Object.keys(v.attributes).forEach((k) => {
+          if (k.trim()) keys.add(k.trim());
+        });
+      }
+    });
+    return Array.from(keys);
+  }, [product.variant_options, rawVariants]);
+
+  // Compute unique values for each attribute key along with match counts
+  const attributeValuesMap = useMemo(() => {
+    const map: Record<string, { value: string; count: number }[]> = {};
+    allAttributeKeys.forEach((key) => {
+      const counts: Record<string, number> = {};
+      rawVariants.forEach((v) => {
+        const val = v.attributes?.[key];
+        if (val && typeof val === 'string' && val.trim()) {
+          const trimmed = val.trim();
+          counts[trimmed] = (counts[trimmed] || 0) + 1;
+        }
+      });
+      map[key] = Object.entries(counts).map(([value, count]) => ({ value, count }));
+    });
+    return map;
+  }, [allAttributeKeys, rawVariants]);
+
+  // Matrix axes selection (defaults to first two attribute keys if available)
+  const [matrixRowAttr, setMatrixRowAttr] = useState<string>(allAttributeKeys[0] || '');
+  const [matrixColAttr, setMatrixColAttr] = useState<string>(allAttributeKeys[1] || allAttributeKeys[0] || '');
+
+  // Keep matrix axes synced when attribute keys change
+  React.useEffect(() => {
+    if (allAttributeKeys.length > 0) {
+      if (!allAttributeKeys.includes(matrixRowAttr)) {
+        setMatrixRowAttr(allAttributeKeys[0]);
+      }
+      if (!allAttributeKeys.includes(matrixColAttr)) {
+        setMatrixColAttr(allAttributeKeys[1] || allAttributeKeys[0]);
+      }
+    }
+  }, [allAttributeKeys, matrixRowAttr, matrixColAttr]);
+
+  // Toggle filter chip for an attribute
+  const handleToggleAttributeFilter = (key: string, value: string) => {
+    setSelectedAttributes((prev) => {
+      const copy = { ...prev };
+      if (copy[key] === value) {
+        delete copy[key];
+      } else {
+        copy[key] = value;
+      }
+      return copy;
+    });
+    setCurrentPage(1);
+  };
+
+  const handleClearAllFilters = () => {
+    setVariantSearch('');
+    setSelectedAttributes({});
+    setCurrentPage(1);
+  };
+
+  const isFilteringActive = variantSearch.trim() !== '' || Object.keys(selectedAttributes).length > 0;
+
+  // Filtered variants based on search text and selected attribute facets
+  const filteredVariants = useMemo(() => {
+    return rawVariants.filter((v) => {
+      // 1. Text Search across name, SKU, barcode, and attribute values
+      if (variantSearch.trim()) {
+        const q = variantSearch.toLowerCase().trim();
+        const matchesName = (v.variant_name || '').toLowerCase().includes(q);
+        const matchesSku = (v.sku || '').toLowerCase().includes(q);
+        const matchesBarcode = (v.barcode || '').toLowerCase().includes(q);
+        const matchesAttrVal = v.attributes
+          ? Object.values(v.attributes).some((val) =>
+              String(val).toLowerCase().includes(q)
+            )
+          : false;
+
+        if (!matchesName && !matchesSku && !matchesBarcode && !matchesAttrVal) {
+          return false;
+        }
+      }
+
+      // 2. Attribute Facet Filter
+      for (const [filterKey, filterVal] of Object.entries(selectedAttributes)) {
+        if (!v.attributes || v.attributes[filterKey] !== filterVal) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [rawVariants, variantSearch, selectedAttributes]);
+
+  const totalFilteredVariants = filteredVariants.length;
+  const paginatedVariants = filteredVariants.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize
   );
@@ -85,10 +199,10 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
   };
 
   const toggleSelectAll = () => {
-    if (selectedVariantIds.length === variants.length) {
+    if (selectedVariantIds.length === filteredVariants.length) {
       setSelectedVariantIds([]);
     } else {
-      setSelectedVariantIds(variants.map((v) => v.id));
+      setSelectedVariantIds(filteredVariants.map((v) => v.id));
     }
   };
 
@@ -170,6 +284,21 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                   </span>
                 )}
                 <span>• ID: <code className="font-mono">{product.id.slice(0, 10)}...</code></span>
+
+                {/* Display Defined Product Variant Options */}
+                {allAttributeKeys.length > 0 && (
+                  <div className="flex items-center gap-1.5 ml-2">
+                    <span className="text-[11px] font-medium text-slate-400">Atribut Varian:</span>
+                    {allAttributeKeys.map((key) => (
+                      <span
+                        key={key}
+                        className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/50 dark:border-amber-800/40"
+                      >
+                        {key}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -309,254 +438,686 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
         )}
       </div>
 
-      {/* Section: List of Variants (DENGAN PAGINATION & DRILL-DOWN) */}
+      {/* Section: List of Variants (DENGAN FILTER ATRIBUT DINAMIS & MODE MATRIKS 2D) */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Layers className="w-5 h-5 text-amber-500" />
-              <span>Daftar Varian Produk ({totalVariants})</span>
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Klik pada salah satu varian di bawah untuk melihat rincian satuan harga dan audit log mutasi stoknya
-            </p>
-          </div>
+        {/* Header Section */}
+        <div className="p-6 border-b border-slate-200 dark:border-slate-800 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Layers className="w-5 h-5 text-amber-500" />
+                <span>Daftar Varian Produk</span>
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold font-mono">
+                  {filteredVariants.length} dari {rawVariants.length} varian
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Pilah varian cepat berdasarkan atribut dinamis atau beralih ke Mode Matriks 2D untuk membandingkan stok & harga
+              </p>
+            </div>
 
-          {canUpdate && onMoveVariants && totalVariants > 0 && (
-            <div className="flex items-center gap-2.5 self-start sm:self-auto">
-              {selectedVariantIds.length > 0 ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg">
-                    {selectedVariantIds.length} Varian Dipilih
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onMoveVariants(variants.filter((v) => selectedVariantIds.includes(v.id)))
-                    }
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm transition-all"
-                  >
-                    <ArrowRightLeft className="w-3.5 h-3.5" />
-                    <span>Pindahkan ({selectedVariantIds.length})</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedVariantIds([])}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                  >
-                    Batal
-                  </button>
-                </div>
-              ) : (
+            {/* View Mode Switcher & Move Button */}
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {/* Toggle View Mode: List vs Matrix */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
                 <button
                   type="button"
-                  onClick={toggleSelectAll}
-                  className="text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                  onClick={() => setViewMode('list')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    viewMode === 'list'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Tampilan Daftar Standar"
                 >
-                  Pilih Semua Varian
+                  <List className="w-3.5 h-3.5" />
+                  <span>Daftar</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('matrix')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    viewMode === 'matrix'
+                      ? 'bg-amber-500 text-white shadow-sm'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Tampilan Matriks 2D (Tabel Silang Atribut)"
+                >
+                  <Grid className="w-3.5 h-3.5" />
+                  <span>Matriks 2D</span>
+                </button>
+              </div>
+
+              {/* Move Variants Selection Actions */}
+              {canUpdate && onMoveVariants && rawVariants.length > 0 && (
+                <div className="flex items-center gap-2">
+                  {selectedVariantIds.length > 0 ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg">
+                        {selectedVariantIds.length} Dipilih
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onMoveVariants(rawVariants.filter((v) => selectedVariantIds.includes(v.id)))
+                        }
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm transition-all"
+                      >
+                        <ArrowRightLeft className="w-3.5 h-3.5" />
+                        <span>Pindahkan ({selectedVariantIds.length})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedVariantIds([])}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                      >
+                        Batal
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={toggleSelectAll}
+                      className="text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                    >
+                      Pilih Semua
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Search Bar & Dynamic Attribute Filter Bar */}
+          <div className="pt-2 space-y-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+              {/* Instant Variant Search Input */}
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={variantSearch}
+                  onChange={(e) => {
+                    setVariantSearch(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  placeholder="Cari varian berdasarkan nama, SKU, barcode, atau atribut (cth: 1kg, black, 3m)..."
+                  className="w-full pl-9.5 pr-8 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900 dark:text-white placeholder:text-slate-400"
+                />
+                {variantSearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVariantSearch('');
+                      setCurrentPage(1);
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Reset All Filters Button */}
+              {isFilteringActive && (
+                <button
+                  type="button"
+                  onClick={handleClearAllFilters}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 hover:bg-rose-100 transition-colors shrink-0"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Filter</span>
                 </button>
               )}
             </div>
-          )}
-        </div>
 
-        {totalVariants === 0 ? (
-          <div className="py-12 text-center text-slate-400 text-xs">
-            Belum ada varian pada produk ini.
-          </div>
-        ) : (
-          <div>
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {paginatedVariants.map((v) => {
-                const isLow = Number(v.current_stock) <= Number(v.min_stock);
-                const isOut = Number(v.current_stock) <= 0;
-                const baseUnit = v.units?.find((u) => u.is_base_unit) || v.units?.[0];
+            {/* Faceted Dynamic Attribute Filter Chips */}
+            {allAttributeKeys.length > 0 && (
+              <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800/60">
+                {allAttributeKeys.map((attrKey) => {
+                  const values = attributeValuesMap[attrKey] || [];
+                  if (values.length === 0) return null;
+                  const currentSelected = selectedAttributes[attrKey];
 
-                return (
-                  <div
-                    key={v.id}
-                    className={`p-5 hover:bg-amber-500/[0.03] dark:hover:bg-slate-800/50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer group ${
-                      v.is_active === false ? 'bg-rose-500/[0.02] dark:bg-rose-950/[0.05]' : ''
-                    }`}
-                    onClick={() => onSelectVariant(v)}
-                  >
-                    <div className="flex items-start gap-3 flex-1 min-w-0">
-                      {canUpdate && onMoveVariants && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleSelectVariant(v.id);
-                          }}
-                          className="mt-0.5 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors shrink-0"
-                          title={selectedVariantIds.includes(v.id) ? 'Batalkan pilihan' : 'Pilih varian ini'}
-                        >
-                          {selectedVariantIds.includes(v.id) ? (
-                            <CheckSquare className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                          ) : (
-                            <Square className="w-4 h-4 text-slate-300 dark:text-slate-600" />
-                          )}
-                        </button>
-                      )}
+                  return (
+                    <div key={attrKey} className="flex items-center gap-2 flex-wrap text-xs">
+                      <span className="font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-1 shrink-0 min-w-[70px]">
+                        <Tag className="w-3 h-3 text-amber-500" />
+                        {attrKey}:
+                      </span>
 
-                      <div className="space-y-1.5 flex-1 min-w-0">
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          <span className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
-                            {v.variant_name}
-                          </span>
-                          <span className="font-mono text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded">
-                            SKU: {v.sku}
-                          </span>
+                      {/* Pill "Semua" */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (currentSelected) {
+                            handleToggleAttributeFilter(attrKey, currentSelected);
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                          !currentSelected
+                            ? 'bg-amber-600 text-white shadow-sm'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        Semua
+                      </button>
 
-                          {/* Variant Sale Status Pill */}
-                          {v.is_active === false ? (
-                            <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/15 border border-rose-200 dark:border-rose-900/50 px-2 py-0.5 rounded-full flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                              Varian: Tidak Dijual
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-200 dark:border-emerald-900/50 px-2 py-0.5 rounded-full flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              Varian: Masih Dijual
-                            </span>
-                          )}
-
-                          {isOut ? (
-                            <span className="text-[10px] font-bold text-rose-600 bg-rose-500/10 px-2 py-0.5 rounded-full">
-                              Habis (0)
-                            </span>
-                          ) : isLow ? (
-                            <span className="text-[10px] font-bold text-amber-600 bg-amber-500/15 px-2 py-0.5 rounded-full flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3" /> Kritis
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
-                              <ShieldCheck className="w-3 h-3" /> Aman
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Units Pills */}
-                        <div className="flex items-center gap-2 flex-wrap text-xs text-slate-500">
-                          <span>Pilihan Satuan:</span>
-                          {v.units?.map((u) => (
+                      {/* Pill for each attribute value */}
+                      {values.map(({ value, count }) => {
+                        const isSelected = currentSelected === value;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => handleToggleAttributeFilter(attrKey, value)}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                              isSelected
+                                ? 'bg-amber-600 text-white font-bold shadow-sm'
+                                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700 hover:border-amber-400 hover:text-amber-600'
+                            }`}
+                          >
+                            <span>{value}</span>
                             <span
-                              key={u.id}
-                              className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
-                                u.is_base_unit
-                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                              className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                                isSelected
+                                  ? 'bg-white/20 text-white'
+                                  : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
                               }`}
                             >
-                              {u.unit_name}: {formatRupiah(u.sell_price)}
+                              {count}
                             </span>
-                          ))}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ========================================================= */}
+        {/* VIEW MODE 1: STANDARD LIST VIEW */}
+        {/* ========================================================= */}
+        {viewMode === 'list' && (
+          <div>
+            {rawVariants.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 text-xs">
+                Belum ada varian pada produk ini.
+              </div>
+            ) : filteredVariants.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 text-xs space-y-2">
+                <AlertTriangle className="w-8 h-8 text-amber-500/60 mx-auto" />
+                <p className="font-semibold text-slate-700 dark:text-slate-300">
+                  Tidak ada varian yang cocok dengan kriteria filter atau pencarian Anda.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleClearAllFilters}
+                  className="text-xs text-amber-600 hover:underline font-semibold"
+                >
+                  Hapus filter pencarian
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {paginatedVariants.map((v) => {
+                    const isLow = Number(v.current_stock) <= Number(v.min_stock);
+                    const isOut = Number(v.current_stock) <= 0;
+                    const baseUnit = v.units?.find((u) => u.is_base_unit) || v.units?.[0];
+
+                    return (
+                      <div
+                        key={v.id}
+                        className={`p-5 hover:bg-amber-500/[0.03] dark:hover:bg-slate-800/50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer group ${
+                          v.is_active === false ? 'bg-rose-500/[0.02] dark:bg-rose-950/[0.05]' : ''
+                        }`}
+                        onClick={() => onSelectVariant(v)}
+                      >
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          {canUpdate && onMoveVariants && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelectVariant(v.id);
+                              }}
+                              className="mt-0.5 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors shrink-0"
+                              title={selectedVariantIds.includes(v.id) ? 'Batalkan pilihan' : 'Pilih varian ini'}
+                            >
+                              {selectedVariantIds.includes(v.id) ? (
+                                <CheckSquare className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-300 dark:text-slate-600" />
+                              )}
+                            </button>
+                          )}
+
+                          <div className="space-y-1.5 flex-1 min-w-0">
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              <span className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                                {v.variant_name}
+                              </span>
+                              <span className="font-mono text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded">
+                                SKU: {v.sku}
+                              </span>
+
+                              {/* Variant Sale Status Pill */}
+                              {v.is_active === false ? (
+                                <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/15 border border-rose-200 dark:border-rose-900/50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                  Varian: Tidak Dijual
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-200 dark:border-emerald-900/50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  Varian: Masih Dijual
+                                </span>
+                              )}
+
+                              {isOut ? (
+                                <span className="text-[10px] font-bold text-rose-600 bg-rose-500/10 px-2 py-0.5 rounded-full">
+                                  Habis (0)
+                                </span>
+                              ) : isLow ? (
+                                <span className="text-[10px] font-bold text-amber-600 bg-amber-500/15 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" /> Kritis
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <ShieldCheck className="w-3 h-3" /> Aman
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Dynamic Attribute Badges on Variant Card */}
+                            {v.attributes && Object.keys(v.attributes).length > 0 && (
+                              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                                {Object.entries(v.attributes).map(([attrKey, attrVal]) => (
+                                  <span
+                                    key={attrKey}
+                                    className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60"
+                                  >
+                                    <Tag className="w-2.5 h-2.5 text-amber-500 shrink-0" />
+                                    <span className="text-slate-500 dark:text-slate-400 font-normal">{attrKey}:</span>
+                                    <span>{attrVal}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Units Pills */}
+                            <div className="flex items-center gap-2 flex-wrap text-xs text-slate-500 pt-0.5">
+                              <span>Pilihan Satuan:</span>
+                              {v.units?.map((u) => (
+                                <span
+                                  key={u.id}
+                                  className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                                    u.is_base_unit
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                                  }`}
+                                >
+                                  {u.unit_name}: {formatRupiah(u.sell_price)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Stock & Navigation Link */}
+                        <div className="flex items-center gap-3 self-end md:self-auto shrink-0">
+                          <div className="text-right mr-1">
+                            <span className="text-[10px] text-slate-400 block font-medium">Stok Varian</span>
+                            <span className="font-mono font-bold text-base text-slate-900 dark:text-white">
+                              {formatStock(v.current_stock)}
+                            </span>
+                            <span className="text-[10px] text-slate-400 block">
+                              Min: {formatStock(v.min_stock)}
+                            </span>
+                          </div>
+
+                          {/* Variant Action Toolbar */}
+                          <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+                            {/* Toggle Variant Status */}
+                            {canUpdate && onToggleVariantStatus && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onToggleVariantStatus(v.id);
+                                }}
+                                className={`p-1.5 rounded-lg transition-colors ${
+                                  v.is_active !== false
+                                    ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                                    : 'text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                                }`}
+                                title={
+                                  v.is_active !== false
+                                    ? 'Status: Masih Dijual (Klik untuk hentikan penjualan varian ini)'
+                                    : 'Status: Tidak Dijual (Klik untuk aktifkan kembali varian ini)'
+                                }
+                              >
+                                <Power className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {canUpdate && onEditVariant && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onEditVariant(v);
+                                }}
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                                title="Edit Varian"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {canUpdate && onMoveVariants && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onMoveVariants([v]);
+                                }}
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors"
+                                title="Pindahkan Varian ke Produk Lain"
+                              >
+                                <ArrowRightLeft className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          {canAdjust && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenAdjust(v.id);
+                              }}
+                              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+                              title="Penyesuaian Stok Cepat"
+                            >
+                              Adjust
+                            </button>
+                          )}
+
+                          <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 group-hover:bg-amber-500 group-hover:text-white transition-all">
+                            <ChevronRight className="w-4 h-4" />
+                          </div>
                         </div>
                       </div>
+                    );
+                  })}
+                </div>
+
+                {/* Pagination for Variants */}
+                {totalFilteredVariants > pageSize && (
+                  <Pagination
+                    currentPage={currentPage}
+                    totalItems={totalFilteredVariants}
+                    pageSize={pageSize}
+                    onPageChange={(page) => setCurrentPage(page)}
+                    onPageSizeChange={(size) => {
+                      setPageSize(size);
+                      setCurrentPage(1);
+                    }}
+                    pageSizeOptions={[5, 10, 20]}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* VIEW MODE 2: 2D MATRIX VIEW (TABEL SILANG KOMBINASI ATRIBUT) */}
+        {/* ========================================================= */}
+        {viewMode === 'matrix' && (
+          <div className="p-6 space-y-4">
+            {allAttributeKeys.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 text-xs space-y-2">
+                <Grid className="w-8 h-8 text-amber-500/50 mx-auto" />
+                <p className="font-semibold text-slate-700 dark:text-slate-300">
+                  Produk ini belum memiliki atribut varian dinamis.
+                </p>
+                <p className="text-slate-500 max-w-md mx-auto">
+                  Mode Matriks 2D memerlukan setidaknya 1 atau 2 atribut (seperti Kemasan × Warna atau Ukuran × Tebal).
+                  Silakan tambahkan atribut pada menu Edit Varian atau gunakan Tampilan Daftar.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Axis Selector Bar (if >= 2 attributes) */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200/70 dark:border-slate-700/70 text-xs">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Grid className="w-4 h-4 text-amber-500" />
+                      Konfigurasi Matriks 2D:
+                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <label className="text-slate-500">Sumbu Baris (↓):</label>
+                      <select
+                        value={matrixRowAttr}
+                        onChange={(e) => setMatrixRowAttr(e.target.value)}
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      >
+                        {allAttributeKeys.map((key) => (
+                          <option key={key} value={key}>
+                            {key}
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
-                    {/* Stock & Navigation Link */}
-                    <div className="flex items-center gap-3 self-end md:self-auto shrink-0">
-                      <div className="text-right mr-1">
-                        <span className="text-[10px] text-slate-400 block font-medium">Stok Varian</span>
-                        <span className="font-mono font-bold text-base text-slate-900 dark:text-white">
-                          {formatStock(v.current_stock)}
-                        </span>
-                        <span className="text-[10px] text-slate-400 block">
-                          Min: {formatStock(v.min_stock)}
-                        </span>
-                      </div>
-
-                      {/* Variant Action Toolbar */}
-                      <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
-                        {/* Toggle Variant Status */}
-                        {canUpdate && onToggleVariantStatus && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onToggleVariantStatus(v.id);
-                            }}
-                            className={`p-1.5 rounded-lg transition-colors ${
-                              v.is_active !== false
-                                ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
-                                : 'text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
-                            }`}
-                            title={
-                              v.is_active !== false
-                                ? 'Status: Masih Dijual (Klik untuk hentikan penjualan varian ini)'
-                                : 'Status: Tidak Dijual (Klik untuk aktifkan kembali varian ini)'
-                            }
-                          >
-                            <Power className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-
-                        {canUpdate && onEditVariant && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onEditVariant(v);
-                            }}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
-                            title="Edit Varian"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-
-                        {canUpdate && onMoveVariants && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onMoveVariants([v]);
-                            }}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors"
-                            title="Pindahkan Varian ke Produk Lain"
-                          >
-                            <ArrowRightLeft className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-
-                      {canAdjust && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenAdjust(v.id);
-                          }}
-                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
-                          title="Penyesuaian Stok Cepat"
+                    {allAttributeKeys.length > 1 && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-slate-500">Sumbu Kolom (→):</label>
+                        <select
+                          value={matrixColAttr}
+                          onChange={(e) => setMatrixColAttr(e.target.value)}
+                          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-500"
                         >
-                          Adjust
-                        </button>
-                      )}
-
-                      <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 group-hover:bg-amber-500 group-hover:text-white transition-all">
-                        <ChevronRight className="w-4 h-4" />
+                          {allAttributeKeys.map((key) => (
+                            <option key={key} value={key} disabled={key === matrixRowAttr}>
+                              {key}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                    </div>
+                    )}
                   </div>
-                );
-              })}
-            </div>
 
-            {/* Pagination for Variants */}
-            {totalVariants > 5 && (
-              <Pagination
-                currentPage={currentPage}
-                totalItems={totalVariants}
-                pageSize={pageSize}
-                onPageChange={(page) => setCurrentPage(page)}
-                onPageSizeChange={(size) => {
-                  setPageSize(size);
-                  setCurrentPage(1);
-                }}
-                pageSizeOptions={[5, 10, 20]}
-              />
+                  <span className="text-[11px] text-slate-400">
+                    Klik sel varian untuk membuka rincian satuan & log mutasi
+                  </span>
+                </div>
+
+                {/* 2D Matrix Table Grid */}
+                {(() => {
+                  const rowValues = (attributeValuesMap[matrixRowAttr] || []).map((v) => v.value);
+                  const isTwoDimensional = allAttributeKeys.length > 1 && matrixRowAttr !== matrixColAttr;
+                  const colValues = isTwoDimensional
+                    ? (attributeValuesMap[matrixColAttr] || []).map((v) => v.value)
+                    : ['Varian Info'];
+
+                  if (rowValues.length === 0) {
+                    return (
+                      <div className="py-10 text-center text-slate-400 text-xs">
+                        Tidak ada data nilai untuk atribut <strong>{matrixRowAttr}</strong>.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+                            <th className="p-3.5 font-bold text-slate-700 dark:text-slate-300 border-r border-slate-200 dark:border-slate-700 min-w-[140px] sticky left-0 bg-slate-100 dark:bg-slate-800 z-10">
+                              <span className="text-slate-400 font-normal block text-[10px]">
+                                {matrixRowAttr} (↓) \ {isTwoDimensional ? `${matrixColAttr} (→)` : ''}
+                              </span>
+                              <span className="text-slate-900 dark:text-white font-bold">
+                                {matrixRowAttr}
+                              </span>
+                            </th>
+                            {colValues.map((colVal) => (
+                              <th
+                                key={colVal}
+                                className="p-3.5 font-bold text-slate-800 dark:text-slate-200 text-center min-w-[170px] border-r border-slate-200 dark:border-slate-700 last:border-r-0"
+                              >
+                                <span className="inline-block px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 font-semibold">
+                                  {colVal}
+                                </span>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                          {rowValues.map((rowVal) => (
+                            <tr
+                              key={rowVal}
+                              className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors"
+                            >
+                              {/* Row Header */}
+                              <td className="p-3.5 font-bold text-slate-900 dark:text-white border-r border-slate-200 dark:border-slate-700 sticky left-0 bg-white dark:bg-slate-900 z-10 shadow-sm">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                                  <span>{rowVal}</span>
+                                </div>
+                              </td>
+
+                              {/* Matrix Data Cells */}
+                              {colValues.map((colVal) => {
+                                // Find variant matching this row and col combination
+                                const matchedVariant = filteredVariants.find((v) => {
+                                  const rowMatch = v.attributes?.[matrixRowAttr] === rowVal;
+                                  if (!isTwoDimensional) return rowMatch;
+                                  const colMatch = v.attributes?.[matrixColAttr] === colVal;
+                                  return rowMatch && colMatch;
+                                });
+
+                                if (!matchedVariant) {
+                                  // Empty combination cell
+                                  return (
+                                    <td
+                                      key={colVal}
+                                      className="p-3 text-center border-r border-slate-200 dark:border-slate-800 last:border-r-0 bg-slate-50/30 dark:bg-slate-950/20"
+                                    >
+                                      <div className="py-2.5 px-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 flex flex-col items-center justify-center gap-1 text-slate-400">
+                                        <span className="text-[11px]">- Kosong -</span>
+                                        {canCreate && (
+                                          <button
+                                            type="button"
+                                            onClick={() => onAddVariant(product.id)}
+                                            className="text-[10px] text-amber-600 dark:text-amber-400 font-bold hover:underline inline-flex items-center gap-0.5"
+                                          >
+                                            <Plus className="w-3 h-3" /> Tambah
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  );
+                                }
+
+                                const isLow = Number(matchedVariant.current_stock) <= Number(matchedVariant.min_stock);
+                                const isOut = Number(matchedVariant.current_stock) <= 0;
+                                const baseUnit = matchedVariant.units?.find((u) => u.is_base_unit) || matchedVariant.units?.[0];
+
+                                return (
+                                  <td
+                                    key={colVal}
+                                    onClick={() => onSelectVariant(matchedVariant)}
+                                    className={`p-3 border-r border-slate-200 dark:border-slate-800 last:border-r-0 cursor-pointer transition-all hover:bg-amber-500/[0.08] dark:hover:bg-amber-500/[0.12] ${
+                                      matchedVariant.is_active === false
+                                        ? 'bg-rose-500/[0.03] dark:bg-rose-950/[0.08]'
+                                        : ''
+                                    }`}
+                                  >
+                                    <div className="space-y-1.5 p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 shadow-xs hover:border-amber-400 dark:hover:border-amber-500 transition-colors">
+                                      {/* Variant Name & SKU */}
+                                      <div className="flex items-center justify-between gap-1">
+                                        <span className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                          {matchedVariant.variant_name}
+                                        </span>
+                                        {matchedVariant.is_active === false && (
+                                          <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" title="Nonaktif" />
+                                        )}
+                                      </div>
+
+                                      <div className="text-[10px] font-mono text-slate-400 truncate">
+                                        SKU: {matchedVariant.sku}
+                                      </div>
+
+                                      {/* Stock Indicator */}
+                                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-700/60">
+                                        <span className="text-[10px] text-slate-500">Stok:</span>
+                                        <div className="flex items-center gap-1.5 font-mono">
+                                          <span
+                                            className={`font-black text-xs ${
+                                              isOut
+                                                ? 'text-rose-600'
+                                                : isLow
+                                                ? 'text-amber-600'
+                                                : 'text-emerald-600 dark:text-emerald-400'
+                                            }`}
+                                          >
+                                            {formatStock(matchedVariant.current_stock)}
+                                          </span>
+                                          {baseUnit?.unit_name && (
+                                            <span className="text-[10px] text-slate-400">
+                                              {baseUnit.unit_name}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Base Sell Price */}
+                                      {baseUnit && (
+                                        <div className="flex items-center justify-between gap-2 text-[10px]">
+                                          <span className="text-slate-400">Harga:</span>
+                                          <span className="font-bold text-slate-800 dark:text-slate-200">
+                                            {formatRupiah(baseUnit.sell_price)}
+                                          </span>
+                                        </div>
+                                      )}
+
+                                      {/* Cell Quick Actions */}
+                                      {canAdjust && (
+                                        <div className="pt-1 flex items-center justify-end">
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              onOpenAdjust(matchedVariant.id);
+                                            }}
+                                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
+                                            title="Penyesuaian Stok Cepat"
+                                          >
+                                            Adjust Stok
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
             )}
           </div>
         )}

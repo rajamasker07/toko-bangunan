@@ -179,6 +179,7 @@ export function buildProductPassage(product: {
   variants?: Array<{
     variant_name?: string | null;
     sku?: string | null;
+    attributes?: Record<string, string> | null;
     units?: Array<{ unit_name?: string | null; conversion_factor?: number | null }>;
   }>;
 }): string {
@@ -203,10 +204,18 @@ export function buildProductPassage(product: {
   if (Array.isArray(product.variants) && product.variants.length > 0) {
     const variantNames: string[] = [];
     const unitNames: string[] = [];
+    const attrEntries: string[] = [];
 
     for (const v of product.variants) {
       if (v.variant_name && v.variant_name !== 'Default') {
         variantNames.push(v.variant_name);
+      }
+      if (v.attributes && typeof v.attributes === 'object') {
+        for (const [k, val] of Object.entries(v.attributes)) {
+          if (val && !attrEntries.includes(`${k}: ${val}`)) {
+            attrEntries.push(`${k}: ${val}`);
+          }
+        }
       }
       if (Array.isArray(v.units)) {
         for (const u of v.units) {
@@ -219,6 +228,9 @@ export function buildProductPassage(product: {
 
     if (variantNames.length > 0) {
       parts.push(`Pilihan Varian: ${variantNames.join(', ')}`);
+    }
+    if (attrEntries.length > 0) {
+      parts.push(`Atribut Varian: ${attrEntries.join(', ')}`);
     }
     if (unitNames.length > 0) {
       parts.push(`Satuan: ${unitNames.join(', ')}`);

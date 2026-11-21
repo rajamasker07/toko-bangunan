@@ -23,6 +23,7 @@ export interface CreateVariantInput {
   barcode?: string;
   initial_stock?: number;
   min_stock?: number;
+  attributes?: Record<string, string>;
   units: CreateUnitInput[];
 }
 
@@ -37,6 +38,7 @@ export interface CreateProductInput {
   description?: string;
   min_stock_alert?: number;
   has_variants?: boolean;
+  variant_options?: string[]; // Daftar nama atribut dinamis (e.g. ['Kemasan', 'Warna'])
   // Dimensi & spesifikasi fisik toko bangunan
   weight?: number | null;
   length?: number | null;
@@ -167,6 +169,7 @@ export class ProductService {
               'available_stock', (pv2.current_stock - COALESCE(pv2.reserved_stock, 0)),
               'min_stock', pv2.min_stock,
               'is_active', pv2.is_active,
+              'attributes', COALESCE(pv2.attributes, '{}'::jsonb),
               'units', (
                 SELECT json_agg(
                   json_build_object(
@@ -376,6 +379,7 @@ export class ProductService {
               'available_stock', (pv.current_stock - COALESCE(pv.reserved_stock, 0)),
               'min_stock', pv.min_stock,
               'is_active', pv.is_active,
+              'attributes', COALESCE(pv.attributes, '{}'::jsonb),
               'units', (
                 SELECT json_agg(
                   json_build_object(
@@ -468,8 +472,8 @@ export class ProductService {
       await client.query(
         `INSERT INTO products (
           id, name, sku, barcode, category_id, brand_id, supplier_id, description, min_stock_alert, has_variants,
-          weight, length, width, height, material, specifications
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+          weight, length, width, height, material, specifications, variant_options
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
         [
           productId,
           data.name,
@@ -487,6 +491,7 @@ export class ProductService {
           data.height !== undefined && data.height !== null ? Number(data.height) : null,
           data.material ? String(data.material).trim() : null,
           data.specifications ? String(data.specifications).trim() : null,
+          JSON.stringify(data.variant_options || []),
         ]
       );
 
@@ -499,9 +504,9 @@ export class ProductService {
         const minStock = Number(data.min_stock ?? data.min_stock_alert ?? 5);
 
         await client.query(
-          `INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, current_stock, min_stock)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [variantId, productId, 'Standar', variantSku, data.barcode || null, initialStock, minStock]
+          `INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, current_stock, min_stock, attributes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [variantId, productId, 'Standar', variantSku, data.barcode || null, initialStock, minStock, '{}']
         );
 
         // Satuan harga for single variant
@@ -561,9 +566,9 @@ export class ProductService {
           const minStock = Number(v.min_stock ?? data.min_stock_alert ?? 5);
 
           await client.query(
-            `INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, current_stock, min_stock)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [variantId, productId, v.variant_name, variantSku, v.barcode || null, initialStock, minStock]
+            `INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, current_stock, min_stock, attributes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [variantId, productId, v.variant_name, variantSku, v.barcode || null, initialStock, minStock, JSON.stringify(v.attributes || {})]
           );
 
           // Units for this variant
@@ -639,6 +644,7 @@ export class ProductService {
       height?: number | null;
       material?: string | null;
       specifications?: string | null;
+      variant_options?: string[];
     },
     options?: { includeBuyPrice?: boolean }
   ) {
@@ -707,6 +713,10 @@ export class ProductService {
     if (data.specifications !== undefined) {
       values.push(data.specifications ? String(data.specifications).trim() : null);
       fields.push(`specifications = $${values.length}`);
+    }
+    if (data.variant_options !== undefined) {
+      values.push(JSON.stringify(data.variant_options || []));
+      fields.push(`variant_options = $${values.length}`);
     }
 
     if (fields.length === 0) return this.getProductById(id, options);

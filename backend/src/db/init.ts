@@ -437,6 +437,11 @@ export async function initializeDatabase() {
       await client.query('ALTER TABLE products ADD COLUMN embedding_updated_at TIMESTAMPTZ;');
     }
 
+    // 3f. Kolom daftar nama opsi atribut dinamis per produk (e.g. ['Kemasan', 'Warna'])
+    if (!(await columnExists(client, 'products', 'variant_options'))) {
+      await client.query("ALTER TABLE products ADD COLUMN variant_options JSONB DEFAULT '[]'::jsonb NOT NULL;");
+    }
+
     // 3. Product Variants Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS product_variants (
@@ -449,6 +454,7 @@ export async function initializeDatabase() {
         reserved_stock NUMERIC(12, 2) DEFAULT 0 NOT NULL,
         min_stock NUMERIC(12, 2) DEFAULT 5 NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
+        attributes JSONB DEFAULT '{}'::jsonb NOT NULL,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
@@ -460,6 +466,12 @@ export async function initializeDatabase() {
     // 3e. Kolom reserved_stock jika belum ada
     if (!(await columnExists(client, 'product_variants', 'reserved_stock'))) {
       await client.query('ALTER TABLE product_variants ADD COLUMN reserved_stock NUMERIC(12, 2) DEFAULT 0 NOT NULL;');
+    }
+
+    // 3g. Kolom nilai atribut dinamis varian jika belum ada (e.g. {"Kemasan": "1kg", "Warna": "Super Black"})
+    if (!(await columnExists(client, 'product_variants', 'attributes'))) {
+      await client.query("ALTER TABLE product_variants ADD COLUMN attributes JSONB DEFAULT '{}'::jsonb NOT NULL;");
+      await client.query("CREATE INDEX IF NOT EXISTS idx_product_variants_attributes ON product_variants USING gin (attributes);");
     }
 
     // 4. Variant Units (Satuan Harga bertingkat / multi-unit)

@@ -37,6 +37,7 @@ export class VariantService {
       barcode?: string;
       initial_stock?: number;
       min_stock?: number;
+      attributes?: Record<string, string>;
       units?: Array<{
         unit_name: string;
         conversion_factor?: number;
@@ -69,9 +70,9 @@ export class VariantService {
       await client.query('UPDATE products SET has_variants = true WHERE id = $1', [productId]);
 
       await client.query(
-        `INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, current_stock, min_stock)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [variantId, productId, data.variant_name, sku, data.barcode || null, initialStock, minStock]
+        `INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, current_stock, min_stock, attributes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [variantId, productId, data.variant_name, sku, data.barcode || null, initialStock, minStock, JSON.stringify(data.attributes || {})]
       );
 
       if (data.units && data.units.length > 0) {
@@ -128,6 +129,7 @@ export class VariantService {
     barcode?: string;
     min_stock?: number;
     is_active?: boolean;
+    attributes?: Record<string, string>;
   }) {
     const fields: string[] = [];
     const values: any[] = [];
@@ -151,6 +153,10 @@ export class VariantService {
     if (data.is_active !== undefined) {
       values.push(data.is_active);
       fields.push(`is_active = $${values.length}`);
+    }
+    if (data.attributes !== undefined) {
+      values.push(JSON.stringify(data.attributes || {}));
+      fields.push(`attributes = $${values.length}`);
     }
 
     if (fields.length === 0) return null;
