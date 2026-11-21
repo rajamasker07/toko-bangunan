@@ -721,6 +721,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  bulkUpdateVariantAttributes: (
+    productId: string,
+    data: {
+      updates: Array<{ variant_id: string; attributes: Record<string, string> }>;
+      variant_options?: string[];
+    }
+  ) =>
+    fetchJson<{ success: boolean; message: string; data: any }>(
+      `/products/${productId}/variants/bulk-attributes`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }
+    ),
   updateVariant: (variantId: string, data: any) =>
     fetchJson<any>(`/variants/${variantId}`, {
       method: 'PUT',

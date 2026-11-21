@@ -299,4 +299,65 @@ export class VariantService {
     }
     return res.rows[0];
   }
+
+  /**
+   * Bulk update attributes for multiple variants of a product
+   */
+  static async bulkUpdateAttributes(
+    productId: string,
+    updates: Array<{ variant_id: string; attributes: Record<string, string> }>,
+    variantOptions?: string[]
+  ) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const item of updates) {
+        await client.query(
+          `UPDATE product_variants 
+           SET attributes = $1, updated_at = CURRENT_TIMESTAMP 
+           WHERE id = $2 AND product_id = $3`,
+          [JSON.stringify(item.attributes || {}), item.variant_id, productId]
+        );
+      }
+
+      if (variantOptions && Array.isArray(variantOptions)) {
+        await client.query(
+          `UPDATE products 
+           SET variant_options = $1, updated_at = CURRENT_TIMESTAMP 
+           WHERE id = $2`,
+          [JSON.stringify(variantOptions), productId]
+        );
+      } else {
+        // Collect all distinct attribute keys from all variants of this product
+        const allVarsRes = await client.query(
+          `SELECT attributes FROM product_variants WHERE product_id = $1`,
+          [productId]
+        );
+        const keysSet = new Set<string>();
+        for (const row of allVarsRes.rows) {
+          if (row.attributes && typeof row.attributes === 'object') {
+            Object.keys(row.attributes).forEach((k) => {
+              if (k && k.trim()) keysSet.add(k.trim());
+            });
+          }
+        }
+        await client.query(
+          `UPDATE products 
+           SET variant_options = $1, updated_at = CURRENT_TIMESTAMP 
+           WHERE id = $2`,
+          [JSON.stringify(Array.from(keysSet)), productId]
+        );
+      }
+
+      await client.query('COMMIT');
+      EmbeddingService.syncProductEmbedding(productId).catch(() => {});
+      return { count: updates.length };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
 }

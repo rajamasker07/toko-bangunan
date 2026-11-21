@@ -54,6 +54,7 @@ interface ExistingVariant {
   reserved_stock: string | number;
   min_stock: string | number;
   is_active: boolean;
+  attributes?: Record<string, string>;
 }
 
 interface ExistingVariantUnit {
@@ -96,6 +97,8 @@ interface ParsedProductRow {
   skuVarianRaw: string | null;
   namaVarianRaw: string | null;
   barcodeVarian: string | null;
+  atributVarianRaw: string | null;
+  attributesParsed: Record<string, string>;
   stokAwal: number | null;
   minStockVarian: number | null;
   statusVarian: boolean | null;
@@ -168,6 +171,24 @@ function parseOptionalBool(
 
 function hasRowErrors(messages: ImportCellIssue[]): boolean {
   return messages.some((m) => m.severity === 'error');
+}
+
+export function parseAttributeString(raw: string | null | undefined): Record<string, string> {
+  if (!raw || typeof raw !== 'string') return {};
+  const result: Record<string, string> = {};
+  // Split by pipe '|', newline, or comma if pattern is 'key: value'
+  const segments = raw.split(/[|\n]/).map((s) => s.trim()).filter(Boolean);
+  for (const seg of segments) {
+    const colonIdx = seg.indexOf(':');
+    if (colonIdx > 0) {
+      const key = seg.slice(0, colonIdx).trim();
+      const val = seg.slice(colonIdx + 1).trim();
+      if (key && val) {
+        result[key] = val;
+      }
+    }
+  }
+  return result;
 }
 
 export async function runProductImport(
@@ -433,6 +454,9 @@ export async function runProductImport(
       });
     }
 
+    const atributVarianRaw = parseTextCell(row.values.atribut_varian);
+    const attributesParsed = parseAttributeString(atributVarianRaw);
+
     const stokAwal = parseOptionalNonNegNumber(row.values.stok_awal, 'stok_awal', 'Stok awal', messages);
     const minStockVarian = parseOptionalNonNegNumber(
       row.values.stok_minimum_varian,
@@ -540,6 +564,8 @@ export async function runProductImport(
       skuVarianRaw,
       namaVarianRaw,
       barcodeVarian,
+      atributVarianRaw,
+      attributesParsed,
       stokAwal,
       minStockVarian,
       statusVarian,
@@ -1178,14 +1204,15 @@ export async function runProductImport(
           (grp.existingProduct ? Number(grp.existingProduct.min_stock_alert) : 5);
         const vActive = vRows.find((r) => r.statusVarian !== null)?.statusVarian ?? null;
         const vInitialStock = vRows.find((r) => r.stokAwal !== null)?.stokAwal ?? 0;
+        const vAttributes = vRows.find((r) => r.attributesParsed && Object.keys(r.attributesParsed).length > 0)?.attributesParsed || {};
 
         let variantId: string;
         if (!existingVariant) {
           variantId = generateUUIDv7();
           await db.query(
             `INSERT INTO product_variants (
-               id, product_id, variant_name, sku, barcode, current_stock, min_stock, is_active
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+               id, product_id, variant_name, sku, barcode, current_stock, min_stock, is_active, attributes
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [
               variantId,
               productId,
@@ -1195,6 +1222,7 @@ export async function runProductImport(
               vInitialStock,
               vMinStock,
               vActive ?? true,
+              JSON.stringify(vAttributes),
             ]
           );
 
@@ -1217,6 +1245,10 @@ export async function runProductImport(
           }
         } else {
           variantId = existingVariant.id;
+          const mergedAttrs = {
+            ...(existingVariant.attributes && typeof existingVariant.attributes === 'object' ? existingVariant.attributes : {}),
+            ...vAttributes,
+          };
           // Jangan pernah menimpa current_stock / reserved_stock pada upsert!
           await db.query(
             `UPDATE product_variants SET
@@ -1224,13 +1256,15 @@ export async function runProductImport(
                barcode = $2,
                min_stock = $3,
                is_active = $4,
+               attributes = $5,
                updated_at = CURRENT_TIMESTAMP
-             WHERE id = $5`,
+             WHERE id = $6`,
             [
               vRows.find((r) => r.namaVarianRaw)?.namaVarianRaw || existingVariant.variant_name,
               vBarcode ?? existingVariant.barcode,
               vRows.find((r) => r.minStockVarian !== null)?.minStockVarian ?? existingVariant.min_stock,
               vActive ?? existingVariant.is_active,
+              JSON.stringify(mergedAttrs),
               variantId,
             ]
           );
@@ -1297,6 +1331,26 @@ export async function runProductImport(
             );
           }
         }
+      }
+
+      // Update variant_options for product based on variant attributes
+      const allAttrsRes = await db.query(
+        `SELECT attributes FROM product_variants WHERE product_id = $1`,
+        [productId]
+      );
+      const keysSet = new Set<string>();
+      for (const row of allAttrsRes.rows) {
+        if (row.attributes && typeof row.attributes === 'object') {
+          Object.keys(row.attributes).forEach((k) => {
+            if (k && k.trim()) keysSet.add(k.trim());
+          });
+        }
+      }
+      if (keysSet.size > 0) {
+        await db.query(
+          `UPDATE products SET variant_options = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+          [JSON.stringify(Array.from(keysSet)), productId]
+        );
       }
 
       for (const r of grp.rows) {

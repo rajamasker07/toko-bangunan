@@ -168,4 +168,29 @@ export class VariantController {
       res.status(400).json({ success: false, message: error.message });
     }
   }
+
+  static async bulkUpdateAttributes(req: Request, res: Response) {
+    try {
+      const productId = String(req.params.productId);
+      const { updates, variant_options } = req.body;
+
+      if (!Array.isArray(updates) || updates.length === 0) {
+        return res.status(400).json({ success: false, message: 'Daftar update varian tidak boleh kosong' });
+      }
+
+      const result = await VariantService.bulkUpdateAttributes(
+        productId,
+        updates,
+        variant_options
+      );
+
+      res.json({
+        success: true,
+        message: `Berhasil memperbarui atribut untuk ${result.count} varian`,
+        data: result,
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
 }

@@ -359,6 +359,10 @@ const ENTITY_SCHEMAS: Record<ImportEntityType, EntityTemplateSchema> = {
       harga_modal: 'harga_beli',
       sell_price: 'harga_jual',
       wholesale_price: 'harga_grosir',
+      atribut: 'atribut_varian',
+      attributes: 'atribut_varian',
+      atribut_varian: 'atribut_varian',
+      variant_attributes: 'atribut_varian',
     },
     columns: [
       {
@@ -504,6 +508,16 @@ const ENTITY_SCHEMAS: Record<ImportEntityType, EntityTemplateSchema> = {
         width: 26,
         description: 'Wajib jika multi-varian. Untuk produk tunggal default "Standar".',
         example: 'Standar Sak 50kg',
+      },
+      {
+        key: 'atribut_varian',
+        label: 'Atribut Varian',
+        required: false,
+        width: 28,
+        isText: true,
+        description:
+          'Atribut spesifikasi varian dipisah pipa "|" atau koma, contoh: "Kemasan: 50kg | Tipe: PCC" atau "Panjang: 4m, Warna: Maroon".',
+        example: 'Kemasan: 50kg | Tipe: PCC',
       },
       {
         key: 'barcode_varian',

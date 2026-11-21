@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Product, ProductVariant } from '../types';
+import { api } from '../services/api';
 import { formatRupiah, formatStock } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { Pagination } from './common/Pagination';
@@ -31,7 +32,10 @@ import {
   RotateCcw,
   Filter,
   Check,
-  X
+  X,
+  Sparkles,
+  Wand2,
+  BookmarkPlus
 } from 'lucide-react';
 
 interface ProductDetailViewProps {
@@ -48,6 +52,8 @@ interface ProductDetailViewProps {
   onMergeProduct?: (product: Product) => void;
   onAbsorbProducts?: (targetProduct: Product) => void;
   onMoveVariants?: (variants: ProductVariant[]) => void;
+  onRefresh?: () => void;
+  showToast?: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
@@ -64,6 +70,8 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
   onMergeProduct,
   onAbsorbProducts,
   onMoveVariants,
+  onRefresh,
+  showToast,
 }) => {
   const { can } = useAuth();
   const canCreate = can('products:create');
@@ -80,6 +88,19 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
 
   // View Mode: 'list' (default) vs 'matrix' (2D Grid)
   const [viewMode, setViewMode] = useState<'list' | 'matrix'>('list');
+
+  // Auto-Extract Attributes Modal state (Tahap 2)
+  const [isExtractModalOpen, setIsExtractModalOpen] = useState<boolean>(false);
+  const [extractDelimiter, setExtractDelimiter] = useState<string>('-');
+  const [customDelimiter, setCustomDelimiter] = useState<string>('');
+  const [segmentMappings, setSegmentMappings] = useState<string[]>(['Kemasan', 'Warna']);
+  const [isExtractSubmitting, setIsExtractSubmitting] = useState<boolean>(false);
+
+  // Bulk Tag Modal state (Tahap 2)
+  const [isBulkTagModalOpen, setIsBulkTagModalOpen] = useState<boolean>(false);
+  const [bulkTagKey, setBulkTagKey] = useState<string>('');
+  const [bulkTagValue, setBulkTagValue] = useState<string>('');
+  const [isBulkTagSubmitting, setIsBulkTagSubmitting] = useState<boolean>(false);
 
   // Pagination for variants list
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -203,6 +224,135 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
       setSelectedVariantIds([]);
     } else {
       setSelectedVariantIds(filteredVariants.map((v) => v.id));
+    }
+  };
+
+  // Helper active delimiter for auto-extract modal
+  const activeDelimiter = extractDelimiter === 'custom' ? customDelimiter : extractDelimiter;
+
+  // Compute maximum segments in variant names for auto-extract modal
+  const maxSegmentsCount = useMemo(() => {
+    if (!activeDelimiter) return 1;
+    let maxCount = 1;
+    rawVariants.forEach((v) => {
+      const parts = v.variant_name.split(activeDelimiter);
+      if (parts.length > maxCount) maxCount = parts.length;
+    });
+    return Math.min(maxCount, 5); // cap at 5
+  }, [rawVariants, activeDelimiter]);
+
+  // Sync segmentMappings length when maxSegmentsCount changes
+  React.useEffect(() => {
+    setSegmentMappings((prev) => {
+      const next = [...prev];
+      while (next.length < maxSegmentsCount) {
+        next.push(allAttributeKeys[next.length] || `Atribut ${next.length + 1}`);
+      }
+      return next.slice(0, maxSegmentsCount);
+    });
+  }, [maxSegmentsCount, allAttributeKeys]);
+
+  // Handle auto-extract submit
+  const handleExecuteAutoExtract = async () => {
+    if (!activeDelimiter) {
+      if (showToast) showToast('Tentukan karakter pemisah terlebih dahulu', 'error');
+      return;
+    }
+
+    const validMappings = segmentMappings.filter((m) => m && m.trim());
+    if (validMappings.length === 0) {
+      if (showToast) showToast('Petakan minimal 1 segmen ke nama atribut', 'error');
+      return;
+    }
+
+    try {
+      setIsExtractSubmitting(true);
+      const updates = rawVariants.map((v) => {
+        const parts = v.variant_name.split(activeDelimiter).map((s) => s.trim());
+        const extractedAttrs: Record<string, string> = { ...(v.attributes || {}) };
+
+        segmentMappings.forEach((attrName, idx) => {
+          if (attrName && attrName.trim() && parts[idx]) {
+            extractedAttrs[attrName.trim()] = parts[idx];
+          }
+        });
+
+        return {
+          variant_id: v.id,
+          attributes: extractedAttrs,
+        };
+      });
+
+      // Combine with existing product options
+      const combinedOptions = Array.from(
+        new Set([...(product.variant_options || []), ...validMappings.map((m) => m.trim())])
+      );
+
+      const res = await api.bulkUpdateVariantAttributes(product.id, {
+        updates,
+        variant_options: combinedOptions,
+      });
+
+      if (showToast) {
+        showToast(res.message || `Berhasil mengekstrak atribut untuk ${updates.length} varian!`, 'success');
+      }
+      setIsExtractModalOpen(false);
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      if (showToast) showToast(err.message || 'Gagal mengekstrak atribut varian', 'error');
+    } finally {
+      setIsExtractSubmitting(false);
+    }
+  };
+
+  // Handle bulk tag submit on selected variants
+  const handleExecuteBulkTag = async () => {
+    const trimmedKey = bulkTagKey.trim();
+    const trimmedVal = bulkTagValue.trim();
+
+    if (!trimmedKey) {
+      if (showToast) showToast('Nama atribut wajib diisi', 'error');
+      return;
+    }
+    if (!trimmedVal) {
+      if (showToast) showToast('Nilai atribut wajib diisi', 'error');
+      return;
+    }
+
+    try {
+      setIsBulkTagSubmitting(true);
+      const updates = selectedVariantIds.map((vId) => {
+        const v = rawVariants.find((x) => x.id === vId);
+        return {
+          variant_id: vId,
+          attributes: {
+            ...(v?.attributes || {}),
+            [trimmedKey]: trimmedVal,
+          },
+        };
+      });
+
+      const combinedOptions = Array.from(
+        new Set([...(product.variant_options || []), trimmedKey])
+      );
+
+      const res = await api.bulkUpdateVariantAttributes(product.id, {
+        updates,
+        variant_options: combinedOptions,
+      });
+
+      if (showToast) {
+        showToast(res.message || `Atribut berhasil diterapkan ke ${updates.length} varian`, 'success');
+      }
+      setIsBulkTagModalOpen(false);
+      setSelectedVariantIds([]);
+      setBulkTagKey('');
+      setBulkTagValue('');
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      if (showToast) showToast(err.message || 'Gagal menerapkan atribut massal', 'error');
+    } finally {
+      setIsBulkTagSubmitting(false);
     }
   };
 
@@ -456,8 +606,21 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
               </p>
             </div>
 
-            {/* View Mode Switcher & Move Button */}
+            {/* View Mode Switcher, Auto-Extract & Move Buttons */}
             <div className="flex items-center gap-2.5 flex-wrap">
+              {/* Auto-Extract Attributes Button (Tahap 2) */}
+              {canUpdate && rawVariants.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setIsExtractModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-amber-300 dark:border-amber-800/60 bg-amber-500/10 hover:bg-amber-500/20 text-amber-800 dark:text-amber-300 transition-colors shadow-2xs"
+                  title="Ekstrak atribut dinamis (Kemasan, Warna, dll) otomatis dari nama varian yang sudah ada"
+                >
+                  <Wand2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>Ekstrak Atribut Otomatis</span>
+                </button>
+              )}
+
               {/* Toggle View Mode: List vs Matrix */}
               <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
                 <button
@@ -488,24 +651,38 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                 </button>
               </div>
 
-              {/* Move Variants Selection Actions */}
-              {canUpdate && onMoveVariants && rawVariants.length > 0 && (
+              {/* Selection Actions (Move & Bulk Tag) */}
+              {canUpdate && rawVariants.length > 0 && (
                 <div className="flex items-center gap-2">
                   {selectedVariantIds.length > 0 ? (
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg">
                         {selectedVariantIds.length} Dipilih
                       </span>
+                      {/* Bulk Tag Button (Tahap 2) */}
                       <button
                         type="button"
-                        onClick={() =>
-                          onMoveVariants(rawVariants.filter((v) => selectedVariantIds.includes(v.id)))
-                        }
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm transition-all"
+                        onClick={() => setIsBulkTagModalOpen(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all"
+                        title="Atur nilai atribut bersama untuk varian yang dicentang"
                       >
-                        <ArrowRightLeft className="w-3.5 h-3.5" />
-                        <span>Pindahkan ({selectedVariantIds.length})</span>
+                        <Tag className="w-3.5 h-3.5" />
+                        <span>Atur Atribut ({selectedVariantIds.length})</span>
                       </button>
+
+                      {onMoveVariants && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onMoveVariants(rawVariants.filter((v) => selectedVariantIds.includes(v.id)))
+                          }
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm transition-all"
+                        >
+                          <ArrowRightLeft className="w-3.5 h-3.5" />
+                          <span>Pindahkan</span>
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => setSelectedVariantIds([])}
@@ -667,7 +844,6 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                   {paginatedVariants.map((v) => {
                     const isLow = Number(v.current_stock) <= Number(v.min_stock);
                     const isOut = Number(v.current_stock) <= 0;
-                    const baseUnit = v.units?.find((u) => u.is_base_unit) || v.units?.[0];
 
                     return (
                       <div
@@ -678,7 +854,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                         onClick={() => onSelectVariant(v)}
                       >
                         <div className="flex items-start gap-3 flex-1 min-w-0">
-                          {canUpdate && onMoveVariants && (
+                          {canUpdate && (
                             <button
                               type="button"
                               onClick={(e) => {
@@ -889,7 +1065,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                 </p>
                 <p className="text-slate-500 max-w-md mx-auto">
                   Mode Matriks 2D memerlukan setidaknya 1 atau 2 atribut (seperti Kemasan × Warna atau Ukuran × Tebal).
-                  Silakan tambahkan atribut pada menu Edit Varian atau gunakan Tampilan Daftar.
+                  Gunakan tombol <strong>"Ekstrak Atribut Otomatis"</strong> di atas untuk memecah nama varian lama secara massal, atau edit varian untuk menambahkan atribut.
                 </p>
               </div>
             ) : (
@@ -1122,6 +1298,320 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* ========================================================= */}
+      {/* MODAL 1: AUTO-EXTRACT ATTRIBUTES FROM VARIANT NAMES (TAHAP 2) */}
+      {/* ========================================================= */}
+      {isExtractModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  <Wand2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Ekstrak Atribut Otomatis dari Nama Varian
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Pecah nama varian lama (misal: "1kg - Super Black") menjadi atribut dinamis terstruktur secara massal.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExtractModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Delimiter Selection */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                1. Pilih Karakter Pemisah (Pemisah Antara Atribut):
+              </label>
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                {[
+                  { label: 'Strip / Dash ( - )', val: '-' },
+                  { label: 'Garis Miring ( / )', val: '/' },
+                  { label: 'Koma ( , )', val: ',' },
+                  { label: 'Pipa ( | )', val: '|' },
+                  { label: 'Spasi (   )', val: ' ' },
+                  { label: 'Kustom', val: 'custom' },
+                ].map((item) => (
+                  <button
+                    key={item.val}
+                    type="button"
+                    onClick={() => setExtractDelimiter(item.val)}
+                    className={`px-3 py-1.5 rounded-xl font-semibold border transition-all ${
+                      extractDelimiter === item.val
+                        ? 'border-amber-500 bg-amber-500 text-white shadow-xs'
+                        : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-amber-400'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              {extractDelimiter === 'custom' && (
+                <div className="pt-1.5 flex items-center gap-2">
+                  <span className="text-xs text-slate-500">Ketik Pemisah:</span>
+                  <input
+                    type="text"
+                    value={customDelimiter}
+                    onChange={(e) => setCustomDelimiter(e.target.value)}
+                    placeholder="Contoh: _ atau x"
+                    className="w-24 px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-center"
+                    autoFocus
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Segment Mapping */}
+            <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                2. Petakan Tiap Bagian Hasil Pecahan ke Nama Atribut:
+              </label>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {segmentMappings.map((attrName, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-bold text-amber-700 dark:text-amber-400">
+                        Bagian #{idx + 1}
+                      </span>
+                      <span className="text-slate-400 text-[10px]">
+                        Contoh: "
+                        {rawVariants[0]?.variant_name?.split(activeDelimiter)?.[idx]?.trim() || '...'}"
+                      </span>
+                    </div>
+
+                    <input
+                      type="text"
+                      list="extract-attr-suggestions"
+                      value={attrName}
+                      onChange={(e) => {
+                        const copy = [...segmentMappings];
+                        copy[idx] = e.target.value;
+                        setSegmentMappings(copy);
+                      }}
+                      placeholder="Nama atribut (Kemasan, Warna, dll)..."
+                      className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <datalist id="extract-attr-suggestions">
+                {['Kemasan', 'Warna', 'Ukuran', 'Panjang', 'Ketebalan', 'Tipe', 'Finishing', 'Diameter'].map((sug) => (
+                  <option key={sug} value={sug} />
+                ))}
+              </datalist>
+            </div>
+
+            {/* Live Preview Table */}
+            <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  3. Live Preview Hasil Ekstraksi ({Math.min(5, rawVariants.length)} Contoh Varian):
+                </label>
+                <span className="text-[11px] text-slate-400">
+                  Total {rawVariants.length} varian akan diperbarui
+                </span>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-600 dark:text-slate-400 font-bold">
+                    <tr>
+                      <th className="p-2.5">Nama Varian Saat Ini</th>
+                      <th className="p-2.5">Hasil Parsing Atribut</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {rawVariants.slice(0, 5).map((v) => {
+                      const parts = v.variant_name.split(activeDelimiter).map((s) => s.trim());
+                      return (
+                        <tr key={v.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="p-2.5 font-medium text-slate-900 dark:text-white font-mono text-[11px]">
+                            {v.variant_name}
+                          </td>
+                          <td className="p-2.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {segmentMappings.map((attrName, idx) => {
+                                const val = parts[idx];
+                                if (!attrName || !val) return null;
+                                return (
+                                  <span
+                                    key={idx}
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-300/40"
+                                  >
+                                    <span className="text-slate-400 font-normal">{attrName}:</span>
+                                    <span>{val}</span>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsExtractModalOpen(false)}
+                disabled={isExtractSubmitting}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteAutoExtract}
+                disabled={isExtractSubmitting}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 disabled:opacity-50"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>
+                  {isExtractSubmitting
+                    ? 'Menyimpan...'
+                    : `Ekstrak & Simpan ke ${rawVariants.length} Varian`}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL 2: BULK TAG ATTRIBUTE ON SELECTED VARIANTS (TAHAP 2) */}
+      {/* ========================================================= */}
+      {isBulkTagModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                  <BookmarkPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Set Atribut Massal
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Terapkan atribut bersama untuk {selectedVariantIds.length} varian terpilih
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBulkTagModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Inputs */}
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Nama Atribut:
+                </label>
+                <input
+                  type="text"
+                  list="bulk-tag-key-suggestions"
+                  value={bulkTagKey}
+                  onChange={(e) => setBulkTagKey(e.target.value)}
+                  placeholder="Contoh: Kemasan, Warna, Ukuran..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold"
+                />
+                <datalist id="bulk-tag-key-suggestions">
+                  {allAttributeKeys.concat(['Kemasan', 'Warna', 'Ukuran', 'Panjang', 'Tipe', 'Ketebalan']).map((k) => (
+                    <option key={k} value={k} />
+                  ))}
+                </datalist>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Nilai Atribut:
+                </label>
+                <input
+                  type="text"
+                  list="bulk-tag-val-suggestions"
+                  value={bulkTagValue}
+                  onChange={(e) => setBulkTagValue(e.target.value)}
+                  placeholder="Contoh: 1kg, Super Black, 3 Meter..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold"
+                />
+                <datalist id="bulk-tag-val-suggestions">
+                  {(attributeValuesMap[bulkTagKey] || []).map((v) => (
+                    <option key={v.value} value={v.value} />
+                  ))}
+                </datalist>
+              </div>
+
+              {/* Selected Variants Preview */}
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 text-[11px] space-y-1">
+                <span className="font-bold text-slate-700 dark:text-slate-300 block">
+                  Varian yang akan terupdate ({selectedVariantIds.length}):
+                </span>
+                <div className="max-h-24 overflow-y-auto space-y-0.5">
+                  {rawVariants
+                    .filter((v) => selectedVariantIds.includes(v.id))
+                    .map((v) => (
+                      <div key={v.id} className="text-slate-600 dark:text-slate-400 truncate">
+                        • {v.variant_name} <span className="font-mono text-[10px]">({v.sku})</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsBulkTagModalOpen(false)}
+                disabled={isBulkTagSubmitting}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteBulkTag}
+                disabled={isBulkTagSubmitting}
+                className="flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/20 disabled:opacity-50"
+              >
+                <Tag className="w-3.5 h-3.5" />
+                <span>
+                  {isBulkTagSubmitting
+                    ? 'Menyimpan...'
+                    : `Terapkan ke ${selectedVariantIds.length} Varian`}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -155,6 +155,7 @@ export class ExportService {
         pv.sku as sku_varian,
         pv.variant_name as nama_varian,
         pv.barcode as barcode_varian,
+        pv.attributes as variant_attributes,
         pv.current_stock,
         pv.min_stock as stok_minimum_varian,
         pv.is_active as variant_active,
@@ -177,6 +178,8 @@ export class ExportService {
     const rows = res.rows.map((r) => {
       const isBaseUnit = Boolean(r.satuan_dasar);
       const categoryPath = this.getCategoryPath(r.category_id, categoryMap, false);
+      const attrObj = r.variant_attributes && typeof r.variant_attributes === 'object' ? r.variant_attributes : {};
+      const attrString = Object.entries(attrObj).map(([k, val]) => `${k}: ${val}`).join(' | ');
 
       return {
         sku_produk: r.sku_produk || '',
@@ -196,6 +199,7 @@ export class ExportService {
         spesifikasi: r.specifications || '',
         sku_varian: r.sku_varian || '',
         nama_varian: r.nama_varian || '',
+        atribut_varian: attrString,
         barcode_varian: r.barcode_varian || '',
         // Isi stok_awal pada baris satuan dasar agar ketika di-import ulang stok persis sesuai kondisi saat diekspor
         stok_awal: isBaseUnit && r.current_stock != null ? Number(r.current_stock) : '',
@@ -228,6 +232,7 @@ export class ExportService {
       { key: 'spesifikasi', label: 'Spesifikasi', width: 30 },
       { key: 'sku_varian', label: 'SKU Varian', width: 20, isText: true },
       { key: 'nama_varian', label: 'Nama Varian', width: 26 },
+      { key: 'atribut_varian', label: 'Atribut Varian', width: 28, isText: true },
       { key: 'barcode_varian', label: 'Barcode Varian', width: 18, isText: true },
       { key: 'stok_awal', label: 'Stok Awal', width: 13 },
       { key: 'stok_minimum_varian', label: 'Stok Min. Varian', width: 16 },

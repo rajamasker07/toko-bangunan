@@ -809,6 +809,11 @@ export const App: React.FC = () => {
                   onMergeProduct={(p) => handleOpenMergeProduct(p)}
                   onAbsorbProducts={(targetProd) => handleOpenBulkMerge([], targetProd)}
                   onMoveVariants={(vars) => handleOpenMoveVariants(selectedProduct, vars)}
+                  onRefresh={() => {
+                    loadProducts();
+                    loadSummary();
+                  }}
+                  showToast={showToast}
                 />
               ) : null}
             </>
