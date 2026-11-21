@@ -717,6 +717,28 @@ export const App: React.FC = () => {
 
           {activeTab === 'products' && (
             <>
+              <div className={selectedProduct ? 'hidden' : 'block'}>
+                <ProductListView
+                  products={products}
+                  categories={categories}
+                  brands={brands}
+                  loading={loadingProducts}
+                  onRefresh={loadProducts}
+                  onOpenCreate={handleOpenCreateProduct}
+                  onOpenImport={() => handleOpenImport('products', 'products')}
+                  onOpenDetail={(p) => {
+                    setSelectedProduct(p);
+                    setSelectedVariant(null);
+                  }}
+                  onOpenAdjust={handleOpenAdjust}
+                  onDeleteProduct={handleDeleteProduct}
+                  onEditProduct={handleOpenEditProduct}
+                  onToggleProductStatus={handleToggleProductStatus}
+                  initialStockFilter={productStockFilter}
+                  showToast={showToast}
+                />
+              </div>
+
               {selectedProduct && selectedVariant ? (
                 <VariantDetailView
                   product={selectedProduct}
@@ -759,27 +781,7 @@ export const App: React.FC = () => {
                   onMergeProduct={(p) => handleOpenMergeProduct(p)}
                   onMoveVariants={(vars) => handleOpenMoveVariants(selectedProduct, vars)}
                 />
-              ) : (
-                <ProductListView
-                  products={products}
-                  categories={categories}
-                  brands={brands}
-                  loading={loadingProducts}
-                  onRefresh={loadProducts}
-                  onOpenCreate={handleOpenCreateProduct}
-                  onOpenImport={() => handleOpenImport('products', 'products')}
-                  onOpenDetail={(p) => {
-                    setSelectedProduct(p);
-                    setSelectedVariant(null);
-                  }}
-                  onOpenAdjust={handleOpenAdjust}
-                  onDeleteProduct={handleDeleteProduct}
-                  onEditProduct={handleOpenEditProduct}
-                  onToggleProductStatus={handleToggleProductStatus}
-                  initialStockFilter={productStockFilter}
-                  showToast={showToast}
-                />
-              )}
+              ) : null}
             </>
           )}
 

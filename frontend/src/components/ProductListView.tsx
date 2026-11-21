@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue, useRef } from 'react';
 import { Product, Category, Brand, ProductSearchMode, EmbeddingStatusResponse } from '../types';
 import { formatRupiah, formatStock } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
@@ -133,6 +133,37 @@ function computeClientRelevanceScore(p: Product, rawQuery: string): number {
   return score;
 }
 
+const CATALOG_FILTER_STORAGE_KEY = 'bangunjaya_catalog_filter_state';
+
+interface CatalogFilterState {
+  search: string;
+  searchMode: ProductSearchMode;
+  selectedCategory: string;
+  selectedBrand: string;
+  stockFilter: string;
+  saleFilter: 'all' | 'active' | 'inactive';
+  currentPage: number;
+  pageSize: number;
+}
+
+function getStoredFilterState(): Partial<CatalogFilterState> {
+  try {
+    const raw = sessionStorage.getItem(CATALOG_FILTER_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function storeFilterState(state: CatalogFilterState) {
+  try {
+    sessionStorage.setItem(CATALOG_FILTER_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore
+  }
+}
+
 export const ProductListView: React.FC<ProductListViewProps> = ({
   products,
   categories,
@@ -161,19 +192,64 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
   const [isExporting, setIsExporting] = useState(false);
 
-  const [search, setSearch] = useState('');
+  const savedState = useMemo(() => getStoredFilterState(), []);
+
+  const [search, setSearch] = useState<string>(savedState.search ?? '');
   const deferredSearch = useDeferredValue(search);
-  const [searchMode, setSearchMode] = useState<ProductSearchMode>('keyword');
-  const [selectedCategory, setSelectedCategory] = useState('');
-  const [selectedBrand, setSelectedBrand] = useState('');
-  const [stockFilter, setStockFilter] = useState(initialStockFilter);
-  const [saleFilter, setSaleFilter] = useState<'all' | 'active' | 'inactive'>('active');
+  const [searchMode, setSearchMode] = useState<ProductSearchMode>(savedState.searchMode ?? 'keyword');
+  const [selectedCategory, setSelectedCategory] = useState<string>(savedState.selectedCategory ?? '');
+  const [selectedBrand, setSelectedBrand] = useState<string>(savedState.selectedBrand ?? '');
+  const [stockFilter, setStockFilter] = useState<string>(
+    initialStockFilter !== 'all' ? initialStockFilter : (savedState.stockFilter ?? initialStockFilter)
+  );
+  const [saleFilter, setSaleFilter] = useState<'all' | 'active' | 'inactive'>(
+    savedState.saleFilter ?? 'active'
+  );
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState<number>(savedState.currentPage ?? 1);
+  const [pageSize, setPageSize] = useState<number>(savedState.pageSize ?? 10);
+
+  // Sinkronkan filter jika initialStockFilter berubah dari props (misal dari dashboard card)
+  useEffect(() => {
+    if (initialStockFilter && initialStockFilter !== 'all') {
+      setStockFilter(initialStockFilter);
+      setCurrentPage(1);
+    }
+  }, [initialStockFilter]);
+
+  // Simpan state filter ke sessionStorage agar tidak hilang saat navigasi
+  useEffect(() => {
+    storeFilterState({
+      search,
+      searchMode,
+      selectedCategory,
+      selectedBrand,
+      stockFilter,
+      saleFilter,
+      currentPage,
+      pageSize,
+    });
+  }, [search, searchMode, selectedCategory, selectedBrand, stockFilter, saleFilter, currentPage, pageSize]);
 
   // Server Hybrid Search State
   const [serverSearchResults, setServerSearchResults] = useState<Product[] | null>(null);
   const [isSearchingServer, setIsSearchingServer] = useState(false);
   const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatusResponse | null>(null);
   const [isReindexing, setIsReindexing] = useState(false);
+
+  // Sinkronkan serverSearchResults dengan props products terbaru saat terjadi edit/delete produk
+  useEffect(() => {
+    if (serverSearchResults !== null) {
+      const prodMap = new Map(products.map((p) => [p.id, p]));
+      setServerSearchResults((prev) => {
+        if (!prev) return null;
+        return prev
+          .filter((p) => prodMap.has(p.id))
+          .map((p) => prodMap.get(p.id)!);
+      });
+    }
+  }, [products]);
 
   // Load Embedding Status
   const fetchEmbeddingStatus = async () => {
@@ -379,12 +455,13 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
     }
   }, [brandOptions, selectedBrand]);
 
-  // Pagination states
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(10);
-
-  // Reset to page 1 whenever filters change
+  // Reset ke halaman 1 saat filter atau pencarian diubah (kecuali saat initial mount restore)
+  const isInitialFilterRender = useRef(true);
   useEffect(() => {
+    if (isInitialFilterRender.current) {
+      isInitialFilterRender.current = false;
+      return;
+    }
     setCurrentPage(1);
   }, [deferredSearch, searchMode, selectedCategory, selectedBrand, stockFilter, saleFilter]);
 
@@ -663,6 +740,13 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                   setSelectedBrand('');
                   setStockFilter('all');
                   setSaleFilter('active');
+                  setServerSearchResults(null);
+                  setCurrentPage(1);
+                  try {
+                    sessionStorage.removeItem(CATALOG_FILTER_STORAGE_KEY);
+                  } catch {
+                    // ignore
+                  }
                 }}
                 className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline font-semibold"
               >
