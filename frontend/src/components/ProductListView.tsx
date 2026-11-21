@@ -89,7 +89,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [stockFilter, setStockFilter] = useState(initialStockFilter);
-  const [saleFilter, setSaleFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [saleFilter, setSaleFilter] = useState<'all' | 'active' | 'inactive'>('active');
 
   // Server Hybrid Search State
   const [serverSearchResults, setServerSearchResults] = useState<Product[] | null>(null);
@@ -166,55 +166,8 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
     };
   }, [search, searchMode]);
 
-  // Extract unique brands list
-  const brandList = useMemo(() => {
-    const list: string[] = [];
-    if (brands && brands.length > 0) {
-      brands.forEach((b) => {
-        if (b.name && !list.includes(b.name)) list.push(b.name);
-      });
-    }
-    products.forEach((p) => {
-      if (p.brand && !list.includes(p.brand)) list.push(p.brand);
-    });
-    return list.sort((a, b) => a.localeCompare(b));
-  }, [brands, products]);
-
-  // Searchable options for Category dropdown
-  const categoryOptions = useMemo<SearchableOption[]>(() => {
-    return categories.map((c) => {
-      const count = products.filter((p) => p.category_id === c.id).length;
-      return {
-        value: c.id,
-        label: c.name,
-        subtitle: `${count} produk`,
-      };
-    });
-  }, [categories, products]);
-
-  // Searchable options for Brand (Merek) dropdown
-  const brandOptions = useMemo<SearchableOption[]>(() => {
-    return brandList.map((brandName) => {
-      const count = products.filter((p) => p.brand && p.brand.toLowerCase() === brandName.toLowerCase()).length;
-      return {
-        value: brandName,
-        label: brandName,
-        subtitle: `${count} produk`,
-      };
-    });
-  }, [brandList, products]);
-
-  // Pagination states
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(10);
-
-  // Reset to page 1 whenever filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [deferredSearch, searchMode, selectedCategory, selectedBrand, stockFilter, saleFilter]);
-
-  // Filter products client-side for ultra-responsive instant UX with useMemo
-  const filteredProducts = useMemo(() => {
+  // Produk yang cocok dengan pencarian (server/lokal), status penjualan, dan filter kondisi stok
+  const searchMatchedProducts = useMemo(() => {
     const query = deferredSearch.trim().toLowerCase();
     const baseList = serverSearchResults !== null ? serverSearchResults : products;
 
@@ -236,12 +189,6 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           );
       }
 
-      const matchCategory =
-        !selectedCategory || p.category_id === selectedCategory;
-
-      const matchBrand =
-        !selectedBrand || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
-
       let matchStock = true;
       if (stockFilter === 'low') {
         matchStock = Boolean(p.has_low_stock && Number(p.total_stock) > 0);
@@ -258,9 +205,109 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
         matchSale = p.is_active === false;
       }
 
-      return matchSearch && matchCategory && matchBrand && matchStock && matchSale;
+      return matchSearch && matchStock && matchSale;
     });
-  }, [products, serverSearchResults, deferredSearch, selectedCategory, selectedBrand, stockFilter, saleFilter]);
+  }, [products, serverSearchResults, deferredSearch, stockFilter, saleFilter]);
+
+  // Searchable options Kategori: DIBATASI HANYA dari produk yang sedang tampil / cocok
+  const categoryOptions = useMemo<SearchableOption[]>(() => {
+    // Jika sedang memilih merek tertentu, opsi kategori hanya menampilkan kategori produk merek tersebut
+    const candidates = selectedBrand
+      ? searchMatchedProducts.filter((p) => p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase())
+      : searchMatchedProducts;
+
+    const catCountMap = new Map<string, { name: string; count: number }>();
+    for (const p of candidates) {
+      if (p.category_id) {
+        const existing = catCountMap.get(p.category_id);
+        const name = p.category_name || categories.find((c) => c.id === p.category_id)?.name || 'Kategori';
+        if (existing) {
+          existing.count += 1;
+        } else {
+          catCountMap.set(p.category_id, { name, count: 1 });
+        }
+      }
+    }
+
+    const options: SearchableOption[] = [];
+    for (const [id, data] of catCountMap.entries()) {
+      options.push({
+        value: id,
+        label: data.name,
+        subtitle: `${data.count} produk`,
+      });
+    }
+
+    return options.sort((a, b) => a.label.localeCompare(b.label));
+  }, [searchMatchedProducts, selectedBrand, categories]);
+
+  // Searchable options Merek: DIBATASI HANYA dari produk yang sedang tampil / cocok
+  const brandOptions = useMemo<SearchableOption[]>(() => {
+    // Jika sedang memilih kategori tertentu, opsi merek hanya menampilkan merek yang ada di kategori tersebut
+    const candidates = selectedCategory
+      ? searchMatchedProducts.filter((p) => p.category_id === selectedCategory)
+      : searchMatchedProducts;
+
+    const brandCountMap = new Map<string, { name: string; count: number }>();
+    for (const p of candidates) {
+      if (p.brand && p.brand.trim()) {
+        const key = p.brand.toLowerCase();
+        const existing = brandCountMap.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          brandCountMap.set(key, { name: p.brand, count: 1 });
+        }
+      }
+    }
+
+    const options: SearchableOption[] = [];
+    for (const [, data] of brandCountMap.entries()) {
+      options.push({
+        value: data.name,
+        label: data.name,
+        subtitle: `${data.count} produk`,
+      });
+    }
+
+    return options.sort((a, b) => a.label.localeCompare(b.label));
+  }, [searchMatchedProducts, selectedCategory]);
+
+  // Otomatis reset kategori terpilih jika tidak ada lagi pada produk yang cocok
+  useEffect(() => {
+    if (selectedCategory && !categoryOptions.some((opt) => opt.value === selectedCategory)) {
+      setSelectedCategory('');
+    }
+  }, [categoryOptions, selectedCategory]);
+
+  // Otomatis reset merek terpilih jika tidak ada lagi pada produk yang cocok
+  useEffect(() => {
+    if (selectedBrand && !brandOptions.some((opt) => opt.value.toLowerCase() === selectedBrand.toLowerCase())) {
+      setSelectedBrand('');
+    }
+  }, [brandOptions, selectedBrand]);
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
+
+  // Reset to page 1 whenever filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [deferredSearch, searchMode, selectedCategory, selectedBrand, stockFilter, saleFilter]);
+
+  // Filter produk akhir untuk tabel (setelah filter kategori dan merek diaplikasikan)
+  const filteredProducts = useMemo(() => {
+    return searchMatchedProducts.filter((p) => {
+      const matchCategory =
+        !selectedCategory || p.category_id === selectedCategory;
+
+      const matchBrand =
+        !selectedBrand || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
+
+      return matchCategory && matchBrand;
+    });
+  }, [searchMatchedProducts, selectedCategory, selectedBrand]);
 
   // Paginated slice
   const paginatedProducts = useMemo(() => {
@@ -364,31 +411,32 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
               }`}
             >
-              <Sparkles className="w-3 h-3 text-amber-300" />
-              <span>✨ Pintar (Hybrid AI)</span>
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Pintar (Hybrid AI)</span>
             </button>
             <button
               type="button"
               onClick={() => setSearchMode('keyword')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
                 searchMode === 'keyword'
                   ? 'bg-slate-800 text-white dark:bg-white dark:text-slate-900 shadow-sm'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
               }`}
             >
-              <span>🔤 Kata Kunci Eksak</span>
+              <Search className="w-3.5 h-3.5 text-slate-400" />
+              <span>Kata Kunci Eksak</span>
             </button>
             <button
               type="button"
               onClick={() => setSearchMode('semantic')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
                 searchMode === 'semantic'
                   ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
               }`}
             >
-              <Brain className="w-3 h-3 text-cyan-300" />
-              <span>🧠 Makna AI</span>
+              <Brain className="w-3.5 h-3.5 text-cyan-300" />
+              <span>Makna AI</span>
             </button>
           </div>
 
@@ -428,7 +476,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
               value={selectedCategory}
               onChange={(val) => setSelectedCategory(val)}
               options={categoryOptions}
-              placeholder="Semua Kategori"
+              placeholder={categoryOptions.length > 0 ? `Semua Kategori (${categoryOptions.length})` : 'Semua Kategori'}
               searchPlaceholder="Cari kategori..."
               allowClear={true}
               clearLabel="Semua Kategori"
@@ -444,7 +492,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
               value={selectedBrand}
               onChange={(val) => setSelectedBrand(val)}
               options={brandOptions}
-              placeholder={`Semua Merek (${brandList.length})`}
+              placeholder={brandOptions.length > 0 ? `Semua Merek (${brandOptions.length})` : 'Semua Merek'}
               searchPlaceholder="Cari merek..."
               allowClear={true}
               clearLabel="Semua Merek"
@@ -479,17 +527,6 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
               <span className="text-slate-400 font-semibold text-[11px] mr-1">Status Penjualan:</span>
               <button
                 type="button"
-                onClick={() => setSaleFilter('all')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
-                  saleFilter === 'all'
-                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                }`}
-              >
-                Semua Status ({products.length})
-              </button>
-              <button
-                type="button"
                 onClick={() => setSaleFilter('active')}
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1 ${
                   saleFilter === 'active'
@@ -499,6 +536,17 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
                 <span>Masih Dijual ({products.filter((p) => p.is_active !== false).length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSaleFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                  saleFilter === 'all'
+                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
+              >
+                Semua Status ({products.length})
               </button>
               <button
                 type="button"
@@ -514,7 +562,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
               </button>
             </div>
 
-            {(search || selectedCategory || selectedBrand || stockFilter !== 'all' || saleFilter !== 'all') && (
+            {(search || selectedCategory || selectedBrand || stockFilter !== 'all' || saleFilter !== 'active') && (
               <button
                 type="button"
                 onClick={() => {
@@ -522,7 +570,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                   setSelectedCategory('');
                   setSelectedBrand('');
                   setStockFilter('all');
-                  setSaleFilter('all');
+                  setSaleFilter('active');
                 }}
                 className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline font-semibold"
               >
@@ -601,7 +649,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
             Coba ubah kata kunci pencarian, kategori, merek, atau filter stok.
           </p>
           <div className="flex items-center justify-center gap-2 pt-1">
-            {(search || selectedCategory || selectedBrand || stockFilter !== 'all') && (
+            {(search || selectedCategory || selectedBrand || stockFilter !== 'all' || saleFilter !== 'active') && (
               <button
                 type="button"
                 onClick={() => {
@@ -609,6 +657,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                   setSelectedCategory('');
                   setSelectedBrand('');
                   setStockFilter('all');
+                  setSaleFilter('active');
                 }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200"
               >
