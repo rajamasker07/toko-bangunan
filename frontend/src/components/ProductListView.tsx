@@ -26,7 +26,8 @@ import {
   Sparkles,
   Brain,
   RefreshCw,
-  X
+  X,
+  GitMerge
 } from 'lucide-react';
 
 interface ProductListViewProps {
@@ -43,6 +44,8 @@ interface ProductListViewProps {
   onEditProduct?: (product: Product) => void;
   onDeleteProduct: (id: string, name: string) => void;
   onToggleProductStatus?: (product: Product) => void;
+  onOpenBulkMerge?: (selectedProducts: Product[]) => void;
+  onOpenDetector?: () => void;
   initialStockFilter?: string;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
@@ -178,6 +181,8 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   onEditProduct,
   onDeleteProduct,
   onToggleProductStatus,
+  onOpenBulkMerge,
+  onOpenDetector,
   initialStockFilter = 'all',
   showToast,
 }) => {
@@ -191,6 +196,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   const canManageAI = can('products:update') || can('products:create') || can('master:write');
 
   const [isExporting, setIsExporting] = useState(false);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
 
   const savedState = useMemo(() => getStoredFilterState(), []);
 
@@ -531,6 +537,18 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
             </div>
           )}
 
+          {canUpdate && onOpenDetector && (
+            <button
+              type="button"
+              onClick={onOpenDetector}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-violet-200 dark:border-violet-900/60 bg-violet-50/70 hover:bg-violet-100 dark:bg-violet-950/40 dark:hover:bg-violet-900/60 text-violet-700 dark:text-violet-300 shadow-sm transition-colors"
+              title="Pindai otomatis produk terpisah yang kemungkinan adalah varian untuk digabungkan massal"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+              <span>Deteksi Produk Mirip</span>
+            </button>
+          )}
+
           {canExport && (
             <button
               onClick={() => handleExportProducts('xlsx')}
@@ -856,6 +874,32 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
                 <tr>
+                  {canUpdate && onOpenBulkMerge && (
+                    <th className="py-3 px-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={
+                          paginatedProducts.length > 0 &&
+                          paginatedProducts.every((p) => selectedProductIds.includes(p.id))
+                        }
+                        onChange={() => {
+                          const allPageSelected = paginatedProducts.every((p) =>
+                            selectedProductIds.includes(p.id)
+                          );
+                          if (allPageSelected) {
+                            const pageIds = new Set(paginatedProducts.map((p) => p.id));
+                            setSelectedProductIds((prev) => prev.filter((id) => !pageIds.has(id)));
+                          } else {
+                            const newSet = new Set(selectedProductIds);
+                            paginatedProducts.forEach((p) => newSet.add(p.id));
+                            setSelectedProductIds(Array.from(newSet));
+                          }
+                        }}
+                        className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        title="Pilih semua produk di halaman ini"
+                      />
+                    </th>
+                  )}
                   <th className="py-3 px-4">Nama Produk & SKU</th>
                   <th className="py-3 px-4">Kategori & Brand</th>
                   <th className="py-3 px-4">Varian & Satuan</th>
@@ -886,9 +930,29 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                     <tr
                       key={product.id}
                       className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors ${
-                        product.is_active === false ? 'bg-rose-500/[0.02] dark:bg-rose-950/[0.05]' : ''
+                        selectedProductIds.includes(product.id)
+                          ? 'bg-indigo-50/50 dark:bg-indigo-950/20'
+                          : product.is_active === false
+                          ? 'bg-rose-500/[0.02] dark:bg-rose-950/[0.05]'
+                          : ''
                       }`}
                     >
+                      {canUpdate && onOpenBulkMerge && (
+                        <td className="py-3.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedProductIds.includes(product.id)}
+                            onChange={() => {
+                              setSelectedProductIds((prev) =>
+                                prev.includes(product.id)
+                                  ? prev.filter((id) => id !== product.id)
+                                  : [...prev, product.id]
+                              );
+                            }}
+                            className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          />
+                        </td>
+                      )}
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           <button
@@ -1118,6 +1182,58 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
             }}
             pageSizeOptions={[5, 10, 20, 50]}
           />
+        </div>
+      )}
+
+      {/* Floating Action Bar for Selected Products */}
+      {selectedProductIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-700/80 backdrop-blur-md flex items-center gap-4 animate-in slide-in-from-bottom-5 duration-200">
+          <div className="flex items-center gap-2 text-xs font-bold">
+            <span className="w-6 h-6 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-xs font-mono">
+              {selectedProductIds.length}
+            </span>
+            <span>Produk Dipilih</span>
+          </div>
+
+          <div className="h-4 w-px bg-slate-700" />
+
+          {filteredProducts.length > paginatedProducts.length && (
+            <button
+              type="button"
+              onClick={() => {
+                const allFilteredIds = filteredProducts.map((p) => p.id);
+                setSelectedProductIds(allFilteredIds);
+              }}
+              className="text-xs text-indigo-300 hover:text-indigo-200 underline font-medium"
+            >
+              Pilih Seluruh {filteredProducts.length} Produk Hasil Filter
+            </button>
+          )}
+
+          <div className="flex items-center gap-2">
+            {canUpdate && onOpenBulkMerge && (
+              <button
+                type="button"
+                onClick={() => {
+                  const selected = products.filter((p) => selectedProductIds.includes(p.id));
+                  onOpenBulkMerge(selected);
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/30 transition-all"
+              >
+                <GitMerge className="w-4 h-4" />
+                <span>Gabung Jadi Varian</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setSelectedProductIds([])}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              title="Batalkan Pilihan"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
     </div>

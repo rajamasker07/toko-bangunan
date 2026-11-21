@@ -32,6 +32,8 @@ import {
   ReindexEmbeddingsResponse,
   MoveVariantsPayload,
   MergeProductPayload,
+  BulkMergeProductsPayload,
+  BulkMergeResult,
   PromoteVariantPayload,
   RestructureResult,
 } from '../types';
@@ -777,6 +779,15 @@ export const api = {
 
   mergeProduct: async (sourceProductId: string, data: MergeProductPayload) => {
     const res = await fetchJson<RestructureResult>(`/products/${sourceProductId}/merge`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    invalidateMasterDataCache();
+    return res;
+  },
+
+  bulkMergeProducts: async (data: BulkMergeProductsPayload) => {
+    const res = await fetchJson<BulkMergeResult>('/products/bulk-merge', {
       method: 'POST',
       body: JSON.stringify(data),
     });

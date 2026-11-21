@@ -22,6 +22,7 @@ import {
   Power,
   ArrowRightLeft,
   GitMerge,
+  FolderInput,
   CheckSquare,
   Square
 } from 'lucide-react';
@@ -38,6 +39,7 @@ interface ProductDetailViewProps {
   onToggleProductStatus?: (product: Product) => void;
   onToggleVariantStatus?: (variantId: string) => void;
   onMergeProduct?: (product: Product) => void;
+  onAbsorbProducts?: (targetProduct: Product) => void;
   onMoveVariants?: (variants: ProductVariant[]) => void;
 }
 
@@ -53,6 +55,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
   onToggleProductStatus,
   onToggleVariantStatus,
   onMergeProduct,
+  onAbsorbProducts,
   onMoveVariants,
 }) => {
   const { can } = useAuth();
@@ -228,6 +231,18 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
               >
                 <GitMerge className="w-3.5 h-3.5 text-indigo-500" />
                 <span>Gabung ke Produk Lain</span>
+              </button>
+            )}
+
+            {canUpdate && onAbsorbProducts && (
+              <button
+                type="button"
+                onClick={() => onAbsorbProducts(product)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-purple-200 dark:border-purple-900/60 bg-purple-50/70 hover:bg-purple-100 dark:bg-purple-950/30 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 transition-colors"
+                title="Serap produk-produk lain ke dalam produk ini sebagai varian baru"
+              >
+                <FolderInput className="w-3.5 h-3.5 text-purple-500" />
+                <span>Serap Produk Lain</span>
               </button>
             )}
           </div>

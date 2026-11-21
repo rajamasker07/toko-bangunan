@@ -25,6 +25,8 @@ import { EditProductModal } from './components/EditProductModal';
 import { EditVariantModal } from './components/EditVariantModal';
 import { MoveVariantModal } from './components/MoveVariantModal';
 import { MergeProductModal } from './components/MergeProductModal';
+import { BulkMergeProductsModal } from './components/BulkMergeProductsModal';
+import { SimilarProductsDetectorModal } from './components/SimilarProductsDetectorModal';
 import { PromoteVariantModal } from './components/PromoteVariantModal';
 import { StockAdjustmentModal } from './components/StockAdjustmentModal';
 import { StockAdjustmentView } from './components/StockAdjustmentView';
@@ -107,6 +109,12 @@ export const App: React.FC = () => {
 
   const [isMergeProductOpen, setIsMergeProductOpen] = useState<boolean>(false);
   const [mergeProductSource, setMergeProductSource] = useState<Product | null>(null);
+
+  const [isBulkMergeOpen, setIsBulkMergeOpen] = useState<boolean>(false);
+  const [bulkMergeSourceProducts, setBulkMergeSourceProducts] = useState<Product[]>([]);
+  const [bulkMergeLockedTarget, setBulkMergeLockedTarget] = useState<Product | null>(null);
+
+  const [isDetectorOpen, setIsDetectorOpen] = useState<boolean>(false);
 
   const [isPromoteVariantOpen, setIsPromoteVariantOpen] = useState<boolean>(false);
   const [promoteVariantSourceProduct, setPromoteVariantSourceProduct] = useState<Product | null>(null);
@@ -584,6 +592,24 @@ export const App: React.FC = () => {
     setIsMergeProductOpen(true);
   };
 
+  const handleOpenBulkMerge = (sourceProducts: Product[], lockedTarget?: Product | null) => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin menggabungkan produk.', 'error');
+      return;
+    }
+    setBulkMergeSourceProducts(sourceProducts);
+    setBulkMergeLockedTarget(lockedTarget || null);
+    setIsBulkMergeOpen(true);
+  };
+
+  const handleOpenDetector = () => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin mengelola katalog produk.', 'error');
+      return;
+    }
+    setIsDetectorOpen(true);
+  };
+
   const handleOpenPromoteVariant = (sourceProduct: Product, variant: ProductVariant) => {
     if (!can('products:create')) {
       showToast('Anda tidak memiliki izin membuat produk mandiri dari varian.', 'error');
@@ -734,6 +760,8 @@ export const App: React.FC = () => {
                   onDeleteProduct={handleDeleteProduct}
                   onEditProduct={handleOpenEditProduct}
                   onToggleProductStatus={handleToggleProductStatus}
+                  onOpenBulkMerge={(selected) => handleOpenBulkMerge(selected)}
+                  onOpenDetector={handleOpenDetector}
                   initialStockFilter={productStockFilter}
                   showToast={showToast}
                 />
@@ -779,6 +807,7 @@ export const App: React.FC = () => {
                   onToggleProductStatus={handleToggleProductStatus}
                   onToggleVariantStatus={handleToggleVariantStatus}
                   onMergeProduct={(p) => handleOpenMergeProduct(p)}
+                  onAbsorbProducts={(targetProd) => handleOpenBulkMerge([], targetProd)}
                   onMoveVariants={(vars) => handleOpenMoveVariants(selectedProduct, vars)}
                 />
               ) : null}
@@ -997,6 +1026,36 @@ export const App: React.FC = () => {
           allProducts={products}
           onSuccess={(targetId) => handleRestructureSuccess(targetId)}
           showToast={showToast}
+        />
+      )}
+
+      {can('products:update') && (
+        <BulkMergeProductsModal
+          isOpen={isBulkMergeOpen}
+          onClose={() => {
+            setIsBulkMergeOpen(false);
+            setBulkMergeSourceProducts([]);
+            setBulkMergeLockedTarget(null);
+          }}
+          initialSourceProducts={bulkMergeSourceProducts}
+          lockedTargetProduct={bulkMergeLockedTarget}
+          allProducts={products}
+          categories={categories}
+          brands={brands}
+          onSuccess={(targetId) => handleRestructureSuccess(targetId)}
+          showToast={showToast}
+        />
+      )}
+
+      {can('products:update') && (
+        <SimilarProductsDetectorModal
+          isOpen={isDetectorOpen}
+          onClose={() => setIsDetectorOpen(false)}
+          products={products}
+          onSelectGroup={(groupProducts) => {
+            setIsDetectorOpen(false);
+            handleOpenBulkMerge(groupProducts);
+          }}
         />
       )}
 

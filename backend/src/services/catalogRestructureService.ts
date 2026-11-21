@@ -47,6 +47,32 @@ export interface PromoteVariantInput {
   allowDeleteProduct?: boolean;
 }
 
+export interface BulkMergeProductsInput {
+  source_product_ids: string[];
+  target_mode: 'existing' | 'new';
+  // Mode existing:
+  target_product_id?: string;
+  target_product_name?: string;
+  target_standard_variant_name?: string;
+  // Mode new:
+  new_product_name?: string;
+  new_product_sku?: string;
+  category_id?: string | null;
+  brand_id?: string | null;
+  brand?: string;
+  supplier_id?: string | null;
+  description?: string | null;
+  min_stock_alert?: number;
+  // Mapping varian & SKU:
+  rename_map?: Record<string, string>;
+  sku_map?: Record<string, string>;
+  source_empty_action?: 'delete' | 'deactivate';
+  notes?: string;
+  userId?: string | null;
+  createdBy?: string;
+  allowDeleteProduct?: boolean;
+}
+
 export class CatalogRestructureService {
   /**
    * Pindahkan satu atau banyak varian ke produk target secara atomik.
@@ -539,6 +565,314 @@ export class CatalogRestructureService {
         variant_id: variant.id,
         source_product_deleted: sourceDeleted,
         message: `Varian "${variant.variant_name}" berhasil dipisahkan menjadi produk baru "${input.new_product_name.trim()}".`,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Gabungkan banyak produk sekaligus (bulk merge) ke dalam satu produk target.
+   * Mendukung 2 mode target:
+   * 1. 'existing': Menggabungkan ke produk yang sudah ada di katalog.
+   * 2. 'new': Membuat master produk induk baru dan menyerap semua produk terpilih sebagai variannya.
+   */
+  static async bulkMergeProducts(input: BulkMergeProductsInput) {
+    if (!Array.isArray(input.source_product_ids) || input.source_product_ids.length === 0) {
+      throw new Error('Pilih minimal satu produk sumber untuk digabungkan.');
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const actorName = (input.createdBy || 'Admin').slice(0, 100);
+      const actorId = input.userId || null;
+      const emptyAction = input.source_empty_action || 'deactivate';
+
+      let targetProductId = input.target_product_id?.trim() || '';
+      let targetProductName = '';
+
+      // Tentukan produk target berdasarkan mode
+      if (input.target_mode === 'new') {
+        if (!input.new_product_name || !input.new_product_name.trim()) {
+          throw new Error('Nama produk induk baru wajib diisi.');
+        }
+
+        let targetSku = input.new_product_sku?.trim();
+        if (!targetSku) {
+          targetSku = `PRD-${Date.now().toString().slice(-6)}`;
+        }
+
+        // Cek SKU produk induk baru
+        const skuCheck = await client.query(
+          `SELECT id FROM products WHERE LOWER(sku) = LOWER($1) LIMIT 1`,
+          [targetSku]
+        );
+        if (skuCheck.rows.length > 0) {
+          targetSku = `${targetSku}-${Date.now().toString().slice(-3)}`;
+        }
+
+        let brandId = input.brand_id || null;
+        if (input.brand && !input.brand_id) {
+          const resolved = await BrandService.findOrCreate(input.brand, client);
+          brandId = resolved.brand.id;
+        }
+
+        targetProductId = generateUUIDv7();
+        targetProductName = input.new_product_name.trim();
+
+        await client.query(
+          `INSERT INTO products (
+            id, name, sku, category_id, brand_id, supplier_id, description, min_stock_alert, is_active, has_variants
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, TRUE)`,
+          [
+            targetProductId,
+            targetProductName,
+            targetSku,
+            input.category_id || null,
+            brandId,
+            input.supplier_id || null,
+            input.description || null,
+            input.min_stock_alert !== undefined ? Number(input.min_stock_alert) : 5,
+          ]
+        );
+      } else {
+        // Mode 'existing'
+        if (!targetProductId) {
+          throw new Error('Produk tujuan wajib dipilih.');
+        }
+
+        const targetRes = await client.query(
+          `SELECT id, name, sku, is_active, has_variants FROM products WHERE id = $1 FOR UPDATE`,
+          [targetProductId]
+        );
+        if (targetRes.rows.length === 0) {
+          throw new Error('Produk tujuan tidak ditemukan.');
+        }
+
+        targetProductName = targetRes.rows[0].name;
+
+        // Opsi rename produk target jika diberikan
+        if (input.target_product_name?.trim() && input.target_product_name.trim() !== targetProductName) {
+          await client.query(
+            `UPDATE products SET name = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+            [input.target_product_name.trim(), targetProductId]
+          );
+          targetProductName = input.target_product_name.trim();
+        }
+
+        // Opsi rename varian 'Standar' produk target jika diberikan
+        if (input.target_standard_variant_name?.trim()) {
+          await client.query(
+            `UPDATE product_variants
+             SET variant_name = $1, updated_at = CURRENT_TIMESTAMP
+             WHERE product_id = $2
+               AND (LOWER(variant_name) = 'standar' OR (SELECT COUNT(*) FROM product_variants WHERE product_id = $2) = 1)`,
+            [input.target_standard_variant_name.trim(), targetProductId]
+          );
+        }
+      }
+
+      // Bersihkan source_product_ids: hindari duplikat dan jangan sertakan targetProductId
+      const rawSourceIds = Array.from(new Set(input.source_product_ids.map((id) => String(id).trim()))).filter(
+        Boolean
+      );
+      const cleanSourceIds = rawSourceIds.filter((id) => id !== targetProductId);
+
+      if (cleanSourceIds.length === 0) {
+        throw new Error('Tidak ada produk sumber yang valid untuk digabungkan.');
+      }
+
+      // Lock seluruh produk sumber secara terurut untuk cegah deadlock
+      const sortedSourceIds = [...cleanSourceIds].sort();
+      await client.query(
+        `SELECT id, name FROM products WHERE id = ANY($1::uuid[]) ORDER BY id ASC FOR UPDATE`,
+        [sortedSourceIds]
+      );
+
+      // Ambil seluruh varian dari produk sumber
+      const sourceVariantsRes = await client.query(
+        `SELECT pv.*, p.name as source_product_name, p.id as source_product_id
+         FROM product_variants pv
+         JOIN products p ON pv.product_id = p.id
+         WHERE pv.product_id = ANY($1::uuid[])
+         ORDER BY pv.id ASC
+         FOR UPDATE`,
+        [sortedSourceIds]
+      );
+      const sourceVariants = sourceVariantsRes.rows;
+
+      // Ambil varian yang sudah ada di produk target untuk pengecekan bentrok nama
+      const targetVariantsRes = await client.query(
+        `SELECT id, variant_name, sku FROM product_variants WHERE product_id = $1`,
+        [targetProductId]
+      );
+      const targetVariantNameSet = new Set(
+        targetVariantsRes.rows.map((v) => v.variant_name.trim().toLowerCase())
+      );
+      const batchNamesSet = new Set<string>();
+
+      // Buat rencana mapping nama dan SKU varian
+      const variantPlan: Array<{
+        variant: any;
+        finalName: string;
+        finalSku: string;
+      }> = [];
+
+      for (const v of sourceVariants) {
+        const customName = input.rename_map?.[v.id]?.trim();
+        // Smart default: jika varian bernama 'Standar', pakai nama produk asalnya agar lebih deskriptif
+        const defaultName =
+          v.variant_name.toLowerCase() === 'standar' ? v.source_product_name.trim() : v.variant_name.trim();
+        const finalName = customName || defaultName;
+
+        const customSku = input.sku_map?.[v.id]?.trim();
+        const finalSku = customSku || v.sku.trim();
+
+        const nameLower = finalName.toLowerCase();
+        if (targetVariantNameSet.has(nameLower) || batchNamesSet.has(nameLower)) {
+          throw new Error(
+            `Nama varian "${finalName}" bentrok dengan varian yang sudah ada pada produk tujuan "${targetProductName}". Silakan sesuaikan nama varian.`
+          );
+        }
+        batchNamesSet.add(nameLower);
+
+        // Jika SKU diubah, cek keunikan di tabel product_variants
+        if (finalSku !== v.sku) {
+          const skuConflictRes = await client.query(
+            `SELECT id FROM product_variants WHERE LOWER(sku) = LOWER($1) AND id != $2 LIMIT 1`,
+            [finalSku, v.id]
+          );
+          if (skuConflictRes.rows.length > 0) {
+            throw new Error(`SKU "${finalSku}" sudah digunakan oleh varian lain.`);
+          }
+        }
+
+        variantPlan.push({ variant: v, finalName, finalSku });
+      }
+
+      // Eksekusi perpindahan setiap varian
+      for (const item of variantPlan) {
+        const v = item.variant;
+
+        await client.query(
+          `UPDATE product_variants
+           SET product_id = $1, variant_name = $2, sku = $3, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $4`,
+          [targetProductId, item.finalName, item.finalSku, v.id]
+        );
+
+        await client.query(
+          `UPDATE stock_movements SET product_id = $1 WHERE variant_id = $2`,
+          [targetProductId, v.id]
+        );
+
+        await client.query(
+          `UPDATE stock_reservation_items SET product_id = $1 WHERE variant_id = $2`,
+          [targetProductId, v.id]
+        );
+
+        // Jejak audit di kartu stok
+        const moveId = generateUUIDv7();
+        const refNo = `BULKMOV-${Date.now().toString().slice(-6)}`;
+        const userNotes = input.notes ? ` Catatan: ${input.notes.trim()}` : '';
+        const auditLog = `Penggabungan massal produk ke "${targetProductName}". Asal: "${v.source_product_name}".${userNotes}`;
+
+        await client.query(
+          `INSERT INTO stock_movements (
+            id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock, reference_no, notes, created_by, user_id
+          ) VALUES ($1, $2, $3, 'VARIANT_MOVED', $4, 0, $4, $5, $6, $7, $8)`,
+          [
+            moveId,
+            targetProductId,
+            v.id,
+            Number(v.current_stock) || 0,
+            refNo,
+            auditLog,
+            actorName,
+            actorId,
+          ]
+        );
+      }
+
+      // Periksa dan tangani seluruh produk sumber
+      const deletedSourceIds: string[] = [];
+      const updatedSourceIds: string[] = [];
+
+      for (const sourceId of cleanSourceIds) {
+        const countRes = await client.query(
+          `SELECT COUNT(*)::int as count FROM product_variants WHERE product_id = $1`,
+          [sourceId]
+        );
+        const remainingCount = countRes.rows[0]?.count || 0;
+
+        if (remainingCount === 0) {
+          if (emptyAction === 'delete' && input.allowDeleteProduct) {
+            await client.query(`DELETE FROM products WHERE id = $1`, [sourceId]);
+            deletedSourceIds.push(sourceId);
+          } else {
+            await client.query(
+              `UPDATE products
+               SET is_active = FALSE, has_variants = FALSE, updated_at = CURRENT_TIMESTAMP
+               WHERE id = $1`,
+              [sourceId]
+            );
+            updatedSourceIds.push(sourceId);
+          }
+        } else {
+          await client.query(
+            `UPDATE products
+             SET has_variants = ($1 > 1), updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2`,
+            [remainingCount, sourceId]
+          );
+          updatedSourceIds.push(sourceId);
+        }
+      }
+
+      // Update flag has_variants pada produk target
+      const targetCountRes = await client.query(
+        `SELECT COUNT(*)::int as count FROM product_variants WHERE product_id = $1`,
+        [targetProductId]
+      );
+      const targetTotalVariants = targetCountRes.rows[0]?.count || 0;
+      await client.query(
+        `UPDATE products
+         SET has_variants = ($1 > 1), updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [targetTotalVariants, targetProductId]
+      );
+
+      await client.query('COMMIT');
+
+      // Latar belakang: Sinkronisasi AI embedding
+      EmbeddingService.syncProductEmbedding(targetProductId).catch((err) => {
+        logger.warn('AI_EMBEDDING', `Sync embedding target bulkMerge error: ${err.message}`);
+      });
+
+      for (const dId of deletedSourceIds) {
+        EmbeddingService.removeProductFromIndex(dId);
+      }
+      for (const uId of updatedSourceIds) {
+        EmbeddingService.syncProductEmbedding(uId).catch((err) => {
+          logger.warn('AI_EMBEDDING', `Sync embedding source bulkMerge error: ${err.message}`);
+        });
+      }
+
+      return {
+        success: true,
+        target_product_id: targetProductId,
+        target_product_name: targetProductName,
+        target_variant_count: targetTotalVariants,
+        moved_variants_count: variantPlan.length,
+        merged_source_count: cleanSourceIds.length,
+        deleted_source_product_ids: deletedSourceIds,
+        updated_source_product_ids: updatedSourceIds,
+        message: `${cleanSourceIds.length} produk (${variantPlan.length} varian) berhasil digabungkan ke "${targetProductName}".`,
       };
     } catch (error) {
       await client.query('ROLLBACK');

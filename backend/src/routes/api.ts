@@ -185,6 +185,11 @@ router.post(
   requireAnyPermission('products:update', 'products:create', 'master:write'),
   ProductController.reindexEmbeddings
 );
+router.post(
+  '/products/bulk-merge',
+  requirePermission('products:update'),
+  ProductController.bulkMerge
+);
 router.get('/products/:id', requirePermission('products:read'), ProductController.getById);
 router.post('/products', requirePermission('products:create'), ProductController.create);
 router.put('/products/:id', requirePermission('products:update'), ProductController.update);

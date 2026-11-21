@@ -566,4 +566,45 @@ export interface RestructureResult {
   message: string;
 }
 
+export interface BulkMergeProductsPayload {
+  source_product_ids: string[];
+  target_mode: 'existing' | 'new';
+  target_product_id?: string;
+  target_product_name?: string;
+  target_standard_variant_name?: string;
+  new_product_name?: string;
+  new_product_sku?: string;
+  category_id?: string | null;
+  brand_id?: string | null;
+  brand?: string;
+  supplier_id?: string | null;
+  description?: string;
+  min_stock_alert?: number;
+  rename_map?: Record<string, string>;
+  sku_map?: Record<string, string>;
+  source_empty_action?: 'delete' | 'deactivate';
+  notes?: string;
+}
+
+export interface BulkMergeResult {
+  success: boolean;
+  target_product_id: string;
+  target_product_name: string;
+  target_variant_count?: number;
+  moved_variants_count: number;
+  merged_source_count: number;
+  deleted_source_product_ids: string[];
+  updated_source_product_ids: string[];
+  message: string;
+}
+
+export interface SimilarProductGroup {
+  id: string;
+  commonPrefix: string;
+  categoryName?: string;
+  brandName?: string;
+  products: Product[];
+  totalStock: number;
+}
+
 
