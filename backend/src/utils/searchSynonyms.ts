@@ -305,20 +305,47 @@ export function scoreKeywordMatch(
     score += 1000;
     matchedTerms.add(rawQ);
   } else if (pSku.startsWith(rawQ) || (pBarcode && pBarcode.startsWith(rawQ))) {
-    score += 400;
+    score += 500;
     matchedTerms.add(rawQ);
   } else if (pSku.includes(rawQ) || (pBarcode && pBarcode.includes(rawQ))) {
-    score += 200;
+    score += 250;
     matchedTerms.add(rawQ);
   }
 
-  // 2. Exact Phrase Match pada Nama Produk
+  // 2. Phrase & Prefix Match pada Nama Produk
   if (pName === rawQ) {
-    score += 500;
+    score += 800;
     matchedTerms.add(pName);
+  } else if (pName.startsWith(rawQ)) {
+    score += 450;
+    matchedTerms.add(rawQ);
   } else if (pName.includes(rawQ)) {
     score += 250;
     matchedTerms.add(rawQ);
+  }
+
+  // 2b. Brand Matching
+  if (pBrand === rawQ) {
+    score += 300;
+    matchedTerms.add(pBrand);
+  } else if (pBrand.startsWith(rawQ)) {
+    score += 180;
+    matchedTerms.add(pBrand);
+  } else if (pBrand.includes(rawQ)) {
+    score += 100;
+    matchedTerms.add(pBrand);
+  }
+
+  // 2c. Category Matching
+  if (pCategory === rawQ) {
+    score += 200;
+    matchedTerms.add(pCategory);
+  } else if (pCategory.startsWith(rawQ)) {
+    score += 120;
+    matchedTerms.add(pCategory);
+  } else if (pCategory.includes(rawQ)) {
+    score += 70;
+    matchedTerms.add(pCategory);
   }
 
   // 3. Varian SKU / Barcode / Variant Name Match
@@ -329,15 +356,24 @@ export function scoreKeywordMatch(
       const vName = (v.variant_name || '').toLowerCase();
 
       if (vSku === rawQ || (vBarcode && vBarcode === rawQ)) {
-        score += 800;
+        score += 900;
         matchedTerms.add(rawQ);
-      } else if (vSku.includes(rawQ)) {
+      } else if (vSku.startsWith(rawQ) || (vBarcode && vBarcode.startsWith(rawQ))) {
+        score += 400;
+        matchedTerms.add(rawQ);
+      } else if (vSku.includes(rawQ) || (vBarcode && vBarcode.includes(rawQ))) {
         score += 180;
         matchedTerms.add(rawQ);
       }
 
-      if (vName && (vName === rawQ || vName.includes(rawQ))) {
-        score += 120;
+      if (vName && vName === rawQ) {
+        score += 250;
+        matchedTerms.add(vName);
+      } else if (vName && vName.startsWith(rawQ)) {
+        score += 150;
+        matchedTerms.add(vName);
+      } else if (vName && vName.includes(rawQ)) {
+        score += 80;
         matchedTerms.add(vName);
       }
     }
@@ -348,8 +384,12 @@ export function scoreKeywordMatch(
   for (const token of tokens) {
     let tokenMatched = false;
 
-    if (pName.includes(token)) {
-      score += 60;
+    if (pName.startsWith(token)) {
+      score += 80;
+      tokenMatched = true;
+      matchedTerms.add(token);
+    } else if (pName.includes(token)) {
+      score += 50;
       tokenMatched = true;
       matchedTerms.add(token);
     }

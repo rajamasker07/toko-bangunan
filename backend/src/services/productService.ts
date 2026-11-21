@@ -107,7 +107,7 @@ export class ProductService {
     },
     options?: { includeBuyPrice?: boolean }
   ) {
-    const searchMode = filters?.searchMode || filters?.mode || 'hybrid';
+    const searchMode = filters?.searchMode || filters?.mode || 'keyword';
     const rawSearch = (filters?.search || '').trim();
     const isSearching = rawSearch.length > 0;
 
@@ -244,16 +244,20 @@ export class ProductService {
         }
       }
 
-      // 3. Peringkatkan urutan keyword (1-based rank)
+      // 3. Peringkatkan urutan keyword (Dense Ranking: skor sama mendapat peringkat sama)
       const sortedByKw = [...rows]
         .map((p) => ({ id: p.id, score: kwMap.get(p.id)?.score || 0 }))
         .filter((item) => item.score > 0)
         .sort((a, b) => b.score - a.score);
 
       const kwRankMap = new Map<string, number>();
-      sortedByKw.forEach((item, index) => {
-        kwRankMap.set(item.id, index + 1);
-      });
+      let currentRank = 1;
+      for (let i = 0; i < sortedByKw.length; i++) {
+        if (i > 0 && sortedByKw[i].score < sortedByKw[i - 1].score) {
+          currentRank = i + 1;
+        }
+        kwRankMap.set(sortedByKw[i].id, currentRank);
+      }
 
       // 4. Bobot RRF berdasarkan mode
       const wKw = searchMode === 'semantic' ? 0.2 : 1.0;
@@ -277,18 +281,18 @@ export class ProductService {
           continue;
         }
 
-        // Reciprocal Rank Fusion
-        let rrfScore = 0;
+        // Reciprocal Rank Fusion (hitung dengan presisi floating point penuh)
+        let rawRrfScore = 0;
         if (kwRank) {
-          rrfScore += wKw * (1 / (k + kwRank));
+          rawRrfScore += wKw * (1 / (k + kwRank));
         }
         if (semRank) {
-          rrfScore += wSem * (1 / (k + semRank));
+          rawRrfScore += wSem * (1 / (k + semRank));
         }
 
-        // Exact match boost
+        // Exact match boost (SKU / Barcode / Nama persis mendapat prioritas tertinggi mutlak)
         if (isExact) {
-          rrfScore += 1000;
+          rawRrfScore += 1000;
         }
 
         // Tentukan match_type & similarity_score
@@ -313,14 +317,33 @@ export class ProductService {
           ...p,
           match_type: matchType,
           similarity_score: displayScore,
-          rrf_score: Math.round(rrfScore * 10000) / 10000,
+          rrf_score: Math.round(rawRrfScore * 10000) / 10000,
+          _raw_rrf_score: rawRrfScore,
+          _kw_score: kwScore,
           matched_terms: kw?.matchedTerms || [],
         });
       }
 
-      // Urutkan dari rrfScore tertinggi
-      scoredProducts.sort((a, b) => b.rrf_score - a.rrf_score);
-      rows = scoredProducts;
+      // Urutkan dari produk yang paling relevan (skor relevansi tertinggi ke terendah)
+      scoredProducts.sort((a, b) => {
+        // 1. Raw RRF score tertinggi (termasuk exact match boost)
+        if (b._raw_rrf_score !== a._raw_rrf_score) {
+          return b._raw_rrf_score - a._raw_rrf_score;
+        }
+        // 2. Keyword score tertinggi
+        if (b._kw_score !== a._kw_score) {
+          return b._kw_score - a._kw_score;
+        }
+        // 3. Similarity score semantik tertinggi
+        if ((b.similarity_score || 0) !== (a.similarity_score || 0)) {
+          return (b.similarity_score || 0) - (a.similarity_score || 0);
+        }
+        // 4. Nama produk secara alfabetis (A-Z)
+        return a.name.localeCompare(b.name);
+      });
+
+      // Bersihkan properti penunjang sorting internal
+      rows = scoredProducts.map(({ _raw_rrf_score, _kw_score, ...rest }) => rest);
     }
 
     if (filters?.limit && filters.limit > 0) {

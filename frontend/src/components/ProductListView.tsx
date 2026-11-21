@@ -55,6 +55,84 @@ const EXAMPLE_SEARCH_QUERIES = [
   { label: 'atap bening kanopi', emoji: '🏠' },
 ];
 
+/**
+ * Menghitung skor relevansi pencarian leksikal di sisi klien (fallback/debouncing)
+ * Mengurutkan hasil dari yang paling relevan (exact match > prefix > contains > tokens)
+ */
+function computeClientRelevanceScore(p: Product, rawQuery: string): number {
+  const q = rawQuery.trim().toLowerCase();
+  if (!q) return 0;
+
+  const sku = (p.sku || '').toLowerCase();
+  const barcode = (p.barcode || '').toLowerCase();
+  const name = (p.name || '').toLowerCase();
+  const brand = (p.brand || '').toLowerCase();
+  const category = (p.category_name || '').toLowerCase();
+
+  let score = 0;
+
+  // 1. Exact match (prioritas tertinggi)
+  if (sku === q || barcode === q) score += 1000;
+  else if (name === q) score += 800;
+  else if (brand === q) score += 300;
+  else if (category === q) score += 200;
+
+  // 2. Prefix match (diawali teks kueri)
+  if (sku.startsWith(q) || barcode.startsWith(q)) score += 500;
+  if (name.startsWith(q)) score += 450;
+  if (brand.startsWith(q)) score += 180;
+  if (category.startsWith(q)) score += 120;
+
+  // 3. Phrase match (mengandung frase kueri)
+  if (name.includes(q)) score += 250;
+  if (sku.includes(q) || barcode.includes(q)) score += 200;
+  if (brand.includes(q)) score += 100;
+  if (category.includes(q)) score += 70;
+
+  // 4. Variant matching
+  if (Array.isArray(p.variants)) {
+    for (const v of p.variants) {
+      const vSku = (v.sku || '').toLowerCase();
+      const vBarcode = (v.barcode || '').toLowerCase();
+      const vName = (v.variant_name || '').toLowerCase();
+
+      if (vSku === q || vBarcode === q) score += 900;
+      else if (vSku.startsWith(q) || vBarcode.startsWith(q)) score += 400;
+      else if (vSku.includes(q) || vBarcode.includes(q)) score += 180;
+
+      if (vName === q) score += 250;
+      else if (vName.startsWith(q)) score += 150;
+      else if (vName.includes(q)) score += 80;
+    }
+  }
+
+  // 5. Multi-token match
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (tokens.length > 1) {
+    let tokenMatches = 0;
+    for (const token of tokens) {
+      if (name.startsWith(token)) {
+        score += 70;
+        tokenMatches++;
+      } else if (name.includes(token)) {
+        score += 50;
+        tokenMatches++;
+      } else if (brand.includes(token)) {
+        score += 35;
+        tokenMatches++;
+      } else if (category.includes(token)) {
+        score += 25;
+        tokenMatches++;
+      }
+    }
+    if (tokenMatches === tokens.length) {
+      score += 200; // Bonus jika semua kata kueri ditemukan
+    }
+  }
+
+  return score;
+}
+
 export const ProductListView: React.FC<ProductListViewProps> = ({
   products,
   categories,
@@ -85,7 +163,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
-  const [searchMode, setSearchMode] = useState<ProductSearchMode>('hybrid');
+  const [searchMode, setSearchMode] = useState<ProductSearchMode>('keyword');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [stockFilter, setStockFilter] = useState(initialStockFilter);
@@ -171,7 +249,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
     const query = deferredSearch.trim().toLowerCase();
     const baseList = serverSearchResults !== null ? serverSearchResults : products;
 
-    return baseList.filter((p) => {
+    const filtered = baseList.filter((p) => {
       let matchSearch = true;
       if (serverSearchResults === null && query) {
         matchSearch =
@@ -207,6 +285,20 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
       return matchSearch && matchStock && matchSale;
     });
+
+    // Jika pencarian lokal (sebelum server merespons), urutkan dari yang paling relevan
+    if (serverSearchResults === null && query) {
+      return [...filtered].sort((a, b) => {
+        const scoreA = computeClientRelevanceScore(a, query);
+        const scoreB = computeClientRelevanceScore(b, query);
+        if (scoreB !== scoreA) {
+          return scoreB - scoreA;
+        }
+        return a.name.localeCompare(b.name);
+      });
+    }
+
+    return filtered;
   }, [products, serverSearchResults, deferredSearch, stockFilter, saleFilter]);
 
   // Searchable options Kategori: DIBATASI HANYA dari produk yang sedang tampil / cocok
