@@ -269,19 +269,22 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 self-start lg:self-center flex-wrap">
-            {/* Stock Metric Badge */}
-            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 text-right min-w-[140px]">
-              <span className="text-[11px] text-slate-400 block font-medium">Stok Fisik Saat Ini</span>
-              <span className="text-2xl font-black font-mono text-slate-900 dark:text-white">
-                {formatStock(variant.current_stock)}
-              </span>
-              <span className="text-[10px] text-slate-400 block mt-0.5">
-                Batas Min: {formatStock(variant.min_stock)}
-              </span>
-            </div>
+          {/* Quick Metrics */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 text-right min-w-[150px] shrink-0 self-start lg:self-center shadow-sm">
+            <span className="text-[11px] text-slate-400 block font-medium">Stok Fisik Saat Ini</span>
+            <span className="text-2xl font-black font-mono text-slate-900 dark:text-white">
+              {formatStock(variant.current_stock)}
+            </span>
+            <span className="text-[10px] text-slate-400 block mt-0.5">
+              Batas Min: {formatStock(variant.min_stock)}
+            </span>
+          </div>
+        </div>
 
-            {/* Toggle Status Button */}
+        {/* Dedicated Action Toolbar */}
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Left: Status & Restructure Tools */}
+          <div className="flex items-center gap-2.5 flex-wrap">
             {canUpdateVariant && (
               <button
                 type="button"
@@ -298,30 +301,31 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                     }
                   }
                 }}
-                className={`flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs transition-all shrink-0 border ${
+                className={`group inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
                   variant.is_active !== false
-                    ? 'border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
-                    : 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                    ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 dark:hover:border-rose-800 dark:hover:bg-rose-950/50 dark:hover:text-rose-300'
+                    : 'border-rose-200 dark:border-rose-900/60 bg-rose-50/70 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/50 dark:hover:text-emerald-300'
                 }`}
                 title={
                   variant.is_active !== false
-                    ? 'Hentikan penjualan varian ini'
-                    : 'Aktifkan kembali penjualan varian ini'
+                    ? 'Status: Masih Dijual. Klik untuk menghentikan penjualan varian ini.'
+                    : 'Status: Tidak Dijual. Klik untuk mulai menjual varian ini kembali.'
                 }
               >
-                <Power className="w-4 h-4" />
-                <span>{variant.is_active !== false ? 'Hentikan Penjualan Varian' : 'Jual Kembali Varian'}</span>
-              </button>
-            )}
-
-            {canUpdateVariant && onEditVariant && (
-              <button
-                onClick={() => onEditVariant(variant)}
-                className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all shrink-0 border border-slate-200 dark:border-slate-700"
-                title="Edit Data Varian"
-              >
-                <Edit2 className="w-4 h-4 text-blue-500" />
-                <span>Edit Varian</span>
+                <Power className="w-3.5 h-3.5 transition-transform group-hover:scale-110" />
+                <span>
+                  {variant.is_active !== false ? (
+                    <>
+                      <span className="group-hover:hidden">Status: Masih Dijual</span>
+                      <span className="hidden group-hover:inline font-bold">Hentikan Penjualan</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="group-hover:hidden">Status: Tidak Dijual</span>
+                      <span className="hidden group-hover:inline font-bold">Jual Kembali</span>
+                    </>
+                  )}
+                </span>
               </button>
             )}
 
@@ -329,10 +333,10 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
               <button
                 type="button"
                 onClick={() => onMoveVariant(variant)}
-                className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all shrink-0 border border-slate-200 dark:border-slate-700"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 transition-colors"
                 title="Pindahkan varian ini ke produk lain"
               >
-                <ArrowRightLeft className="w-4 h-4 text-amber-500" />
+                <ArrowRightLeft className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 <span>Pindah Produk</span>
               </button>
             )}
@@ -341,19 +345,35 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
               <button
                 type="button"
                 onClick={() => onPromoteVariant(variant)}
-                className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 dark:text-emerald-300 transition-all shrink-0 border border-emerald-200 dark:border-emerald-800"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 transition-colors"
                 title="Pisahkan varian ini menjadi produk mandiri baru"
               >
-                <ExternalLink className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <ExternalLink className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>Jadikan Produk Mandiri</span>
               </button>
             )}
+          </div>
 
-            {/* Quick Adjust Button */}
+          {/* Right: Core CTAs */}
+          <div className="flex items-center gap-2.5 flex-wrap sm:justify-end">
+            {canUpdateVariant && onEditVariant && (
+              <button
+                type="button"
+                onClick={() => onEditVariant(variant)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors shadow-sm"
+                title="Edit Data Varian"
+              >
+                <Edit2 className="w-3.5 h-3.5 text-blue-500" />
+                <span>Edit Varian</span>
+              </button>
+            )}
+
             {canAdjustStock && (
               <button
+                type="button"
                 onClick={() => onOpenAdjust(variant.id)}
-                className="flex items-center gap-2 px-4 py-3 rounded-xl font-bold text-xs bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all shrink-0"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm shadow-amber-600/20 transition-all"
+                title="Penyesuaian Stok Fisik Varian"
               >
                 <SlidersHorizontal className="w-4 h-4" />
                 <span>Penyesuaian Stok</span>

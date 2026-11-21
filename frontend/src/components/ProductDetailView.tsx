@@ -172,45 +172,50 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
           </div>
 
           {/* Quick Metrics */}
-          <div className="flex items-center gap-3 self-start lg:self-center flex-wrap">
-            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 text-right min-w-[130px]">
-              <span className="text-[11px] text-slate-400 block font-medium">Total Stok Seluruh Varian</span>
-              <span className="text-2xl font-black font-mono text-slate-900 dark:text-white">
-                {formatStock(product.total_stock)}
-              </span>
-              <span className="text-[10px] text-slate-400 block mt-0.5">
-                Batas Min Alert: {formatStock(product.min_stock_alert)}
-              </span>
-            </div>
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 text-right min-w-[150px] shrink-0 self-start lg:self-center shadow-sm">
+            <span className="text-[11px] text-slate-400 block font-medium">Total Stok Seluruh Varian</span>
+            <span className="text-2xl font-black font-mono text-slate-900 dark:text-white">
+              {formatStock(product.total_stock)}
+            </span>
+            <span className="text-[10px] text-slate-400 block mt-0.5">
+              Batas Min Alert: {formatStock(product.min_stock_alert)}
+            </span>
+          </div>
+        </div>
 
+        {/* Dedicated Action Toolbar */}
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Left: Status & Restructure Utilities */}
+          <div className="flex items-center gap-2.5 flex-wrap">
             {canUpdate && onToggleProductStatus && (
               <button
                 type="button"
                 onClick={() => onToggleProductStatus(product)}
-                className={`flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs transition-all shrink-0 border ${
+                className={`group inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
                   product.is_active !== false
-                    ? 'border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
-                    : 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                    ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 dark:hover:border-rose-800 dark:hover:bg-rose-950/50 dark:hover:text-rose-300'
+                    : 'border-rose-200 dark:border-rose-900/60 bg-rose-50/70 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/50 dark:hover:text-emerald-300'
                 }`}
                 title={
                   product.is_active !== false
-                    ? 'Hentikan penjualan produk ini'
-                    : 'Aktifkan kembali penjualan produk ini'
+                    ? 'Status: Masih Dijual. Klik untuk menghentikan penjualan produk ini.'
+                    : 'Status: Tidak Dijual. Klik untuk mulai menjual produk ini kembali.'
                 }
               >
-                <Power className="w-4 h-4" />
-                <span>{product.is_active !== false ? 'Hentikan Penjualan' : 'Jual Kembali'}</span>
-              </button>
-            )}
-
-            {canUpdate && onEditProduct && (
-              <button
-                onClick={() => onEditProduct(product)}
-                className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all shrink-0 border border-slate-200 dark:border-slate-700"
-                title="Edit Master Produk"
-              >
-                <Edit2 className="w-4 h-4 text-blue-500" />
-                <span>Edit Produk</span>
+                <Power className="w-3.5 h-3.5 transition-transform group-hover:scale-110" />
+                <span>
+                  {product.is_active !== false ? (
+                    <>
+                      <span className="group-hover:hidden">Status: Masih Dijual</span>
+                      <span className="hidden group-hover:inline font-bold">Hentikan Penjualan</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="group-hover:hidden">Status: Tidak Dijual</span>
+                      <span className="hidden group-hover:inline font-bold">Jual Kembali</span>
+                    </>
+                  )}
+                </span>
               </button>
             )}
 
@@ -218,18 +223,35 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
               <button
                 type="button"
                 onClick={() => onMergeProduct(product)}
-                className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 dark:text-indigo-300 transition-all shrink-0 border border-indigo-200 dark:border-indigo-800"
-                title="Gabung seluruh varian produk ini ke produk lain"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/70 hover:bg-indigo-100 dark:bg-indigo-950/30 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 transition-colors"
+                title="Pindahkan seluruh varian produk ini dan gabungkan ke produk lain"
               >
-                <GitMerge className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                <span>Gabung Produk</span>
+                <GitMerge className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Gabung ke Produk Lain</span>
+              </button>
+            )}
+          </div>
+
+          {/* Right: Core CTAs & Deletion */}
+          <div className="flex items-center gap-2.5 flex-wrap sm:justify-end">
+            {canUpdate && onEditProduct && (
+              <button
+                type="button"
+                onClick={() => onEditProduct(product)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors shadow-sm"
+                title="Edit Informasi Master Produk"
+              >
+                <Edit2 className="w-3.5 h-3.5 text-blue-500" />
+                <span>Edit Produk</span>
               </button>
             )}
 
             {canCreate && (
               <button
+                type="button"
                 onClick={() => onAddVariant(product.id)}
-                className="flex items-center gap-2 px-4 py-3 rounded-xl font-bold text-xs bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 transition-all shrink-0"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm shadow-amber-600/20 transition-all"
+                title="Tambah Varian Baru untuk Produk ini"
               >
                 <Plus className="w-4 h-4" />
                 <span>Tambah Varian</span>
@@ -240,7 +262,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
               <button
                 type="button"
                 onClick={() => onDeleteProduct(product.id, product.name)}
-                className="p-3 rounded-xl border border-rose-200 dark:border-rose-800/70 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors shrink-0"
+                className="p-2 rounded-xl border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
                 title="Hapus Produk"
               >
                 <Trash2 className="w-4 h-4" />
@@ -419,9 +441,9 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                     </div>
 
                     {/* Stock & Navigation Link */}
-                    <div className="flex items-center gap-4 self-end md:self-auto shrink-0">
-                      <div className="text-right">
-                        <span className="text-[10px] text-slate-400 block">Stok Varian</span>
+                    <div className="flex items-center gap-3 self-end md:self-auto shrink-0">
+                      <div className="text-right mr-1">
+                        <span className="text-[10px] text-slate-400 block font-medium">Stok Varian</span>
                         <span className="font-mono font-bold text-base text-slate-900 dark:text-white">
                           {formatStock(v.current_stock)}
                         </span>
@@ -430,56 +452,59 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                         </span>
                       </div>
 
-                      {/* Toggle Variant Status */}
-                      {canUpdate && onToggleVariantStatus && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onToggleVariantStatus(v.id);
-                          }}
-                          className={`p-1.5 rounded-lg transition-colors ${
-                            v.is_active !== false
-                              ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
-                              : 'text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
-                          }`}
-                          title={
-                            v.is_active !== false
-                              ? 'Status: Masih Dijual (Klik untuk hentikan penjualan varian ini)'
-                              : 'Status: Tidak Dijual (Klik untuk aktifkan kembali varian ini)'
-                          }
-                        >
-                          <Power className="w-4 h-4" />
-                        </button>
-                      )}
+                      {/* Variant Action Toolbar */}
+                      <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+                        {/* Toggle Variant Status */}
+                        {canUpdate && onToggleVariantStatus && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onToggleVariantStatus(v.id);
+                            }}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              v.is_active !== false
+                                ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                                : 'text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                            }`}
+                            title={
+                              v.is_active !== false
+                                ? 'Status: Masih Dijual (Klik untuk hentikan penjualan varian ini)'
+                                : 'Status: Tidak Dijual (Klik untuk aktifkan kembali varian ini)'
+                            }
+                          >
+                            <Power className="w-3.5 h-3.5" />
+                          </button>
+                        )}
 
-                      {canUpdate && onEditVariant && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEditVariant(v);
-                          }}
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
-                          title="Edit Varian"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      )}
+                        {canUpdate && onEditVariant && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditVariant(v);
+                            }}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                            title="Edit Varian"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
 
-                      {canUpdate && onMoveVariants && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onMoveVariants([v]);
-                          }}
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors"
-                          title="Pindahkan Varian ke Produk Lain"
-                        >
-                          <ArrowRightLeft className="w-4 h-4" />
-                        </button>
-                      )}
+                        {canUpdate && onMoveVariants && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onMoveVariants([v]);
+                            }}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors"
+                            title="Pindahkan Varian ke Produk Lain"
+                          >
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
 
                       {canAdjust && (
                         <button
@@ -488,7 +513,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                             e.stopPropagation();
                             onOpenAdjust(v.id);
                           }}
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
                           title="Penyesuaian Stok Cepat"
                         >
                           Adjust
