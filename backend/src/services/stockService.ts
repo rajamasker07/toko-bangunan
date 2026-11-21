@@ -11,7 +11,8 @@ export type StockActionType =
   | 'MANUAL_ADJUSTMENT'  // Penyesuaian manual lainnya
   | 'RESERVATION_HOLD'   // Penahanan stok untuk reservasi titip barang
   | 'RESERVATION_PICKUP' // Pengambilan stok barang titipan oleh pelanggan
-  | 'RESERVATION_RELEASE'; // Pelepasan penahanan stok karena reservasi batal
+  | 'RESERVATION_RELEASE' // Pelepasan penahanan stok karena reservasi batal
+  | 'VARIANT_MOVED';     // Jejak audit pemindahan varian antar produk
 
 export interface AdjustStockInput {
   variant_id: string;

@@ -22,7 +22,9 @@ import {
   User,
   Barcode,
   Edit2,
-  Power
+  Power,
+  ArrowRightLeft,
+  ExternalLink
 } from 'lucide-react';
 
 interface VariantDetailViewProps {
@@ -34,6 +36,8 @@ interface VariantDetailViewProps {
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
   onEditVariant?: (variant: ProductVariant) => void;
   onToggleVariantStatus?: (variantId: string) => void;
+  onMoveVariant?: (variant: ProductVariant) => void;
+  onPromoteVariant?: (variant: ProductVariant) => void;
   onRefresh?: () => void;
 }
 
@@ -46,6 +50,8 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
   showToast,
   onEditVariant,
   onToggleVariantStatus,
+  onMoveVariant,
+  onPromoteVariant,
   onRefresh,
 }) => {
   const { can } = useAuth();
@@ -170,6 +176,8 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
         return <span className="bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-400 px-2 py-0.5 rounded text-[10px] font-bold">Retur Masuk</span>;
       case 'RETURN_OUT':
         return <span className="bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-400 px-2 py-0.5 rounded text-[10px] font-bold">Retur Keluar</span>;
+      case 'VARIANT_MOVED':
+        return <span className="bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-400 px-2 py-0.5 rounded text-[10px] font-bold">Pindah Produk</span>;
       default:
         return <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[10px] font-bold">{type}</span>;
     }
@@ -314,6 +322,30 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
               >
                 <Edit2 className="w-4 h-4 text-blue-500" />
                 <span>Edit Varian</span>
+              </button>
+            )}
+
+            {canUpdateVariant && onMoveVariant && (
+              <button
+                type="button"
+                onClick={() => onMoveVariant(variant)}
+                className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all shrink-0 border border-slate-200 dark:border-slate-700"
+                title="Pindahkan varian ini ke produk lain"
+              >
+                <ArrowRightLeft className="w-4 h-4 text-amber-500" />
+                <span>Pindah Produk</span>
+              </button>
+            )}
+
+            {can('products:create') && onPromoteVariant && (
+              <button
+                type="button"
+                onClick={() => onPromoteVariant(variant)}
+                className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 dark:text-emerald-300 transition-all shrink-0 border border-emerald-200 dark:border-emerald-800"
+                title="Pisahkan varian ini menjadi produk mandiri baru"
+              >
+                <ExternalLink className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Jadikan Produk Mandiri</span>
               </button>
             )}
 
@@ -552,13 +584,26 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                         <td className="py-3 px-4 text-center whitespace-nowrap">
                           <span
                             className={`inline-flex items-center gap-1 font-bold px-2.5 py-1 rounded-full ${
-                              isPositive
+                              change === 0
+                                ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                : isPositive
                                 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                                 : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
                             }`}
                           >
-                            {isPositive ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5" />}
-                            {isPositive ? `+${formatStock(change)}` : formatStock(change)}
+                            {change === 0 ? (
+                              '0'
+                            ) : isPositive ? (
+                              <>
+                                <ArrowUpRight className="w-3.5 h-3.5" />
+                                +{formatStock(change)}
+                              </>
+                            ) : (
+                              <>
+                                <ArrowDownLeft className="w-3.5 h-3.5" />
+                                {formatStock(change)}
+                              </>
+                            )}
                           </span>
                         </td>
 

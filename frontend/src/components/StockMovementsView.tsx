@@ -69,6 +69,8 @@ export const StockMovementsView: React.FC = () => {
         return <span className="bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-400 px-2 py-0.5 rounded text-[10px] font-bold">Retur Masuk</span>;
       case 'RETURN_OUT':
         return <span className="bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-400 px-2 py-0.5 rounded text-[10px] font-bold">Retur Keluar</span>;
+      case 'VARIANT_MOVED':
+        return <span className="bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-400 px-2 py-0.5 rounded text-[10px] font-bold">Pindah Produk</span>;
       default:
         return <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[10px] font-bold">{type}</span>;
     }
@@ -193,13 +195,26 @@ export const StockMovementsView: React.FC = () => {
                         <td className="py-3 px-4 text-center whitespace-nowrap">
                           <span
                             className={`inline-flex items-center gap-1 font-bold px-2.5 py-1 rounded-full ${
-                              isPositive
+                              change === 0
+                                ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                : isPositive
                                 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                                 : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
                             }`}
                           >
-                            {isPositive ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5" />}
-                            {isPositive ? `+${formatStock(change)}` : formatStock(change)}
+                            {change === 0 ? (
+                              '0'
+                            ) : isPositive ? (
+                              <>
+                                <ArrowUpRight className="w-3.5 h-3.5" />
+                                +{formatStock(change)}
+                              </>
+                            ) : (
+                              <>
+                                <ArrowDownLeft className="w-3.5 h-3.5" />
+                                {formatStock(change)}
+                              </>
+                            )}
                           </span>
                         </td>
 

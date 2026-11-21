@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { hasPermission } from '../config/rbac.js';
 import { ProductService } from '../services/productService.js';
 import { EmbeddingService } from '../services/embeddingService.js';
+import { CatalogRestructureService } from '../services/catalogRestructureService.js';
 
 export class ProductController {
   static async list(req: Request, res: Response) {
@@ -115,6 +116,68 @@ export class ProductController {
       });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  static async moveVariants(req: Request, res: Response) {
+    try {
+      const sourceProductId = String(req.params.id);
+      const { variant_ids, target_product_id, rename_map, sku_map, source_empty_action, notes } = req.body;
+
+      if (!target_product_id) {
+        return res.status(400).json({ success: false, message: 'Produk tujuan wajib dipilih' });
+      }
+      if (!Array.isArray(variant_ids) || variant_ids.length === 0) {
+        return res.status(400).json({ success: false, message: 'Pilih minimal satu varian untuk dipindahkan' });
+      }
+
+      const allowDeleteProduct = hasPermission(req.user!.role, 'products:delete');
+
+      const result = await CatalogRestructureService.moveVariants({
+        source_product_id: sourceProductId,
+        variant_ids,
+        target_product_id: String(target_product_id),
+        rename_map,
+        sku_map,
+        source_empty_action,
+        notes,
+        userId: req.user!.id,
+        createdBy: req.user!.full_name,
+        allowDeleteProduct,
+      });
+
+      res.json({ success: true, data: result, message: result.message });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  static async mergeProduct(req: Request, res: Response) {
+    try {
+      const sourceProductId = String(req.params.id);
+      const { target_product_id, rename_map, sku_map, source_empty_action, notes } = req.body;
+
+      if (!target_product_id) {
+        return res.status(400).json({ success: false, message: 'Produk tujuan wajib dipilih' });
+      }
+
+      const allowDeleteProduct = hasPermission(req.user!.role, 'products:delete');
+
+      const result = await CatalogRestructureService.mergeProduct({
+        source_product_id: sourceProductId,
+        target_product_id: String(target_product_id),
+        rename_map,
+        sku_map,
+        source_empty_action,
+        notes,
+        userId: req.user!.id,
+        createdBy: req.user!.full_name,
+        allowDeleteProduct,
+      });
+
+      res.json({ success: true, data: result, message: result.message });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
     }
   }
 }

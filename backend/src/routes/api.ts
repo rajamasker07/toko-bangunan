@@ -194,6 +194,16 @@ router.patch(
   ProductController.toggleStatus
 );
 router.delete('/products/:id', requirePermission('products:delete'), ProductController.delete);
+router.post(
+  '/products/:id/move-variants',
+  requirePermission('products:update'),
+  ProductController.moveVariants
+);
+router.post(
+  '/products/:id/merge',
+  requirePermission('products:update'),
+  ProductController.mergeProduct
+);
 
 // Product Variants
 router.post(
@@ -208,6 +218,16 @@ router.patch(
   VariantController.toggleStatus
 );
 router.delete('/variants/:id', requirePermission('products:delete'), VariantController.deleteVariant);
+router.post(
+  '/variants/:id/move',
+  requirePermission('products:update'),
+  VariantController.moveVariant
+);
+router.post(
+  '/variants/:id/promote',
+  requireAnyPermission('products:create', 'products:update'),
+  VariantController.promoteVariant
+);
 
 // Variant Units (Satuan Harga bertingkat)
 router.post(

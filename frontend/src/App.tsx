@@ -23,6 +23,9 @@ import { AddVariantModal } from './components/AddVariantModal';
 import { ProductFormModal } from './components/ProductFormModal';
 import { EditProductModal } from './components/EditProductModal';
 import { EditVariantModal } from './components/EditVariantModal';
+import { MoveVariantModal } from './components/MoveVariantModal';
+import { MergeProductModal } from './components/MergeProductModal';
+import { PromoteVariantModal } from './components/PromoteVariantModal';
 import { StockAdjustmentModal } from './components/StockAdjustmentModal';
 import { StockAdjustmentView } from './components/StockAdjustmentView';
 import { CategoryManagementView } from './components/CategoryManagementView';
@@ -96,6 +99,18 @@ export const App: React.FC = () => {
   const [isEditVariantOpen, setIsEditVariantOpen] = useState<boolean>(false);
   const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
   const [editingVariantProductName, setEditingVariantProductName] = useState<string>('');
+
+  // Catalog Restructuring Modals state
+  const [isMoveVariantOpen, setIsMoveVariantOpen] = useState<boolean>(false);
+  const [moveVariantSourceProduct, setMoveVariantSourceProduct] = useState<Product | null>(null);
+  const [moveVariantsList, setMoveVariantsList] = useState<ProductVariant[]>([]);
+
+  const [isMergeProductOpen, setIsMergeProductOpen] = useState<boolean>(false);
+  const [mergeProductSource, setMergeProductSource] = useState<Product | null>(null);
+
+  const [isPromoteVariantOpen, setIsPromoteVariantOpen] = useState<boolean>(false);
+  const [promoteVariantSourceProduct, setPromoteVariantSourceProduct] = useState<Product | null>(null);
+  const [promoteVariantItem, setPromoteVariantItem] = useState<ProductVariant | null>(null);
 
   // Import Data context state (pre-selected entity & return target when opened via shortcut)
   const [importInitialEntity, setImportInitialEntity] = useState<ImportEntityType | undefined>(undefined);
@@ -549,6 +564,58 @@ export const App: React.FC = () => {
     setIsCreateOpen(true);
   };
 
+  // Handle Catalog Restructuring Operations
+  const handleOpenMoveVariants = (sourceProduct: Product, variants: ProductVariant[]) => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin memindahkan varian produk.', 'error');
+      return;
+    }
+    setMoveVariantSourceProduct(sourceProduct);
+    setMoveVariantsList(variants);
+    setIsMoveVariantOpen(true);
+  };
+
+  const handleOpenMergeProduct = (sourceProduct: Product) => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin menggabungkan produk.', 'error');
+      return;
+    }
+    setMergeProductSource(sourceProduct);
+    setIsMergeProductOpen(true);
+  };
+
+  const handleOpenPromoteVariant = (sourceProduct: Product, variant: ProductVariant) => {
+    if (!can('products:create')) {
+      showToast('Anda tidak memiliki izin membuat produk mandiri dari varian.', 'error');
+      return;
+    }
+    if (categoriesTree.length === 0) {
+      loadCategories();
+    }
+    setPromoteVariantSourceProduct(sourceProduct);
+    setPromoteVariantItem(variant);
+    setIsPromoteVariantOpen(true);
+  };
+
+  const handleRestructureSuccess = async (targetOrNewProductId?: string) => {
+    await loadProducts();
+    await loadSummary();
+    if (targetOrNewProductId) {
+      try {
+        const freshList = await api.getProducts();
+        const found = freshList.find((p) => p.id === targetOrNewProductId);
+        if (found) {
+          setSelectedProduct(found);
+          setSelectedVariant(null);
+          return;
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setSelectedVariant(null);
+  };
+
   if (isHydrating) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-6">
@@ -663,6 +730,8 @@ export const App: React.FC = () => {
                   showToast={showToast}
                   onEditVariant={(v) => handleOpenEditVariant(v, selectedProduct.name)}
                   onToggleVariantStatus={handleToggleVariantStatus}
+                  onMoveVariant={(v) => handleOpenMoveVariants(selectedProduct, [v])}
+                  onPromoteVariant={(v) => handleOpenPromoteVariant(selectedProduct, v)}
                   onRefresh={() => {
                     loadProducts();
                     loadSummary();
@@ -687,6 +756,8 @@ export const App: React.FC = () => {
                   onEditVariant={(v) => handleOpenEditVariant(v, selectedProduct.name)}
                   onToggleProductStatus={handleToggleProductStatus}
                   onToggleVariantStatus={handleToggleVariantStatus}
+                  onMergeProduct={(p) => handleOpenMergeProduct(p)}
+                  onMoveVariants={(vars) => handleOpenMoveVariants(selectedProduct, vars)}
                 />
               ) : (
                 <ProductListView
@@ -893,6 +964,52 @@ export const App: React.FC = () => {
             loadProducts();
             loadSummary();
           }}
+          showToast={showToast}
+        />
+      )}
+
+      {can('products:update') && moveVariantSourceProduct && (
+        <MoveVariantModal
+          isOpen={isMoveVariantOpen}
+          onClose={() => {
+            setIsMoveVariantOpen(false);
+            setMoveVariantSourceProduct(null);
+            setMoveVariantsList([]);
+          }}
+          sourceProduct={moveVariantSourceProduct}
+          variantsToMove={moveVariantsList}
+          allProducts={products}
+          onSuccess={(targetId) => handleRestructureSuccess(targetId)}
+          showToast={showToast}
+        />
+      )}
+
+      {can('products:update') && mergeProductSource && (
+        <MergeProductModal
+          isOpen={isMergeProductOpen}
+          onClose={() => {
+            setIsMergeProductOpen(false);
+            setMergeProductSource(null);
+          }}
+          sourceProduct={mergeProductSource}
+          allProducts={products}
+          onSuccess={(targetId) => handleRestructureSuccess(targetId)}
+          showToast={showToast}
+        />
+      )}
+
+      {can('products:create') && promoteVariantSourceProduct && promoteVariantItem && (
+        <PromoteVariantModal
+          isOpen={isPromoteVariantOpen}
+          onClose={() => {
+            setIsPromoteVariantOpen(false);
+            setPromoteVariantSourceProduct(null);
+            setPromoteVariantItem(null);
+          }}
+          sourceProduct={promoteVariantSourceProduct}
+          variant={promoteVariantItem}
+          categories={categoriesTree}
+          onSuccess={(newId) => handleRestructureSuccess(newId)}
           showToast={showToast}
         />
       )}
