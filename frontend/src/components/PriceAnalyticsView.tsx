@@ -464,26 +464,42 @@ export const PriceAnalyticsView: React.FC = () => {
                               Rp {formatIdNumber(item.sell_price, false)}
                             </td>
                             <td className="p-3">
-                              <span
-                                className={`font-black text-xs ${
-                                  item.status === 'LOSS'
-                                    ? 'text-rose-600 dark:text-rose-400'
-                                    : 'text-amber-600 dark:text-amber-400'
-                                }`}
-                              >
-                                {item.gross_margin.toFixed(1).replace('.', ',')}%
-                              </span>
+                              {(() => {
+                                const m = item.gross_margin ?? item.gross_margin_pct;
+                                const isLoss =
+                                  item.status === 'LOSS' ||
+                                  item.alert_level === 'CRITICAL' ||
+                                  (typeof m === 'number' && m <= 0);
+                                return (
+                                  <span
+                                    className={`font-black text-xs ${
+                                      isLoss
+                                        ? 'text-rose-600 dark:text-rose-400'
+                                        : 'text-amber-600 dark:text-amber-400'
+                                    }`}
+                                  >
+                                    {typeof m === 'number' ? `${m.toFixed(1).replace('.', ',')}%` : '-'}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="p-3">
-                              {item.status === 'LOSS' ? (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300">
-                                  Jual Rugi
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">
-                                  Kritis (&lt;{overview.margin_threshold}%)
-                                </span>
-                              )}
+                              {(() => {
+                                const m = item.gross_margin ?? item.gross_margin_pct;
+                                const isLoss =
+                                  item.status === 'LOSS' ||
+                                  item.alert_level === 'CRITICAL' ||
+                                  (typeof m === 'number' && m <= 0);
+                                return isLoss ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300">
+                                    Jual Rugi
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">
+                                    Kritis (&lt;{overview.margin_threshold}%)
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="p-3 text-[11px] text-slate-500">
                               <div>{item.category_name || '-'}</div>
@@ -528,7 +544,10 @@ export const PriceAnalyticsView: React.FC = () => {
                           </div>
                           <div className="text-right">
                             <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 block">
-                              +{inc.sell_price_percent_change.toFixed(1).replace('.', ',')}%
+                              +{(() => {
+                                const p = inc.sell_price_percent_change ?? inc.sell_price_change_pct ?? 0;
+                                return typeof p === 'number' ? p.toFixed(1).replace('.', ',') : p;
+                              })()}%
                             </span>
                             <span className="text-[10px] text-slate-400">
                               Rp {formatIdNumber(inc.old_sell_price, false)} →{' '}
@@ -567,7 +586,10 @@ export const PriceAnalyticsView: React.FC = () => {
                             <div className="flex items-center gap-3">
                               <span className="text-[10px] text-slate-400">{s.change_count}x penyesuaian</span>
                               <span className="text-xs font-bold text-rose-600 dark:text-rose-400">
-                                Rata-rata +{s.avg_buy_percent_change.toFixed(1).replace('.', ',')}%
+                                Rata-rata +{(() => {
+                                  const p = s.avg_buy_percent_change ?? s.avg_increase_pct ?? 0;
+                                  return typeof p === 'number' ? p.toFixed(1).replace('.', ',') : p;
+                                })()}%
                               </span>
                             </div>
                           </div>
@@ -600,7 +622,10 @@ export const PriceAnalyticsView: React.FC = () => {
                             <div className="flex items-center gap-3">
                               <span className="text-[10px] text-slate-400">{c.change_count}x perubahan</span>
                               <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                                Rata-rata +{c.avg_sell_percent_change.toFixed(1).replace('.', ',')}%
+                                Rata-rata +{(() => {
+                                  const p = c.avg_sell_percent_change ?? c.avg_sell_increase_pct ?? 0;
+                                  return typeof p === 'number' ? p.toFixed(1).replace('.', ',') : p;
+                                })()}%
                               </span>
                             </div>
                           </div>
@@ -772,17 +797,19 @@ export const PriceAnalyticsView: React.FC = () => {
                           </div>
                           {row.sell_price_diff !== 0 && (
                             <div className="text-[10px]">
-                              {row.sell_price_diff > 0 ? (
-                                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                                  +{formatIdNumber(row.sell_price_diff, false)} (+
-                                  {row.sell_price_percent_change.toFixed(1).replace('.', ',')}%)
-                                </span>
-                              ) : (
-                                <span className="font-semibold text-rose-600 dark:text-rose-400">
-                                  -{formatIdNumber(Math.abs(row.sell_price_diff), false)} (
-                                  {row.sell_price_percent_change.toFixed(1).replace('.', ',')}%)
-                                </span>
-                              )}
+                              {(() => {
+                                const p = row.sell_price_percent_change ?? (row as any).sell_price_change_pct ?? 0;
+                                const pStr = typeof p === 'number' ? p.toFixed(1).replace('.', ',') : p;
+                                return row.sell_price_diff > 0 ? (
+                                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                    +{formatIdNumber(row.sell_price_diff, false)} (+{pStr}%)
+                                  </span>
+                                ) : (
+                                  <span className="font-semibold text-rose-600 dark:text-rose-400">
+                                    -{formatIdNumber(Math.abs(row.sell_price_diff), false)} ({pStr}%)
+                                  </span>
+                                );
+                              })()}
                             </div>
                           )}
                         </td>
@@ -823,9 +850,9 @@ export const PriceAnalyticsView: React.FC = () => {
 
                         {canViewBuyPrice && (
                           <td className="p-3">
-                            {row.gross_margin_after !== null ? (
+                            {typeof row.gross_margin_after === 'number' ? (
                               <div className="flex items-center gap-1">
-                                {row.gross_margin_before !== null && (
+                                {typeof row.gross_margin_before === 'number' && (
                                   <span className="text-slate-400 text-[10px]">
                                     {row.gross_margin_before.toFixed(1).replace('.', ',')}% →
                                   </span>

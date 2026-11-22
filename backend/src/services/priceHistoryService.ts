@@ -539,24 +539,80 @@ export class PriceHistoryService {
       };
     }
 
+    // Format units_summary as an array (VariantUnitPriceSummary[])
+    const unitsSummaryList = (variant.units || []).map((u: any) => {
+      const records = unitsMap.get(u.unit_name) || [];
+      const first = records[0];
+      const last = records[records.length - 1];
+
+      const currentSell = Number(u.sell_price) || 0;
+      const currentBuy = Number(u.buy_price) || 0;
+      const currentWholesale = u.wholesale_price ? Number(u.wholesale_price) : null;
+      const initialSell = first ? Number(first.old_sell_price ?? first.new_sell_price) : currentSell;
+      const initialBuy = first ? Number(first.old_buy_price ?? first.new_buy_price) : currentBuy;
+
+      const currentMargin = this.calculateGrossMargin(currentSell, currentBuy);
+      const currentMarkup = this.calculateMarkup(currentSell, currentBuy);
+
+      const sellPrices = records.map((r: any) => Number(r.new_sell_price)).filter((p: number) => p > 0);
+      const minSell = sellPrices.length > 0 ? Math.min(...sellPrices) : currentSell;
+      const maxSell = sellPrices.length > 0 ? Math.max(...sellPrices) : currentSell;
+      const avgSell =
+        sellPrices.length > 0
+          ? sellPrices.reduce((a: number, b: number) => a + b, 0) / sellPrices.length
+          : currentSell;
+
+      return {
+        unit_id: u.id,
+        unit_name: u.unit_name,
+        conversion_factor: Number(u.conversion_factor) || 1,
+        is_base_unit: Boolean(u.is_base_unit),
+        current_sell_price: currentSell,
+        current_buy_price: options.includeBuyPrice ? currentBuy : null,
+        current_wholesale_price: currentWholesale,
+        current_gross_margin: options.includeBuyPrice ? currentMargin : null,
+        current_margin_pct: options.includeBuyPrice ? currentMargin : null,
+        current_markup: options.includeBuyPrice ? currentMarkup : null,
+        current_markup_pct: options.includeBuyPrice ? currentMarkup : null,
+        min_sell_price: minSell,
+        max_sell_price: maxSell,
+        avg_sell_price: Math.round(avgSell),
+        all_time_sell_diff: currentSell - initialSell,
+        all_time_sell_percent_change:
+          initialSell > 0 ? Number((((currentSell - initialSell) / initialSell) * 100).toFixed(2)) : 0,
+        history_count: records.length,
+        total_changes: records.length,
+        last_changed_at: last ? last.created_at : null,
+        last_changed_by: last ? last.created_by_name || last.created_by_username || null : null,
+        last_reason: last ? last.reason || null : null,
+      };
+    });
+
     // Time-series points formatted for frontend charting
     const timeSeries = historyRows.map((r: any) => {
       const sell = Number(r.new_sell_price);
       const buy = Number(r.new_buy_price);
       const wholesale = r.new_wholesale_price ? Number(r.new_wholesale_price) : null;
+      const grossMargin = options.includeBuyPrice ? this.calculateGrossMargin(sell, buy) : null;
+      const markup = options.includeBuyPrice ? this.calculateMarkup(sell, buy) : null;
       return {
         id: r.id,
+        date: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
         created_at: r.created_at,
         unit_name: r.unit_name,
         sell_price: sell,
         buy_price: options.includeBuyPrice ? buy : null,
         wholesale_price: wholesale,
-        gross_margin_pct: options.includeBuyPrice ? this.calculateGrossMargin(sell, buy) : null,
-        markup_pct: options.includeBuyPrice ? this.calculateMarkup(sell, buy) : null,
+        gross_margin: grossMargin,
+        gross_margin_pct: grossMargin,
+        markup: markup,
+        markup_pct: markup,
         direction: r.change_direction,
         source: r.change_source,
+        change_source: r.change_source,
         reason: r.reason,
         reference_no: r.reference_no,
+        created_by: r.created_by_name || r.created_by_username || null,
       };
     });
 
@@ -571,8 +627,10 @@ export class PriceHistoryService {
         supplier_name: variant.supplier_name,
         units: variant.units,
       },
-      units_summary: unitsSummary,
+      units_summary: unitsSummaryList,
+      units_summary_map: unitsSummary,
       time_series: timeSeries,
+      total_changes: historyRows.length,
     };
   }
 
@@ -585,36 +643,12 @@ export class PriceHistoryService {
   ) {
     const threshold = await this.getMarginThreshold();
 
-    // Ambil data produk & seluruh varian beserta satuan dasar
     const productRes = await query(
-      `SELECT p.id, p.name, p.sku, p.supplier_id, s.name as supplier_name,
-              COALESCE(
-                json_agg(
-                  json_build_object(
-                    'id', pv.id,
-                    'variant_name', pv.variant_name,
-                    'sku', pv.sku,
-                    'current_stock', pv.current_stock,
-                    'is_active', pv.is_active,
-                    'base_unit', (
-                      SELECT json_build_object(
-                        'unit_name', vu.unit_name,
-                        'buy_price', vu.buy_price,
-                        'sell_price', vu.sell_price,
-                        'wholesale_price', vu.wholesale_price
-                      )
-                      FROM variant_units vu
-                      WHERE vu.variant_id = pv.id AND vu.is_base_unit = TRUE
-                      LIMIT 1
-                    )
-                  )
-                ) FILTER (WHERE pv.id IS NOT NULL), '[]'
-              ) as variants
+      `SELECT p.id, p.name, p.sku, p.supplier_id, s.name as supplier_name, c.name as category_name
        FROM products p
        LEFT JOIN suppliers s ON p.supplier_id = s.id
-       LEFT JOIN product_variants pv ON pv.product_id = p.id
-       WHERE p.id = $1
-       GROUP BY p.id, s.name`,
+       LEFT JOIN categories c ON p.category_id = c.id
+       WHERE p.id = $1`,
       [productId]
     );
 
@@ -623,7 +657,44 @@ export class PriceHistoryService {
     }
 
     const prod = productRes.rows[0];
-    const variantsList = prod.variants || [];
+
+    // Ambil semua varian dan satuan terkait
+    const variantsRes = await query(
+      `SELECT pv.id, pv.variant_name, pv.sku, pv.current_stock, pv.is_active,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', vu.id,
+                    'unit_name', vu.unit_name,
+                    'conversion_factor', vu.conversion_factor,
+                    'is_base_unit', vu.is_base_unit,
+                    'buy_price', vu.buy_price,
+                    'sell_price', vu.sell_price,
+                    'wholesale_price', vu.wholesale_price
+                  ) ORDER BY vu.is_base_unit DESC, vu.conversion_factor ASC
+                ) FILTER (WHERE vu.id IS NOT NULL), '[]'
+              ) as units
+       FROM product_variants pv
+       LEFT JOIN variant_units vu ON vu.variant_id = pv.id
+       WHERE pv.product_id = $1 AND pv.is_active = TRUE
+       GROUP BY pv.id, pv.variant_name, pv.sku, pv.current_stock, pv.is_active
+       ORDER BY pv.variant_name ASC`,
+      [productId]
+    );
+
+    const variantsList = variantsRes.rows;
+
+    // Ambil histori harga produk ini untuk time series & audit
+    const productHistoryRes = await query(
+      `SELECT ph.*, pv.variant_name, pv.sku as variant_sku
+       FROM price_history ph
+       JOIN product_variants pv ON ph.variant_id = pv.id
+       WHERE ph.product_id = $1
+       ORDER BY ph.created_at ASC`,
+      [productId]
+    );
+
+    const productHistoryRows = productHistoryRes.rows;
 
     // Evaluasi margin varian & deteksi alert
     let totalMargin = 0;
@@ -631,43 +702,132 @@ export class PriceHistoryService {
     let criticalCount = 0;
     let warningCount = 0;
 
-    const variantStatusList = variantsList.map((v: any) => {
-      const bu = v.base_unit;
-      if (!bu) return { ...v, status: 'NO_UNIT' };
+    const variantStatusList: any[] = [];
+    const variantsSummary: any[] = [];
 
-      const buy = Number(bu.buy_price) || 0;
-      const sell = Number(bu.sell_price) || 0;
-      const wholesale = bu.wholesale_price ? Number(bu.wholesale_price) : null;
-      const margin = this.calculateGrossMargin(sell, buy);
+    for (const v of variantsList) {
+      const units = v.units || [];
+      const baseUnit = units.find((u: any) => u.is_base_unit) || units[0];
 
-      let status = 'HEALTHY';
-      if (sell <= buy || (wholesale !== null && wholesale <= buy)) {
-        status = 'CRITICAL';
-        criticalCount++;
-      } else if (margin !== null && margin < threshold) {
-        status = 'WARNING';
-        warningCount++;
+      if (baseUnit) {
+        const bSell = Number(baseUnit.sell_price) || 0;
+        const bBuy = Number(baseUnit.buy_price) || 0;
+        const bWholesale = baseUnit.wholesale_price ? Number(baseUnit.wholesale_price) : null;
+        const bMargin = this.calculateGrossMargin(bSell, bBuy);
+
+        let status = 'HEALTHY';
+        if (bSell <= bBuy || (bWholesale !== null && bWholesale <= bBuy)) {
+          status = 'CRITICAL';
+          criticalCount++;
+        } else if (bMargin !== null && bMargin < threshold) {
+          status = 'WARNING';
+          warningCount++;
+        }
+
+        if (bMargin !== null) {
+          totalMargin += bMargin;
+          marginCount++;
+        }
+
+        variantStatusList.push({
+          variant_id: v.id,
+          variant_name: v.variant_name,
+          sku: v.sku,
+          unit_name: baseUnit.unit_name,
+          sell_price: bSell,
+          buy_price: options.includeBuyPrice ? bBuy : null,
+          wholesale_price: bWholesale,
+          gross_margin: options.includeBuyPrice ? bMargin : null,
+          gross_margin_pct: options.includeBuyPrice ? bMargin : null,
+          status,
+        });
       }
 
-      if (margin !== null) {
-        totalMargin += margin;
-        marginCount++;
-      }
+      // Bangun units array (VariantUnitPriceSummary[]) untuk varian ini
+      const unitSummaries = units.map((u: any) => {
+        const uRecords = productHistoryRows.filter(
+          (r) => r.variant_id === v.id && (r.variant_unit_id === u.id || r.unit_name === u.unit_name)
+        );
+        const first = uRecords[0];
+        const last = uRecords[uRecords.length - 1];
 
-      return {
+        const cSell = Number(u.sell_price) || 0;
+        const cBuy = Number(u.buy_price) || 0;
+        const cWholesale = u.wholesale_price ? Number(u.wholesale_price) : null;
+        const iSell = first ? Number(first.old_sell_price ?? first.new_sell_price) : cSell;
+        const iBuy = first ? Number(first.old_buy_price ?? first.new_buy_price) : cBuy;
+
+        const cMargin = this.calculateGrossMargin(cSell, cBuy);
+        const cMarkup = this.calculateMarkup(cSell, cBuy);
+
+        const sPrices = uRecords.map((r) => Number(r.new_sell_price)).filter((p) => p > 0);
+        const minS = sPrices.length > 0 ? Math.min(...sPrices) : cSell;
+        const maxS = sPrices.length > 0 ? Math.max(...sPrices) : cSell;
+        const avgS = sPrices.length > 0 ? sPrices.reduce((a, b) => a + b, 0) / sPrices.length : cSell;
+
+        return {
+          unit_id: u.id,
+          unit_name: u.unit_name,
+          conversion_factor: Number(u.conversion_factor) || 1,
+          is_base_unit: Boolean(u.is_base_unit),
+          current_sell_price: cSell,
+          current_buy_price: options.includeBuyPrice ? cBuy : null,
+          current_wholesale_price: cWholesale,
+          current_gross_margin: options.includeBuyPrice ? cMargin : null,
+          current_margin_pct: options.includeBuyPrice ? cMargin : null,
+          current_markup: options.includeBuyPrice ? cMarkup : null,
+          current_markup_pct: options.includeBuyPrice ? cMarkup : null,
+          min_sell_price: minS,
+          max_sell_price: maxS,
+          avg_sell_price: Math.round(avgS),
+          all_time_sell_diff: cSell - iSell,
+          all_time_sell_percent_change:
+            iSell > 0 ? Number((((cSell - iSell) / iSell) * 100).toFixed(2)) : 0,
+          history_count: uRecords.length,
+          total_changes: uRecords.length,
+          last_changed_at: last ? last.created_at : null,
+          last_changed_by: last ? last.created_by_name || last.created_by_username || null : null,
+          last_reason: last ? last.reason || null : null,
+        };
+      });
+
+      variantsSummary.push({
         variant_id: v.id,
         variant_name: v.variant_name,
         sku: v.sku,
-        unit_name: bu.unit_name,
+        units: unitSummaries,
+      });
+    }
+
+    const avgMargin = marginCount > 0 ? Number((totalMargin / marginCount).toFixed(2)) : null;
+
+    // Time-series across all variants of this product
+    const timeSeries = productHistoryRows.map((r: any) => {
+      const sell = Number(r.new_sell_price);
+      const buy = Number(r.new_buy_price);
+      const wholesale = r.new_wholesale_price ? Number(r.new_wholesale_price) : null;
+      const grossMargin = options.includeBuyPrice ? this.calculateGrossMargin(sell, buy) : null;
+      const markup = options.includeBuyPrice ? this.calculateMarkup(sell, buy) : null;
+      return {
+        id: r.id,
+        date: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+        created_at: r.created_at,
+        unit_name: `${r.variant_name} - ${r.unit_name}`,
         sell_price: sell,
         buy_price: options.includeBuyPrice ? buy : null,
         wholesale_price: wholesale,
-        gross_margin_pct: options.includeBuyPrice ? margin : null,
-        status,
+        gross_margin: grossMargin,
+        gross_margin_pct: grossMargin,
+        markup: markup,
+        markup_pct: markup,
+        direction: r.change_direction,
+        source: r.change_source,
+        change_source: r.change_source,
+        reason: r.reason,
+        reference_no: r.reference_no,
+        created_by: r.created_by_name || r.created_by_username || null,
       };
     });
-
-    const avgMargin = marginCount > 0 ? Number((totalMargin / marginCount).toFixed(2)) : null;
 
     // Ambil histori 10 perubahan harga terakhir pada produk ini
     const recentHistory = await this.getHistory(
@@ -680,6 +840,7 @@ export class PriceHistoryService {
         id: prod.id,
         name: prod.name,
         sku: prod.sku,
+        category_name: prod.category_name || null,
         supplier_id: prod.supplier_id,
         supplier_name: prod.supplier_name,
       },
@@ -690,7 +851,10 @@ export class PriceHistoryService {
         warning_alerts_count: options.includeBuyPrice ? warningCount : 0,
         margin_threshold_pct: threshold,
       },
+      variants_summary: variantsSummary,
       variants_status: variantStatusList,
+      time_series: timeSeries,
+      total_changes: productHistoryRows.length,
       recent_history: recentHistory.items,
     };
   }
@@ -798,7 +962,9 @@ export class PriceHistoryService {
         const grossMargin = PriceHistoryService.calculateGrossMargin(sell, buy);
         const markup = PriceHistoryService.calculateMarkup(sell, buy);
 
-        const isCritical = sell <= buy || (wholesale !== null && wholesale <= buy);
+        const isLoss = sell <= buy || (wholesale !== null && wholesale <= buy) || (grossMargin !== null && grossMargin <= 0);
+        const alertLevel = isLoss ? 'CRITICAL' : 'WARNING';
+        const status = isLoss ? 'LOSS' : (grossMargin !== null && grossMargin < threshold ? 'CRITICAL' : 'WARNING');
 
         return {
           unit_id: row.unit_id,
@@ -806,18 +972,23 @@ export class PriceHistoryService {
           variant_id: row.variant_id,
           variant_name: row.variant_name,
           variant_sku: row.variant_sku,
+          sku: row.variant_sku || '',
           product_id: row.product_id,
           product_name: row.product_name,
+          supplier_id: row.supplier_id,
           supplier_name: row.supplier_name,
           category_name: row.category_name,
           current_stock: Number(row.current_stock) || 0,
           buy_price: buy,
           sell_price: sell,
           wholesale_price: wholesale,
-          gross_margin_pct: grossMargin,
-          markup_pct: markup,
-          alert_level: isCritical ? 'CRITICAL' : 'WARNING',
-          alert_reason: isCritical
+          gross_margin: grossMargin ?? 0,
+          gross_margin_pct: grossMargin ?? 0,
+          markup: markup ?? 0,
+          markup_pct: markup ?? 0,
+          alert_level: alertLevel,
+          status,
+          alert_reason: isLoss
             ? sell <= buy
               ? 'Harga jual di bawah/sama dengan modal (Jual Rugi)'
               : 'Harga grosir di bawah/sama dengan modal'
@@ -845,18 +1016,45 @@ export class PriceHistoryService {
     `);
 
     const topIncreases = topIncreasesRes.rows.map((r: any) => {
-      if (!options.includeBuyPrice) {
-        return {
-          ...r,
-          old_buy_price: null,
-          new_buy_price: null,
-          buy_price_diff: null,
-          buy_price_change_pct: null,
-          old_margin_pct: null,
-          new_margin_pct: null,
-        };
-      }
-      return r;
+      const sellDiff = Number(r.sell_price_diff) || 0;
+      const sellPct = r.sell_price_change_pct !== null ? Number(r.sell_price_change_pct) : 0;
+      const buyDiff = r.buy_price_diff !== null ? Number(r.buy_price_diff) : null;
+      const buyPct = r.buy_price_change_pct !== null ? Number(r.buy_price_change_pct) : null;
+      const oldSell = r.old_sell_price !== null ? Number(r.old_sell_price) : 0;
+      const newSell = Number(r.new_sell_price) || 0;
+      const oldBuy = r.old_buy_price !== null ? Number(r.old_buy_price) : null;
+      const newBuy = r.new_buy_price !== null ? Number(r.new_buy_price) : null;
+
+      const oldMargin = r.old_margin_pct !== null ? Number(r.old_margin_pct) : null;
+      const newMargin = r.new_margin_pct !== null ? Number(r.new_margin_pct) : null;
+
+      return {
+        id: r.id,
+        created_at: r.created_at,
+        date: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+        product_id: r.product_id,
+        product_name: r.product_name,
+        variant_id: r.variant_id,
+        variant_name: r.variant_name,
+        sku: r.variant_sku || '',
+        variant_sku: r.variant_sku || '',
+        unit_name: r.unit_name,
+        old_sell_price: oldSell,
+        new_sell_price: newSell,
+        sell_price_diff: sellDiff,
+        sell_price_change_pct: sellPct,
+        sell_price_percent_change: sellPct,
+        old_buy_price: options.includeBuyPrice ? oldBuy : null,
+        new_buy_price: options.includeBuyPrice ? newBuy : null,
+        buy_price_diff: options.includeBuyPrice ? buyDiff : null,
+        buy_price_change_pct: options.includeBuyPrice ? buyPct : null,
+        buy_price_percent_change: options.includeBuyPrice ? buyPct : null,
+        old_margin_pct: options.includeBuyPrice ? oldMargin : null,
+        new_margin_pct: options.includeBuyPrice ? newMargin : null,
+        gross_margin_before: options.includeBuyPrice ? oldMargin : null,
+        gross_margin_after: options.includeBuyPrice ? newMargin : null,
+        supplier_name: r.supplier_name,
+      };
     });
 
     // 3. Ringkasan Inflasi Harga per Supplier
@@ -878,7 +1076,18 @@ export class PriceHistoryService {
         ORDER BY avg_increase_pct DESC NULLS LAST
         LIMIT 10
       `);
-      supplierInflation = suppRes.rows;
+      supplierInflation = suppRes.rows.map((s: any) => {
+        const avgInc = s.avg_increase_pct !== null ? Number(s.avg_increase_pct) : 0;
+        return {
+          supplier_id: s.supplier_id,
+          supplier_name: s.supplier_name,
+          change_count: Number(s.change_count) || 0,
+          increase_count: Number(s.increase_count) || 0,
+          avg_increase_pct: avgInc,
+          avg_buy_percent_change: avgInc,
+          last_changed_at: s.last_changed_at,
+        };
+      });
     }
 
     // 4. Ringkasan Inflasi Harga per Kategori
@@ -905,6 +1114,27 @@ export class PriceHistoryService {
       LIMIT 10
     `);
 
+    const categoryInflation = categoryInflationRes.rows.map((c: any) => {
+      const avgSellInc = c.avg_sell_increase_pct !== null ? Number(c.avg_sell_increase_pct) : 0;
+      const avgBuyInc =
+        c.avg_buy_increase_pct !== undefined && c.avg_buy_increase_pct !== null
+          ? Number(c.avg_buy_increase_pct)
+          : 0;
+      return {
+        category_id: c.category_id,
+        category_name: c.category_name,
+        change_count: Number(c.change_count) || 0,
+        sell_increase_count: Number(c.sell_increase_count) || 0,
+        avg_sell_increase_pct: avgSellInc,
+        avg_sell_percent_change: avgSellInc,
+        buy_increase_count:
+          c.buy_increase_count !== undefined ? Number(c.buy_increase_count) || 0 : undefined,
+        avg_buy_increase_pct: avgBuyInc,
+        avg_buy_percent_change: avgBuyInc,
+        last_changed_at: c.last_changed_at,
+      };
+    });
+
     // 5. KPI Ringkasan Global
     const kpiRes = await query(`
       SELECT
@@ -916,15 +1146,15 @@ export class PriceHistoryService {
       WHERE created_at >= (CURRENT_TIMESTAMP - ${intervalSql})
     `);
 
-    const criticalCount = marginAlerts.filter((a) => a.alert_level === 'CRITICAL').length;
-    const warningCount = marginAlerts.filter((a) => a.alert_level === 'WARNING').length;
+    const criticalCount = marginAlerts.filter((a) => a.alert_level === 'CRITICAL' || a.status === 'LOSS').length;
+    const warningCount = marginAlerts.filter((a) => a.alert_level === 'WARNING' || a.status === 'CRITICAL').length;
 
     const summary = {
       total_price_changes_30d: Number(kpiRes.rows[0]?.total_changes) || 0,
       price_increases_30d: Number(kpiRes.rows[0]?.total_increases) || 0,
       price_decreases_30d: Number(kpiRes.rows[0]?.total_decreases) || 0,
       critical_margin_count: criticalCount,
-      loss_making_count: marginAlerts.filter((a) => a.alert_level === 'CRITICAL' || a.gross_margin <= 0).length,
+      loss_making_count: marginAlerts.filter((a) => a.alert_level === 'CRITICAL' || a.status === 'LOSS' || (a.gross_margin !== null && a.gross_margin <= 0)).length,
     };
 
     return {
@@ -943,7 +1173,7 @@ export class PriceHistoryService {
       margin_alerts: marginAlerts,
       top_increases: topIncreases,
       supplier_inflation: supplierInflation,
-      category_inflation: categoryInflationRes.rows,
+      category_inflation: categoryInflation,
     };
   }
 

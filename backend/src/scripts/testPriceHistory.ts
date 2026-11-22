@@ -157,7 +157,7 @@ async function runTests() {
     // 6. Variant & Product Price Analytics
     console.log('\n--- Test 6: Variant & Product Price Analytics ---');
     const variantAnalytics = await PriceHistoryService.getVariantAnalytics(variantId, { includeBuyPrice: true });
-    console.log(`Variant Analytics units: ${Object.keys(variantAnalytics.units_summary).length}, time series points: ${variantAnalytics.time_series.length}`);
+    console.log(`Variant Analytics units: ${variantAnalytics.units_summary.length}, time series points: ${variantAnalytics.time_series.length}`);
     if (variantAnalytics.time_series.length < 3) throw new Error('Expected at least 3 time series points');
 
     const productAnalytics = await PriceHistoryService.getProductAnalytics(createdProduct.id, { includeBuyPrice: true });

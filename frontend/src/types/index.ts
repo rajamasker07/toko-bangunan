@@ -739,49 +739,68 @@ export interface ProductPriceAnalytics {
 }
 
 export interface MarginAlertItem {
+  unit_id?: string;
   variant_id: string;
   variant_name: string;
   product_id: string;
   product_name: string;
   sku: string;
+  variant_sku?: string;
   unit_name: string;
-  buy_price: number;
+  buy_price: number | null;
   sell_price: number;
-  gross_margin: number;
-  markup: number;
+  wholesale_price?: number | null;
+  gross_margin?: number | null;
+  gross_margin_pct?: number | null;
+  markup?: number | null;
+  markup_pct?: number | null;
+  alert_level?: 'CRITICAL' | 'WARNING';
   status: 'LOSS' | 'CRITICAL' | 'WARNING';
   category_name?: string | null;
   supplier_name?: string | null;
+  current_stock?: number;
 }
 
 export interface PriceOverviewAnalytics {
   margin_threshold: number;
+  margin_threshold_pct?: number;
   margin_alerts: MarginAlertItem[];
   top_increases: Array<{
+    id?: string;
     variant_id: string;
     variant_name: string;
     product_id: string;
     product_name: string;
     sku: string;
+    variant_sku?: string;
     unit_name: string;
     old_sell_price: number;
     new_sell_price: number;
     sell_price_diff: number;
+    sell_price_change_pct?: number;
     sell_price_percent_change: number;
-    gross_margin_after: number | null;
+    gross_margin_before?: number | null;
+    gross_margin_after?: number | null;
     created_at: string;
+    date?: string;
   }>;
   supplier_inflation: Array<{
     supplier_id: string | null;
     supplier_name: string;
     change_count: number;
+    increase_count?: number;
     avg_buy_percent_change: number;
+    avg_increase_pct?: number;
+    last_changed_at?: string;
   }>;
   category_inflation: Array<{
     category_id: string | null;
     category_name: string;
     change_count: number;
+    sell_increase_count?: number;
     avg_sell_percent_change: number;
+    avg_sell_increase_pct?: number;
+    last_changed_at?: string;
   }>;
   summary: {
     total_price_changes_30d: number;

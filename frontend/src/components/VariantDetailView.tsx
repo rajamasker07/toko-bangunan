@@ -802,9 +802,9 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
 
                         {canViewBuyPrice && (
                           <td className="p-3">
-                            {row.gross_margin_after !== null ? (
+                            {typeof row.gross_margin_after === 'number' ? (
                               <div className="flex items-center gap-1">
-                                {row.gross_margin_before !== null && (
+                                {typeof row.gross_margin_before === 'number' && (
                                   <span className="text-slate-400 text-[10px]">
                                     {row.gross_margin_before.toFixed(1).replace('.', ',')}% →
                                   </span>

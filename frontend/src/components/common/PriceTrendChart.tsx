@@ -353,7 +353,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
               Gross Margin
             </span>
             <div className="flex items-center gap-1.5 mt-0.5">
-              {stats.latestMargin !== null ? (
+              {typeof stats.latestMargin === 'number' ? (
                 <>
                   <span
                     className={`text-base font-black ${
@@ -657,7 +657,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
                     </div>
                   )}
 
-                  {canViewBuyPrice && hoveredPoint.gross_margin !== null && (
+                  {canViewBuyPrice && typeof hoveredPoint.gross_margin === 'number' && (
                     <div className="flex justify-between items-center pt-1 border-t border-slate-800">
                       <span className="text-slate-400 text-[11px]">Gross Margin:</span>
                       <span
