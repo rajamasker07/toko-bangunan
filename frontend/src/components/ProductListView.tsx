@@ -27,7 +27,8 @@ import {
   Brain,
   RefreshCw,
   X,
-  GitMerge
+  GitMerge,
+  Loader2
 } from 'lucide-react';
 
 interface ProductListViewProps {
@@ -241,6 +242,7 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
   // Server Hybrid Search State
   const [serverSearchResults, setServerSearchResults] = useState<Product[] | null>(null);
   const [isSearchingServer, setIsSearchingServer] = useState(false);
+  const prevSearchModeRef = useRef<ProductSearchMode>(searchMode);
   const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatusResponse | null>(null);
   const [isReindexing, setIsReindexing] = useState(false);
 
@@ -292,9 +294,12 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
     }
   };
 
-  // Debounced server search with AbortController
+  // Debounced server search with AbortController (anti-race condition)
   useEffect(() => {
     const query = search.trim();
+    const modeChanged = prevSearchModeRef.current !== searchMode;
+    prevSearchModeRef.current = searchMode;
+
     if (!query) {
       setServerSearchResults(null);
       setIsSearchingServer(false);
@@ -303,6 +308,8 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
     setIsSearchingServer(true);
     const controller = new AbortController();
+    // Jika pengguna hanya mengganti mode pencarian pada kueri yang sudah ada, jalankan langsung (0ms)
+    const delayMs = modeChanged ? 0 : 300;
 
     const timer = setTimeout(async () => {
       try {
@@ -310,15 +317,19 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           { search: query, mode: searchMode },
           { signal: controller.signal }
         );
-        setServerSearchResults(results);
+        if (!controller.signal.aborted) {
+          setServerSearchResults(results);
+        }
       } catch (err: any) {
-        if (err.name !== 'AbortError') {
+        if (err.name !== 'AbortError' && !controller.signal.aborted) {
           console.error('Hybrid search error:', err);
         }
       } finally {
-        setIsSearchingServer(false);
+        if (!controller.signal.aborted) {
+          setIsSearchingServer(false);
+        }
       }
-    }, 300);
+    }, delayMs);
 
     return () => {
       clearTimeout(timer);
@@ -666,9 +677,25 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           </div>
 
           {isSearchingServer && (
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-600 dark:text-violet-400 animate-pulse">
-              <div className="w-2.5 h-2.5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-              <span>Mencari secara semantik...</span>
+            <div
+              className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all ${
+                searchMode === 'hybrid'
+                  ? 'bg-violet-50 dark:bg-violet-950/50 border-violet-200 dark:border-violet-800/70 text-violet-700 dark:text-violet-300'
+                  : searchMode === 'semantic'
+                    ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-200 dark:border-blue-800/70 text-blue-700 dark:text-blue-300'
+                    : 'bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800/70 text-amber-700 dark:text-amber-300'
+              }`}
+              role="status"
+              aria-live="polite"
+            >
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              <span>
+                {searchMode === 'hybrid'
+                  ? 'Mencari dengan Hybrid AI...'
+                  : searchMode === 'semantic'
+                    ? 'Menganalisis makna AI...'
+                    : 'Mencari kata kunci...'}
+              </span>
             </div>
           )}
         </div>
@@ -676,19 +703,41 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
           {/* Search Input */}
           <div className="sm:col-span-5 relative">
-            <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+            {isSearchingServer ? (
+              <Loader2
+                className={`w-4 h-4 absolute left-3.5 top-2.5 animate-spin ${
+                  searchMode === 'hybrid'
+                    ? 'text-violet-500'
+                    : searchMode === 'semantic'
+                      ? 'text-blue-500'
+                      : 'text-amber-500'
+                }`}
+              />
+            ) : (
+              <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-400" />
+            )}
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Cari keluhan, makna, merek, nama, atau SKU..."
-              className="w-full pl-9 pr-9 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              aria-busy={isSearchingServer}
+              className={`w-full pl-9 pr-9 py-2 rounded-xl border bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none transition-all ${
+                isSearchingServer
+                  ? searchMode === 'hybrid'
+                    ? 'border-violet-400 dark:border-violet-500 ring-2 ring-violet-500/20'
+                    : searchMode === 'semantic'
+                      ? 'border-blue-400 dark:border-blue-500 ring-2 ring-blue-500/20'
+                      : 'border-amber-400 dark:border-amber-500 ring-2 ring-amber-500/20'
+                  : 'border-slate-300 dark:border-slate-700 focus:ring-2 focus:ring-amber-500'
+              }`}
             />
             {search && (
               <button
                 type="button"
                 onClick={() => setSearch('')}
                 className="absolute right-3 top-2.5 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                title="Hapus kata kunci"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -871,6 +920,80 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           <div className="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           Memuat daftar produk...
         </div>
+      ) : isSearchingServer && filteredProducts.length === 0 ? (
+        <div
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden"
+          role="status"
+          aria-live="polite"
+        >
+          {/* Indeterminate Sliding Progress Bar */}
+          <div className="relative h-1 w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+            <div
+              className={`absolute inset-y-0 left-0 w-2/5 rounded-full animate-search-progress ${
+                searchMode === 'hybrid'
+                  ? 'bg-gradient-to-r from-violet-500 via-fuchsia-500 to-amber-400'
+                  : searchMode === 'semantic'
+                    ? 'bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-600'
+                    : 'bg-gradient-to-r from-amber-500 via-orange-400 to-amber-500'
+              }`}
+            />
+          </div>
+
+          {/* Banner Status Pencarian Aktif */}
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-center gap-3 bg-slate-50/70 dark:bg-slate-800/30">
+            <div
+              className={`p-2 rounded-xl ${
+                searchMode === 'hybrid'
+                  ? 'bg-violet-100 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400'
+                  : searchMode === 'semantic'
+                    ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'
+                    : 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400'
+              }`}
+            >
+              <Loader2 className="w-4 h-4 animate-spin" />
+            </div>
+            <div className="text-left">
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                {searchMode === 'hybrid'
+                  ? 'Sedang memproses pencarian Pintar (Hybrid AI)...'
+                  : searchMode === 'semantic'
+                    ? 'Sedang menganalisis makna kueri dengan AI...'
+                    : 'Sedang mencari produk yang cocok...'}
+              </p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Meminta hasil paling relevan dari server untuk{' '}
+                <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  &ldquo;{search.trim()}&rdquo;
+                </span>
+              </p>
+            </div>
+          </div>
+
+          {/* Animated Skeleton Rows */}
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {[0, 1, 2, 3, 4].map((idx) => (
+              <div
+                key={idx}
+                className="px-5 py-4 flex items-center justify-between gap-4 animate-pulse"
+                style={{ animationDelay: `${idx * 90}ms` }}
+              >
+                <div className="space-y-2 flex-1 min-w-0">
+                  <div className="h-3.5 bg-slate-200 dark:bg-slate-800 rounded-md w-2/5" />
+                  <div className="flex items-center gap-2">
+                    <div className="h-2.5 bg-slate-100 dark:bg-slate-800/80 rounded w-20" />
+                    <div className="h-2.5 bg-slate-100 dark:bg-slate-800/80 rounded w-28" />
+                  </div>
+                </div>
+                <div className="hidden sm:block space-y-1.5 w-32">
+                  <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded w-24" />
+                  <div className="h-2.5 bg-slate-100 dark:bg-slate-800/80 rounded w-16" />
+                </div>
+                <div className="hidden md:block h-5 bg-slate-200 dark:bg-slate-800 rounded-full w-20" />
+                <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded w-24" />
+              </div>
+            ))}
+          </div>
+        </div>
       ) : filteredProducts.length === 0 ? (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center space-y-3">
           <Package className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto" />
@@ -907,7 +1030,46 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
           </div>
         </div>
       ) : (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden relative">
+          {/* Top Indeterminate Progress Bar + Live Updating Strip saat pencarian sedang diproses */}
+          {isSearchingServer && (
+            <>
+              <div className="relative h-1 w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                <div
+                  className={`absolute inset-y-0 left-0 w-2/5 rounded-full animate-search-progress ${
+                    searchMode === 'hybrid'
+                      ? 'bg-gradient-to-r from-violet-500 via-fuchsia-500 to-amber-400'
+                      : searchMode === 'semantic'
+                        ? 'bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-600'
+                        : 'bg-gradient-to-r from-amber-500 via-orange-400 to-amber-500'
+                  }`}
+                />
+              </div>
+              <div
+                className={`px-4 py-2 border-b text-xs flex items-center justify-between gap-2 ${
+                  searchMode === 'hybrid'
+                    ? 'bg-violet-50/80 dark:bg-violet-950/30 border-violet-100 dark:border-violet-900/50 text-violet-700 dark:text-violet-300'
+                    : searchMode === 'semantic'
+                      ? 'bg-blue-50/80 dark:bg-blue-950/30 border-blue-100 dark:border-blue-900/50 text-blue-700 dark:text-blue-300'
+                      : 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-100 dark:border-amber-900/50 text-amber-800 dark:text-amber-300'
+                }`}
+                role="status"
+                aria-live="polite"
+              >
+                <div className="flex items-center gap-2 font-semibold">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span>
+                    {searchMode === 'hybrid'
+                      ? `Memperbarui hasil pencarian Hybrid AI untuk "${search.trim()}"...`
+                      : searchMode === 'semantic'
+                        ? `Menganalisis makna AI untuk "${search.trim()}"...`
+                        : `Memperbarui hasil pencarian untuk "${search.trim()}"...`}
+                  </span>
+                </div>
+                <span className="text-[10px] opacity-75 hidden sm:inline">Memproses di server</span>
+              </div>
+            </>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
@@ -946,7 +1108,11 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
                   <th className="py-3 px-4 text-right">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody
+                className={`divide-y divide-slate-100 dark:divide-slate-800 transition-opacity duration-200 ${
+                  isSearchingServer ? 'opacity-45 pointer-events-none select-none' : 'opacity-100'
+                }`}
+              >
                 {paginatedProducts.map((product) => {
                   const firstVariant = product.variants?.[0];
                   const primaryUnit = firstVariant?.units?.find((u) => u.is_base_unit) || firstVariant?.units?.[0];
