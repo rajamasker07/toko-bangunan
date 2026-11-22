@@ -2,6 +2,7 @@ import path from 'path';
 import { pool, query } from '../config/db.js';
 import { logger } from '../utils/logger.js';
 import { buildProductPassage } from '../utils/searchSynonyms.js';
+import { RerankerService, type RerankerModelStatus } from './rerankerService.js';
 
 export interface CachedVectorItem {
   productId: string;
@@ -15,6 +16,8 @@ export interface SemanticSearchResult {
   rawScore: number;
   similarityScore: number;
   rank: number;
+  passageText: string;
+  zScore: number;
 }
 
 export interface EmbeddingServiceStatus {
@@ -26,6 +29,11 @@ export interface EmbeddingServiceStatus {
   model_name: string;
   cache_size: number;
   last_reindex_at: string | null;
+  passage_version: number;
+  needs_reindex: boolean;
+  reranker_enabled: boolean;
+  reranker_status: RerankerModelStatus;
+  reranker_model: string | null;
   error?: string | null;
 }
 
@@ -46,8 +54,11 @@ export class EmbeddingService {
 
   public static readonly MODEL_NAME = 'Xenova/multilingual-e5-small';
   public static readonly DIMENSIONS = 384;
-  public static readonly RAW_CUTOFF_FLOOR = 0.765;
-  public static readonly RAW_CUTOFF_RELATIVE_GAP = 0.050;
+  public static readonly PASSAGE_VERSION = 2;
+  public static readonly RAW_CUTOFF_FLOOR = 0.828;
+  public static readonly RAW_CUTOFF_EXACT_FLOOR = 0.845;
+  public static readonly RAW_CUTOFF_RELATIVE_GAP = 0.028;
+  public static readonly Z_SCORE_MULTIPLIER = 1.85;
 
   /**
    * Mengambil pipeline extractor secara lazy dynamic import
@@ -164,18 +175,27 @@ export class EmbeddingService {
   }
 
   /**
+   * Mengambil teks passage produk yang tersimpan di cache memori (untuk Cross-Encoder reranking)
+   */
+  public static getPassageText(productId: string): string | undefined {
+    return this.vectorIndex.get(productId)?.passageText;
+  }
+
+  /**
    * Kalibrasi skor kosinus multilingual-e5 ke rentang manusiawi [0.65, 0.99]
    */
   public static calibrateScore(rawScore: number): number {
-    if (rawScore >= 0.995) return 1.0;
+    const ceiling = 0.96;
+    if (rawScore >= ceiling) return 0.99;
     if (rawScore <= this.RAW_CUTOFF_FLOOR) return 0.65;
-    const ratio = (rawScore - this.RAW_CUTOFF_FLOOR) / (1.0 - this.RAW_CUTOFF_FLOOR);
+    const ratio = (rawScore - this.RAW_CUTOFF_FLOOR) / (ceiling - this.RAW_CUTOFF_FLOOR);
     const scaled = 0.65 + ratio * (0.99 - 0.65);
     return Math.round(scaled * 100) / 100;
   }
 
   /**
-   * Mencari produk paling relevan secara semantik menggunakan in-memory cache
+   * Mencari produk paling relevan secara semantik menggunakan Adaptive Z-Score Thresholding
+   * + Floor Cutoff ketat + Relative Gap Cutoff untuk mencegah halusinasi.
    */
   public static async searchSimilarProducts(
     queryText: string,
@@ -184,12 +204,21 @@ export class EmbeddingService {
       topK?: number;
       minSimilarity?: number;
       hasExactMatch?: boolean;
+      zMultiplier?: number;
+      relativeGap?: number;
     }
   ): Promise<SemanticSearchResult[]> {
     if (!queryText || !queryText.trim()) return [];
 
-    const topK = options?.topK ?? 10;
-    const floorCutoff = options?.hasExactMatch ? 0.805 : (options?.minSimilarity ?? this.RAW_CUTOFF_FLOOR);
+    const topK = options?.topK ?? 12;
+    const floorCutoff =
+      options?.minSimilarity !== undefined
+        ? options.minSimilarity
+        : options?.hasExactMatch
+          ? this.RAW_CUTOFF_EXACT_FLOOR
+          : this.RAW_CUTOFF_FLOOR;
+    const zMultiplier = options?.zMultiplier ?? this.Z_SCORE_MULTIPLIER;
+    const relativeGap = options?.relativeGap ?? this.RAW_CUTOFF_RELATIVE_GAP;
 
     let queryVec: Float32Array;
     try {
@@ -199,11 +228,14 @@ export class EmbeddingService {
       return [];
     }
 
-    const candidateFilter = options?.candidateIds && options.candidateIds.length > 0
-      ? new Set(options.candidateIds)
-      : null;
+    const candidateFilter =
+      options?.candidateIds && options.candidateIds.length > 0
+        ? new Set(options.candidateIds)
+        : null;
 
-    const scored: Array<{ productId: string; rawScore: number }> = [];
+    // 1. Hitung skor kosinus terhadap seluruh kandidat untuk mendapatkan distribusi statistik katalog
+    const allScores: Array<{ productId: string; rawScore: number; passageText: string }> = [];
+    let scoreSum = 0;
 
     for (const [productId, item] of this.vectorIndex.entries()) {
       if (candidateFilter && !candidateFilter.has(productId)) {
@@ -211,26 +243,48 @@ export class EmbeddingService {
       }
 
       const rawScore = this.dotProduct(queryVec, item.vector);
-      if (rawScore >= floorCutoff) {
-        scored.push({ productId, rawScore });
-      }
+      allScores.push({ productId, rawScore, passageText: item.passageText });
+      scoreSum += rawScore;
     }
 
-    if (scored.length === 0) return [];
+    if (allScores.length === 0) return [];
 
-    // Urutkan dari skor tertinggi
-    scored.sort((a, b) => b.rawScore - a.rawScore);
+    // 2. Hitung mean (μ) dan standar deviasi (σ) skor katalog untuk Adaptive Z-Score Cutoff
+    const mean = scoreSum / allScores.length;
+    let varianceSum = 0;
+    for (const item of allScores) {
+      const diff = item.rawScore - mean;
+      varianceSum += diff * diff;
+    }
+    const stdDev = Math.sqrt(varianceSum / allScores.length);
 
-    const bestScore = scored[0].rawScore;
-    const relativeCutoff = bestScore - this.RAW_CUTOFF_RELATIVE_GAP;
+    // 3. Urutkan dari skor kosinus tertinggi
+    allScores.sort((a, b) => b.rawScore - a.rawScore);
 
-    const filtered = scored.filter((item) => item.rawScore >= relativeCutoff).slice(0, topK);
+    const bestScore = allScores[0].rawScore;
+    const zCutoff =
+      allScores.length >= 10 && stdDev > 1e-6 ? mean + zMultiplier * stdDev : floorCutoff;
+    const effectiveFloor = Math.max(floorCutoff, zCutoff);
+
+    // Jika bahkan skor terbaik tidak melewati ambang adaptif, kembalikan kosong (anti-halusinasi)
+    if (bestScore < effectiveFloor) {
+      return [];
+    }
+
+    const relativeCutoff = bestScore - relativeGap;
+    const finalCutoff = Math.max(effectiveFloor, relativeCutoff);
+
+    const filtered = allScores
+      .filter((item) => item.rawScore >= finalCutoff)
+      .slice(0, topK);
 
     return filtered.map((item, index) => ({
       productId: item.productId,
       rawScore: item.rawScore,
       similarityScore: this.calibrateScore(item.rawScore),
       rank: index + 1,
+      passageText: item.passageText,
+      zScore: stdDev > 1e-6 ? Math.round(((item.rawScore - mean) / stdDev) * 100) / 100 : 0,
     }));
   }
 
@@ -432,6 +486,8 @@ export class EmbeddingService {
       }
     }
 
+    this.queryCache.clear();
+    RerankerService.clearCache();
     this.lastReindexAt = new Date().toISOString();
     logger.info('AI_EMBEDDING', `Reindex selesai: ${indexed} berhasil, ${errors} gagal dari ${products.length} produk.`);
 
@@ -451,15 +507,31 @@ export class EmbeddingService {
       // 1. Cepat: Hidrasi produk yang sudah memiliki embedding dari database (< 50ms)
       await this.reloadIndexFromDb();
 
-      // 2. Latar Belakang: Cek apakah ada produk aktif tanpa embedding
-      const unindexed = await query(
-        `SELECT COUNT(*)::int as count FROM products WHERE is_active = TRUE AND embedding IS NULL`
-      );
-      const count = unindexed.rows[0]?.count || 0;
+      // 2. Latar Belakang: Cek apakah ada produk aktif tanpa embedding atau masih format v1 lama
+      const statsRes = await query(`
+        SELECT
+          COUNT(*) FILTER (WHERE embedding IS NULL)::int as unindexed_count,
+          COUNT(*) FILTER (WHERE embedding_text LIKE 'passage: Nama Produk:%')::int as legacy_count
+        FROM products
+        WHERE is_active = TRUE
+      `);
+      const unindexedCount = statsRes.rows[0]?.unindexed_count || 0;
+      const legacyCount = statsRes.rows[0]?.legacy_count || 0;
 
-      if (count > 0) {
-        logger.info('AI_EMBEDDING', `Ditemukan ${count} produk tanpa embedding, melakukan backfill otomatis...`);
-        // Lakukan backfill non-blocking
+      if (legacyCount > 0) {
+        logger.info(
+          'AI_EMBEDDING',
+          `Ditemukan ${legacyCount} produk dengan format passage v1 lama, menjalankan re-index Clean Passage v${this.PASSAGE_VERSION} di latar belakang...`
+        );
+        setTimeout(async () => {
+          try {
+            await this.reindexAllProducts({ force: true });
+          } catch (err: any) {
+            logger.warn('AI_EMBEDDING', `Pemberitahuan re-index background v2: ${err.message}`);
+          }
+        }, 1500);
+      } else if (unindexedCount > 0) {
+        logger.info('AI_EMBEDDING', `Ditemukan ${unindexedCount} produk tanpa embedding, melakukan backfill otomatis...`);
         setTimeout(async () => {
           try {
             await this.reindexAllProducts({ force: false });
@@ -477,24 +549,36 @@ export class EmbeddingService {
           }
         }, 500);
       }
+
+      // 3. Pemanasan Cross-Encoder Reranker secara non-blocking jika RERANKER_ENABLED=true
+      RerankerService.initializeInBackground();
     } catch (err: any) {
       logger.error('AI_EMBEDDING', `Gagal inisialisasi background embedding service: ${err.message}`, {}, err);
     }
   }
 
   /**
-   * Mengambil status kesehatan mesin AI lokal
+   * Mengambil status kesehatan mesin AI lokal (Bi-Encoder + Cross-Encoder Reranker)
    */
   public static async getStatus(): Promise<EmbeddingServiceStatus> {
     let totalProducts = 0;
+    let needsReindex = false;
     try {
-      const res = await query(`SELECT COUNT(*)::int as count FROM products WHERE is_active = TRUE`);
-      totalProducts = res.rows[0]?.count || 0;
+      const res = await query(`
+        SELECT
+          COUNT(*)::int as total_count,
+          COUNT(*) FILTER (WHERE embedding IS NULL OR embedding_text LIKE 'passage: Nama Produk:%')::int as stale_count
+        FROM products
+        WHERE is_active = TRUE
+      `);
+      totalProducts = res.rows[0]?.total_count || 0;
+      needsReindex = (res.rows[0]?.stale_count || 0) > 0;
     } catch {
       // Abaikan jika DB belum siap
     }
 
     const state = this.modelStatus;
+    const reranker = RerankerService.getStatus();
 
     return {
       status: state,
@@ -505,6 +589,11 @@ export class EmbeddingService {
       model_name: this.MODEL_NAME,
       cache_size: this.queryCache.size,
       last_reindex_at: this.lastReindexAt,
+      passage_version: this.PASSAGE_VERSION,
+      needs_reindex: needsReindex,
+      reranker_enabled: reranker.enabled,
+      reranker_status: reranker.status,
+      reranker_model: reranker.enabled ? reranker.model_name : null,
       error: this.modelError,
     };
   }

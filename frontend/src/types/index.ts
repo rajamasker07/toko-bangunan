@@ -142,6 +142,11 @@ export interface EmbeddingStatusResponse {
   model_name: string;
   cache_size: number;
   last_reindex_at: string | null;
+  passage_version?: number;
+  needs_reindex?: boolean;
+  reranker_enabled?: boolean;
+  reranker_status?: 'disabled' | 'initializing' | 'downloading' | 'ready' | 'error';
+  reranker_model?: string | null;
   error?: string | null;
 }
 
@@ -186,6 +191,7 @@ export interface Product {
   match_type?: ProductMatchType;
   similarity_score?: number;
   rrf_score?: number;
+  rerank_score?: number;
   matched_terms?: string[];
 }
 

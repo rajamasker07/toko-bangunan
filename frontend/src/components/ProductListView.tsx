@@ -518,21 +518,59 @@ export const ProductListView: React.FC<ProductListViewProps> = ({
 
         <div className="flex items-center gap-2.5 flex-wrap">
           {canManageAI && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-violet-200 dark:border-violet-900/50 bg-violet-50/70 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 text-xs">
-              <Brain className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+            <div
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs ${
+                embeddingStatus?.needs_reindex
+                  ? 'border-amber-300 dark:border-amber-800/70 bg-amber-50/80 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300'
+                  : 'border-violet-200 dark:border-violet-900/50 bg-violet-50/70 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300'
+              }`}
+              title={
+                embeddingStatus?.needs_reindex
+                  ? 'Format indeks AI telah diperbarui. Klik ikon refresh untuk menyinkronkan ulang seluruh produk.'
+                  : embeddingStatus?.reranker_enabled
+                    ? `Bi-Encoder: ${embeddingStatus.model_name} | Cross-Encoder Reranker: ${embeddingStatus.reranker_status} (${embeddingStatus.reranker_model})`
+                    : `Bi-Encoder Lokal: ${embeddingStatus?.model_name || 'multilingual-e5-small'}`
+              }
+            >
+              <Brain
+                className={`w-3.5 h-3.5 ${
+                  embeddingStatus?.needs_reindex
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-violet-600 dark:text-violet-400'
+                }`}
+              />
               <span className="font-semibold text-[11px]">
                 {embeddingStatus?.status === 'downloading'
-                  ? '⏳ Mengunduh AI...'
-                  : `AI Lokal: Siap (${embeddingStatus?.indexed_products ?? products.length}/${embeddingStatus?.total_products ?? products.length})`}
+                  ? 'Mengunduh AI...'
+                  : embeddingStatus?.needs_reindex
+                    ? `AI Perlu Re-Index (${embeddingStatus?.indexed_products ?? products.length}/${embeddingStatus?.total_products ?? products.length})`
+                    : `AI Lokal: Siap (${embeddingStatus?.indexed_products ?? products.length}/${embeddingStatus?.total_products ?? products.length})${
+                        embeddingStatus?.reranker_enabled && embeddingStatus?.reranker_status === 'ready'
+                          ? ' + Reranker'
+                          : ''
+                      }`}
               </span>
               <button
                 type="button"
                 onClick={handleReindex}
                 disabled={isReindexing}
-                className="ml-1 p-1 hover:bg-violet-200 dark:hover:bg-violet-900/60 rounded-md transition-colors"
+                className={`relative ml-1 p-1 rounded-md transition-colors ${
+                  embeddingStatus?.needs_reindex
+                    ? 'hover:bg-amber-200/80 dark:hover:bg-amber-900/60'
+                    : 'hover:bg-violet-200 dark:hover:bg-violet-900/60'
+                }`}
                 title="Sinkronkan Indeks Vektor AI Produk"
               >
-                <RefreshCw className={`w-3 h-3 text-violet-600 dark:text-violet-400 ${isReindexing ? 'animate-spin' : ''}`} />
+                {embeddingStatus?.needs_reindex && !isReindexing && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                )}
+                <RefreshCw
+                  className={`w-3 h-3 ${
+                    embeddingStatus?.needs_reindex
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-violet-600 dark:text-violet-400'
+                  } ${isReindexing ? 'animate-spin' : ''}`}
+                />
               </button>
             </div>
           )}

@@ -11,6 +11,7 @@
     "db:init": "tsx src/db/init.ts",
     "db:seed": "tsx src/db/seed.ts",
     "embeddings:backfill": "tsx src/scripts/backfillEmbeddings.ts",
+    "search:eval": "tsx src/scripts/evaluateSearch.ts",
     "logs": "tsx src/scripts/viewLogs.ts"
   },
   "keywords": [

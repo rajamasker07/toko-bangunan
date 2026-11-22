@@ -1,101 +1,291 @@
 /**
- * Kamus Sinonim & Istilah Masalah Sehari-hari Toko Bangunan (Domain Knowledge)
- * Digunakan untuk:
- * 1. Menghubungkan kueri bahasa sehari-hari / keluhan pelanggan (misal: "tembok rembes", "sambungan pipa belok")
- *    dengan nama produk teknis (misal: "Aquaproof", "Keni PVC AW Rucika").
- * 2. Memperkaya passage embedding produk agar representasi semantik lebih akurat.
- * 3. Memberikan skor leksikal multi-field berbobot tinggi.
+ * Kamus Sinonim, Word-Boundary Matching & Clean Passage Builder untuk Toko Bangunan
+ *
+ * Prinsip Anti-Halusinasi:
+ * 1. Semua pencocokan sinonim & domain menggunakan batas kata ketat (hasWholeTerm),
+ *    bukan .includes() mentah (menghilangkan polusi '&', 'mu' -> 'Mulia'/'Watermur', dll.).
+ * 2. Memisahkan Exact Synonyms (padanan 1-ke-1 seperti paralon <-> pipa pvc) dari
+ *    Problem Intents (keluhan seperti "tembok rembes" -> waterproofing).
+ * 3. Clean Natural Passage (v2) untuk embedding: tanpa SKU, Barcode, Supplier,
+ *    tanpa label template kaku berulang, dan tanpa polusi tag lintas kategori.
  */
+
+import { extractCandidateWords, scoreFuzzyTokenMatch } from './searchFuzzy.js';
 
 export interface SynonymGroup {
   category: string;
   keywords: string[];
+  negativeKeywords?: string[];
   intents: string[];
   relatedTerms: string[];
 }
 
-export const TOKOBANGUNAN_SYNONYMS: SynonymGroup[] = [
-  {
-    category: 'Waterproofing & Anti Bocor',
-    keywords: ['waterproofing', 'anti bocor', 'antibocor', 'pelapis anti bocor', 'kedap air', 'aquaproof', 'no drop', 'nodrop', 'damdex', 'sika', 'sealant', 'aspal cair', 'flashing tape'],
-    intents: ['tembok rembes', 'dinding rembes', 'atap bocor', 'dak bocor', 'genteng bocor', 'bocor hujan', 'dinding lembab', 'tembok basah', 'nat bocor', 'nambal retak', 'tambal bocor', 'nambal tembok'],
-    relatedTerms: ['cat pelapis', 'semen waterproofing', 'elastis', 'serat fiber', 'kasa fiber', 'membrane'],
-  },
-  {
-    category: 'Perpipaan & Fitting',
-    keywords: ['pipa', 'paralon', 'pralon', 'pvc', 'rucika', 'wavin', 'maspion', 'pipa aw', 'pipa d', 'fitting pvc', 'keni', 'knee', 'elbow', 'sok', 'sock', 'tee', 'letter t', 'drat', 'watermur', 'vlok ring', 'flange', 'lem pipa', 'lem pralon', 'isarplas', 'seal tape', 'sealtape'],
-    intents: ['pipa belok', 'sambungan belok', 'sambungan pipa belok', 'sambungan pipa air', 'cabang pipa', 'sambungan pipa cabang', 'sambung pralon', 'saluran pembuangan', 'saluran air kotor', 'pipa pompa air', 'pipa sanyo', 'pipa sumur', 'paralon bocor'],
-    relatedTerms: ['kran air', 'stop kran', 'valve', 'tandon', 'toren air', 'tutup pipa', 'dop'],
-  },
-  {
-    category: 'Semen & Mortar',
-    keywords: ['semen', 'semen pcc', 'semen opc', 'tiga roda', 'tigaroda', 'semen gresik', 'gresik', 'dynamix', 'holcim', 'padang', 'merdeka', 'mortar', 'semen instan', 'mu', 'mortar utama', 'acian', 'plester', 'plesteran', 'perekat bata ringan', 'thinbed'],
-    intents: ['cor beton', 'cor lantai', 'cor dak', 'cor pondasi', 'cor tiang', 'sloof', 'kolom', 'pondasi rumah', 'pasang hebel', 'pasang bata ringan', 'aci tembok', 'plester dinding', 'nambal semen'],
-    relatedTerms: ['pasir cor', 'split', 'batu krikil', 'obat cor', 'calbond', 'sikament', 'pengeras beton'],
-  },
-  {
-    category: 'Besi & Baja Tulangan',
-    keywords: ['besi', 'besi beton', 'besi ulir', 'besi polos', 'besi behel', 'begel', 'beugel', 'cakar ayam', 'wiremesh', 'baja ringan', 'kanal c', 'truss', 'reng baja', 'hollow', 'holo', 'pipa besi', 'plat besi', 'besi siku', 'bondek'],
-    intents: ['tulangan cor', 'tulangan pondasi', 'rangka atap', 'rangka plafon', 'tiang cor', 'pagar besi', 'tralis', 'besi anti karat', 'besi pondasi'],
-    relatedTerms: ['kawat bendrat', 'baut roofing', 'sekrup gypsum', 'dynabolt', 'sni'],
-  },
-  {
-    category: 'Cat & Finishing',
-    keywords: ['cat', 'cat tembok', 'cat dinding', 'cat kayu', 'cat besi', 'cat genteng', 'cat kolam', 'cat lapangan', 'dulux', 'catylac', 'avitex', 'vinilex', 'danapaint', 'jotun', 'nippon paint', 'aries', 'emco', 'ftalit', 'avian', 'plamir', 'dempul', 'thinner', 'tiner', 'meni besi', 'meni kayu'],
-    intents: ['cat anti karat', 'cat pagar besi', 'cat interior', 'cat eksterior', 'dinding kusam', 'cat tahan cuaca', 'cat mengelupas', 'menghilangkan karat', 'pelapis kayu', 'varnish', 'plitur', 'politur'],
-    relatedTerms: ['kuas cat', 'roll cat', 'bak cat', 'ampelas', 'amplas', 'kertas gosok', 'solasi kertas', 'masking tape'],
-  },
-  {
-    category: 'Keramik & Granit',
-    keywords: ['keramik', 'granit', 'granite', 'lantai', 'ubin', 'tile', 'homogenous tile', 'roman', 'milan', 'ikad', 'mulia', 'asia tile', 'nat', 'nat keramik', 'semen nat', 'pengisi nat', 'lem keramik', 'perekat granit', 'mu 400', 'mu 450', 'am 53', 'am 50'],
-    intents: ['perekat keramik lantai', 'pasang granit', 'keramik kamar mandi', 'keramik kasar', 'keramik dinding dapur', 'ganti nat keramik', 'nat anti bocor', 'keramik terangkat', 'tile popping'],
-    relatedTerms: ['spacer keramik', 'perata keramik', 'trowel', 'roskam gerigi', 'pemotong keramik'],
-  },
-  {
-    category: 'Pengikat & Paku',
-    keywords: ['paku', 'paku kayu', 'paku usuk', 'paku reng', 'paku kaso', 'paku triplek', 'paku seng', 'paku asbes', 'paku payung', 'paku beton', 'sekrup', 'screw', 'baut', 'bolt', 'mur', 'nut', 'fisher', 'fischer', 'dynabolt', 'ramset', 'sekrup gypsum', 'baut roofing'],
-    intents: ['paku rangka atap', 'pasang gypsum', 'pasang plafon', 'paku kayu keras', 'baut baja ringan', 'pasang kanopi', 'gantungan dinding beton', 'pengikat kayu'],
-    relatedTerms: ['kawat las', 'kawat loket', 'kawat ayakan', 'kawat bendrat'],
-  },
-  {
-    category: 'Atap & Plafon',
-    keywords: ['atap', 'seng', 'seng gelombang', 'spandek', 'alderon', 'upvc', 'polycarbonate', 'polikarbonat', 'fiber bening', 'genteng metal', 'asbes', 'gypsum', 'jayaboard', 'elephant', 'grc board', 'kalsiboard', 'list profil', 'cornice'],
-    intents: ['atap bening kanopi', 'atap kanopi dingin', 'atap tembus cahaya', 'tutup kanopi', 'plafon tahan air', 'plafon kamar mandi', 'plafon anti jamur', 'atap gudang'],
-    relatedTerms: ['kompon gypsum', 'kasa gypsum', 'list plafon', 'talang air', 'talang seng', 'karpet talang'],
-  },
-  {
-    category: 'Sanitari & Kamar Mandi',
-    keywords: ['kran', 'keran', 'keran air', 'stop kran', 'kran cabang', 'kran shower', 'shower mandi', 'jet shower', 'bidet', 'kloset', 'closet', 'kloset duduk', 'kloset jongkok', 'toto', 'american standard', 'florence', 'bak cuci piring', 'kitchen sink', 'siphon', 'afur', 'floor drain', 'saringan got'],
-    intents: ['kran air bocor', 'saringan air kamar mandi anti bau', 'saluran cucian piring', 'shower air kencang', 'saluran got mampet'],
-    relatedTerms: ['pelampung toren', 'radar toren', 'selang fleksibel', 'seal karet'],
-  },
-  {
-    category: 'Alat & Perkakas Tukang',
-    keywords: ['palu', 'martil', 'cetok', 'sendok semen', 'cangkul', 'sekop', 'gergaji', 'gergaji kayu', 'gergaji besi', 'meteran', 'waterpass', 'benang bangunan', 'ember cor', 'gerinda', 'mesin bor', 'mata bor', 'mata gerinda', 'batu potong'],
-    intents: ['alat aduk semen', 'alat pasang bata', 'alat ukur lurus', 'potong keramik', 'potong besi', 'bor beton', 'bor tembok'],
-    relatedTerms: ['sarung tangan proyek', 'helm proyek', 'sepatu boot', 'kacamata safety'],
-  },
-  {
-    category: 'Kelistrikan',
-    keywords: ['kabel', 'kabel listrik', 'kabel nym', 'kabel nyahy', 'kabel nymhy', 'eterna', 'supreme', 'extana', 'saklar', 'stop kontak', 'steker', 'colokan', 'mcb', 'box mcb', 'schneider', 'panasonic', 'broco', 'lampu led', 'philips', 'fitting lampu', 'isolasi listrik', 'solasi hitam'],
-    intents: ['stop kontak ac', 'saklar lampu ganda', 'instalasi listrik rumah', 'kabel tanam tembok', 'mcb jeglek', 'pengaman listrik'],
-    relatedTerms: ['pipa conduit', 'klem kabel', 'inbow doos', 'tedus'],
-  },
-  {
-    category: 'Pintu & Jendela',
-    keywords: ['kunci pintu', 'handle pintu', 'gagang pintu', 'bodi kunci', 'silinder kunci', 'engsel', 'engsel pintu', 'engsel jendela', 'grendel', 'slot pintu', 'hak angin', 'door closer', 'dekson', 'dekson', 'bellucci', 'solid'],
-    intents: ['kunci rumah anti maling', 'penahan jendela', 'gagang pintu kamar', 'kunci kamar mandi'],
-    relatedTerms: ['rel pintu geser', 'roda pintu dorong'],
-  },
+/**
+ * Stopwords umum yang tidak boleh memicu pencocokan kategori/sinonim sendirian
+ */
+export const SEARCH_STOPWORDS = new Set<string>([
+  'dan', 'atau', 'yang', 'untuk', 'buat', 'di', 'ke', 'dari', 'dengan', 'pada',
+  'ini', 'itu', 'ada', 'yg', 'utk', 'dg', 'dgn', 'anti', 'super', 'plus', 'pro',
+  'sni', 'std', 'standar', 'asli', 'ori', 'original', 'murah', 'bagus', 'kuat',
+  'tahan', 'lama', 'serbaguna', 'siap', 'pakai', 'bahan', 'bangunan', 'toko',
+]);
+
+/**
+ * Padanan sinonim ketat 1-ke-1 (aktif di semua mode termasuk keyword)
+ */
+export const EXACT_SYNONYM_GROUPS: string[][] = [
+  ['paralon', 'pralon', 'pipa pvc'],
+  ['keni', 'knee', 'elbow'],
+  ['sok', 'sock', 'soket', 'socket'],
+  ['sealtape', 'seal tape', 'selotip pipa'],
+  ['lem pralon', 'lem paralon', 'lem pipa', 'isarplas'],
+  ['holo', 'hollow'],
+  ['behel', 'begel', 'beugel', 'cincin kolom'],
+  ['kanal c', 'baja ringan', 'truss'],
+  ['tiner', 'thinner'],
+  ['ampelas', 'amplas', 'kertas gosok'],
+  ['politur', 'plitur', 'varnish'],
+  ['keran', 'kran'],
+  ['kloset', 'closet'],
+  ['tandon', 'toren', 'tangki air'],
+  ['bak cuci piring', 'kitchen sink', 'wastafel dapur'],
+  ['saringan got', 'floor drain', 'afur'],
+  ['martil', 'palu'],
+  ['cetok', 'sendok semen'],
+  ['sekrup', 'screw', 'skrup'],
+  ['baut', 'bolt'],
+  ['fisher', 'fischer'],
+  ['steker', 'colokan'],
+  ['hebel', 'bata ringan'],
+  ['thinbed', 'perekat bata ringan', 'lem hebel'],
+  ['nodrop', 'no drop'],
+  ['antibocor', 'anti bocor', 'waterproofing'],
+  ['tigaroda', 'tiga roda'],
+  ['polikarbonat', 'polycarbonate'],
+  ['gagang pintu', 'handle pintu'],
+  ['solasi listrik', 'isolasi listrik', 'solasi hitam'],
+  ['isolasi kertas', 'solasi kertas', 'masking tape'],
+  ['gerinda', 'gurinda'],
 ];
 
 /**
- * Normalisasi token (lowercase, hilangkan tanda baca berlebih)
+ * Kamus Domain & Masalah Pelanggan Toko Bangunan
+ * (Bebas singkatan ambigu 2 huruf seperti 'mu' sendirian)
+ */
+export const TOKOBANGUNAN_SYNONYMS: SynonymGroup[] = [
+  {
+    category: 'Waterproofing & Anti Bocor',
+    keywords: [
+      'waterproofing', 'anti bocor', 'antibocor', 'pelapis anti bocor', 'kedap air',
+      'aquaproof', 'no drop', 'nodrop', 'damdex', 'sika top', 'sikatop', 'sikalastic',
+      'sealant', 'aspal cair', 'flashing tape', 'membrane bakar', 'kasa fiber',
+    ],
+    intents: [
+      'tembok rembes', 'dinding rembes', 'atap bocor', 'dak bocor', 'genteng bocor',
+      'bocor hujan', 'dinding lembab', 'tembok basah', 'nat bocor', 'nambal retak',
+      'tambal bocor', 'nambal tembok', 'pelapis dak', 'anti rembes',
+    ],
+    relatedTerms: ['cat pelapis anti bocor', 'pelapis waterproofing', 'waterproof'],
+  },
+  {
+    category: 'Perpipaan & Fitting',
+    keywords: [
+      'pipa pvc', 'pipa air', 'pipa aw', 'pipa d', 'paralon', 'pralon', 'rucika',
+      'wavin', 'maspion', 'fitting pvc', 'keni', 'knee', 'elbow', 'sok drat',
+      'tee pvc', 'letter t', 'watermur', 'vlok ring', 'flange', 'lem pipa',
+      'lem pralon', 'lem paralon', 'isarplas', 'seal tape', 'sealtape', 'dop pvc',
+    ],
+    negativeKeywords: ['pipa besi', 'pipa hollow', 'pipa conduit'],
+    intents: [
+      'pipa belok', 'sambungan belok', 'sambungan pipa belok', 'sambungan pipa air',
+      'cabang pipa', 'sambungan pipa cabang', 'sambung pralon', 'saluran pembuangan',
+      'saluran air kotor', 'pipa pompa air', 'pipa sanyo', 'pipa sumur', 'paralon bocor',
+    ],
+    relatedTerms: ['sambungan pvc', 'fitting pvc', 'tutup pipa'],
+  },
+  {
+    category: 'Semen & Mortar',
+    keywords: [
+      'semen', 'semen pcc', 'semen opc', 'semen instan', 'tiga roda', 'tigaroda',
+      'semen gresik', 'dynamix', 'holcim', 'semen padang', 'semen merdeka',
+      'mortar', 'mortar utama', 'mu 400', 'mu 450', 'mu 380', 'mu 200', 'mu 301',
+      'acian', 'plester', 'plesteran', 'perekat bata ringan', 'thinbed', 'calbond',
+    ],
+    negativeKeywords: ['sendok semen', 'cetok', 'ember cor', 'batako', 'semen nat'],
+    intents: [
+      'cor beton', 'cor lantai', 'cor dak', 'cor pondasi', 'cor tiang', 'sloof',
+      'pasang hebel', 'pasang bata ringan', 'aci tembok', 'plester dinding', 'nambal semen',
+    ],
+    relatedTerms: ['pasir cor', 'batu split', 'obat cor', 'pengeras beton'],
+  },
+  {
+    category: 'Besi & Baja Tulangan',
+    keywords: [
+      'besi beton', 'besi ulir', 'besi polos', 'besi behel', 'besi begel', 'begel',
+      'beugel', 'cakar ayam', 'wiremesh', 'baja ringan', 'kanal c', 'truss',
+      'reng baja', 'besi hollow', 'hollow galvanis', 'hollow hitam', 'pipa besi',
+      'plat besi', 'besi siku', 'bondek', 'kawat bendrat',
+    ],
+    negativeKeywords: [
+      'cat besi', 'meni besi', 'gergaji besi', 'potong besi', 'bor besi',
+      'amplas', 'kuas', 'lem besi', 'paku', 'sekrup', 'baut',
+    ],
+    intents: [
+      'tulangan cor', 'tulangan pondasi', 'rangka atap baja', 'rangka plafon',
+      'tiang cor', 'rangka pagar besi', 'besi pondasi',
+    ],
+    relatedTerms: ['tulangan beton', 'rangka kanopi', 'profil baja'],
+  },
+  {
+    category: 'Cat & Finishing',
+    keywords: [
+      'cat tembok', 'cat dinding', 'cat kayu', 'cat besi', 'cat genteng', 'cat kolam',
+      'cat lapangan', 'cat dasar', 'cat primer', 'alkali killer', 'dulux', 'catylac',
+      'avitex', 'vinilex', 'danapaint', 'jotun', 'nippon paint', 'kansai', 'ftalit',
+      'avian', 'emco', 'plamir', 'dempul', 'thinner', 'tiner', 'meni besi', 'meni kayu',
+      'politur', 'plitur', 'varnish',
+    ],
+    negativeKeywords: ['amplas', 'kertas gosok'],
+    intents: [
+      'cat anti karat', 'cat pagar besi', 'cat interior', 'cat eksterior',
+      'dinding kusam', 'cat tahan cuaca', 'cat mengelupas', 'pelapis kayu', 'cat rumah',
+    ],
+    relatedTerms: ['kuas cat', 'roll cat', 'bak cat', 'masking tape'],
+  },
+  {
+    category: 'Keramik & Granit',
+    keywords: [
+      'keramik', 'granit', 'granite', 'ubin', 'homogenous tile', 'keramik roman',
+      'keramik milan', 'keramik ikad', 'keramik mulia', 'asia tile',
+      'nat keramik', 'semen nat', 'pengisi nat', 'lem keramik', 'perekat keramik',
+      'perekat granit', 'mu 400', 'mu 450', 'am 53', 'am 50',
+    ],
+    intents: [
+      'perekat keramik lantai', 'pasang granit', 'keramik kamar mandi', 'keramik kasar',
+      'keramik dinding dapur', 'ganti nat keramik', 'nat anti bocor', 'keramik terangkat',
+    ],
+    relatedTerms: ['spacer keramik', 'perata keramik', 'roskam gerigi', 'potong keramik'],
+  },
+  {
+    category: 'Pengikat, Paku & Baut',
+    keywords: [
+      'paku kayu', 'paku usuk', 'paku reng', 'paku kaso', 'paku triplek', 'paku seng',
+      'paku asbes', 'paku payung', 'paku beton', 'sekrup', 'screw', 'sekrup gypsum',
+      'baut roofing', 'baut baja ringan', 'dynabolt', 'fisher', 'fischer', 'ramset',
+      'mur baut', 'kawat las', 'kawat loket', 'kawat ayakan',
+    ],
+    intents: [
+      'paku rangka atap', 'pasang gypsum', 'paku kayu keras', 'baut baja ringan',
+      'gantungan dinding beton', 'pengikat kayu', 'bor dinding gantung',
+    ],
+    relatedTerms: ['pengencang', 'self drilling', 'angkur beton'],
+  },
+  {
+    category: 'Atap & Plafon',
+    keywords: [
+      'atap spandek', 'spandek', 'seng gelombang', 'alderon', 'atap upvc',
+      'polycarbonate', 'polikarbonat', 'twinlite', 'fiber bening', 'genteng metal',
+      'asbes', 'gypsum', 'jayaboard', 'elephant gypsum', 'grc board', 'kalsiboard',
+      'list profil', 'cornice', 'talang air', 'karpet talang',
+    ],
+    intents: [
+      'atap bening kanopi', 'atap kanopi dingin', 'atap tembus cahaya', 'tutup kanopi',
+      'plafon tahan air', 'plafon kamar mandi', 'plafon anti jamur', 'atap gudang',
+      'peredam suara hujan', 'peredam panas atap',
+    ],
+    relatedTerms: ['kompon gypsum', 'kasa gypsum', 'list plafon'],
+  },
+  {
+    category: 'Sanitari & Kamar Mandi',
+    keywords: [
+      'kran air', 'keran air', 'stop kran', 'kran cabang', 'kran shower',
+      'shower mandi', 'jet shower', 'bidet', 'kloset duduk', 'kloset jongkok',
+      'kloset', 'closet', 'wastafel', 'toto', 'american standard', 'bak cuci piring',
+      'kitchen sink', 'siphon', 'afur', 'floor drain', 'saringan got', 'tandon air',
+      'toren air', 'pelampung toren', 'radar toren',
+    ],
+    intents: [
+      'kran air bocor', 'saringan air kamar mandi anti bau', 'saluran cucian piring',
+      'shower air kencang', 'saluran got mampet', 'bak air kamar mandi',
+    ],
+    relatedTerms: ['selang fleksibel', 'seal karet', 'sanitasi'],
+  },
+  {
+    category: 'Alat & Perkakas Tukang',
+    keywords: [
+      'palu', 'martil', 'cetok', 'sendok semen', 'cangkul', 'sekop', 'gergaji kayu',
+      'gergaji besi', 'meteran', 'waterpass', 'benang bangunan', 'ember cor',
+      'mesin gerinda', 'gerinda', 'mesin bor', 'mata bor', 'mata gerinda',
+      'batu potong', 'amplas', 'kuas cat', 'roll cat', 'obeng', 'tang', 'kunci inggris',
+    ],
+    intents: [
+      'alat aduk semen', 'alat pasang bata', 'alat ukur lurus', 'potong keramik',
+      'potong besi', 'bor beton', 'bor tembok', 'menghaluskan dempul', 'alat ngecat',
+    ],
+    relatedTerms: ['sarung tangan proyek', 'helm proyek', 'perkakas pertukangan'],
+  },
+  {
+    category: 'Kelistrikan',
+    keywords: [
+      'kabel listrik', 'kabel nym', 'kabel nya', 'kabel nymhy', 'eterna', 'supreme',
+      'saklar', 'stop kontak', 'steker', 'colokan', 'mcb', 'box mcb', 'schneider',
+      'panasonic', 'broco', 'lampu led', 'philips', 'fitting lampu', 'isolasi listrik',
+      'solasi hitam', 'pipa conduit', 'inbow doos', 'tedus',
+    ],
+    intents: [
+      'stop kontak ac', 'saklar lampu ganda', 'instalasi listrik rumah',
+      'kabel tanam tembok', 'mcb jeglek', 'pengaman listrik', 'penerangan rumah',
+    ],
+    relatedTerms: ['klem kabel', 'listrik rumah', 'panel listrik'],
+  },
+  {
+    category: 'Pintu & Jendela',
+    keywords: [
+      'kunci pintu', 'handle pintu', 'gagang pintu', 'bodi kunci', 'silinder kunci',
+      'engsel pintu', 'engsel jendela', 'grendel', 'slot pintu', 'hak angin',
+      'door closer', 'dekson', 'dekkson', 'bellucci', 'rel pintu geser', 'roda pintu dorong',
+    ],
+    intents: [
+      'kunci rumah anti maling', 'penahan jendela', 'gagang pintu kamar',
+      'kunci kamar mandi', 'engsel pintu berat',
+    ],
+    relatedTerms: ['aksesoris pintu', 'aksesoris jendela'],
+  },
+];
+
+// Cache regex batas kata untuk performa tinggi
+const wholeTermRegexCache = new Map<string, RegExp>();
+
+/**
+ * Pencocokan batas kata ketat (word-boundary aware untuk alfanumerik + simbol ukuran seperti 1/2).
+ * Contoh:
+ * - hasWholeTerm("Keramik Mulia", "mu") === false
+ * - hasWholeTerm("Watermur Rucika", "mu") === false
+ * - hasWholeTerm("Semen Mortar Utama MU 400", "mu 400") === true
+ * - hasWholeTerm("Besi & Baja Tulangan", "&") === false (karena term kosong setelah sanitasi)
+ */
+export function hasWholeTerm(text: string, term: string): boolean {
+  if (!text || !term) return false;
+  const cleanTerm = term.trim().toLowerCase();
+  if (!cleanTerm || !/[a-z0-9]/.test(cleanTerm)) return false;
+
+  let regex = wholeTermRegexCache.get(cleanTerm);
+  if (!regex) {
+    const escaped = cleanTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i');
+    wholeTermRegexCache.set(cleanTerm, regex);
+  }
+  return regex.test(text);
+}
+
+/**
+ * Normalisasi token (lowercase, hilangkan tanda baca berlebih, pertahankan / dan - di dalam ukuran/SKU)
  */
 export function normalizeToken(token: string): string {
   return token
     .toLowerCase()
-    .replace(/[^\w\d\s-]/g, ' ')
+    .replace(/[^\w\d\s/-]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -105,66 +295,135 @@ export function normalizeToken(token: string): string {
 export function tokenize(text: string): string[] {
   if (!text) return [];
   const normalized = normalizeToken(text);
-  const words = normalized.split(/\s+/).filter((w) => w.length > 0);
+  const words = normalized.split(/\s+/).filter((w) => w.length > 0 && /[a-z0-9]/.test(w));
   return Array.from(new Set(words));
 }
 
 /**
- * Mengekstrak sinonim dan intent terkait dari kueri
+ * Mencari padanan sinonim ketat 1-ke-1 dari teks kueri menggunakan word-boundary
+ */
+export function getExactSynonymsForQuery(query: string): string[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return [];
+
+  const synSet = new Set<string>();
+  for (const group of EXACT_SYNONYM_GROUPS) {
+    const matched = group.some((term) => hasWholeTerm(normalized, term));
+    if (matched) {
+      for (const term of group) {
+        if (!hasWholeTerm(normalized, term)) {
+          synSet.add(term);
+        }
+      }
+    }
+  }
+  return Array.from(synSet);
+}
+
+/**
+ * Mengekstrak sinonim ketat (exactSynonyms) dan istilah intent/masalah (intentTerms)
+ * secara terpisah menggunakan pencocokan batas kata (hasWholeTerm).
  */
 export function expandQueryTokens(query: string): {
   rawQuery: string;
   tokens: string[];
+  meaningfulTokens: string[];
+  exactSynonyms: string[];
+  intentTerms: string[];
   expandedTerms: string[];
   matchedCategories: string[];
 } {
   const normalizedQuery = normalizeToken(query);
   const tokens = tokenize(normalizedQuery);
-  const expandedSet = new Set<string>();
+  const meaningfulTokens = tokens.filter((t) => !SEARCH_STOPWORDS.has(t));
+  const exactSynonyms = getExactSynonymsForQuery(normalizedQuery);
+
+  const intentSet = new Set<string>();
   const matchedCategories = new Set<string>();
 
-  // Cek pencocokan frasa atau kata kunci pada kamus domain
+  // Cek pencocokan intent / masalah pelanggan menggunakan batas kata ketat
   for (const group of TOKOBANGUNAN_SYNONYMS) {
-    let matchedGroup = false;
+    // Jika kueri mengandung kata negatif untuk grup ini (misal "cat besi" untuk grup Besi Tulangan), lewati
+    if (group.negativeKeywords?.some((neg) => hasWholeTerm(normalizedQuery, neg))) {
+      continue;
+    }
 
-    // Cek kecocokan intent / masalah pelanggan
+    let matchedByIntent = false;
+    let matchedByKeyword = false;
+
     for (const intent of group.intents) {
-      if (normalizedQuery.includes(intent.toLowerCase())) {
-        matchedGroup = true;
-        group.keywords.forEach((kw) => expandedSet.add(kw));
-        group.relatedTerms.forEach((rt) => expandedSet.add(rt));
+      if (hasWholeTerm(normalizedQuery, intent)) {
+        matchedByIntent = true;
         break;
       }
     }
 
-    // Cek kecocokan kata kunci produk
-    if (!matchedGroup) {
+    if (!matchedByIntent) {
+      // Cek kecocokan minimal 2 token dari salah satu frasa intent (contoh: "tembok bocor" -> cocok "tembok rembes" / "atap bocor")
+      for (const intent of group.intents) {
+        const intentWords = tokenize(intent).filter((w) => !SEARCH_STOPWORDS.has(w));
+        if (intentWords.length >= 2) {
+          const hits = intentWords.filter((w) => hasWholeTerm(normalizedQuery, w)).length;
+          if (hits === intentWords.length) {
+            matchedByIntent = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!matchedByIntent) {
       for (const kw of group.keywords) {
-        if (normalizedQuery.includes(kw.toLowerCase())) {
-          matchedGroup = true;
-          group.keywords.forEach((k) => expandedSet.add(k));
-          group.relatedTerms.forEach((rt) => expandedSet.add(rt));
+        if (hasWholeTerm(normalizedQuery, kw)) {
+          matchedByKeyword = true;
           break;
         }
       }
     }
 
-    if (matchedGroup) {
+    if (matchedByIntent) {
       matchedCategories.add(group.category);
+      group.keywords.forEach((kw) => intentSet.add(kw));
+      group.relatedTerms.forEach((rt) => intentSet.add(rt));
+    } else if (matchedByKeyword) {
+      matchedCategories.add(group.category);
+      // Saat kueri sudah menyebut kata kunci produk langsung, jangan menyemburkan seluruh kategori lain
+      group.relatedTerms.forEach((rt) => intentSet.add(rt));
     }
   }
+
+  const intentTerms = Array.from(intentSet);
+  const expandedTerms = Array.from(new Set([...exactSynonyms, ...intentTerms]));
 
   return {
     rawQuery: query.trim(),
     tokens,
-    expandedTerms: Array.from(expandedSet),
+    meaningfulTokens: meaningfulTokens.length > 0 ? meaningfulTokens : tokens,
+    exactSynonyms,
+    intentTerms,
+    expandedTerms,
     matchedCategories: Array.from(matchedCategories),
   };
 }
 
 /**
- * Membangun teks passage kaya konteks untuk embedding model (multilingual-e5-small)
- * Format passage wajib diawali 'passage: ' sesuai panduan e5 model
+ * Memotong teks secara rapi pada batas kata
+ */
+function truncateClean(text: string, maxLength: number): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  if (cleaned.length <= maxLength) return cleaned;
+  const sliced = cleaned.slice(0, maxLength);
+  const lastSpace = sliced.lastIndexOf(' ');
+  return (lastSpace > maxLength * 0.6 ? sliced.slice(0, lastSpace) : sliced).trim();
+}
+
+/**
+ * Membangun teks Clean Natural Passage (v2) untuk embedding model (multilingual-e5-small)
+ *
+ * Perubahan anti-halusinasi v2:
+ * - Menghapus SKU, Barcode, Supplier, dan label template kaku berulang ("Nama Produk:", "SKU:", "Kategori:").
+ * - Menggunakan hasWholeTerm() pada nama & kategori produk saja untuk menentukan tag kegunaan (maks 4 tag),
+ *   sehingga produk seperti "Besi Beton" atau "Amplas" tidak pernah lagi tercemar tag kategori lain.
  */
 export function buildProductPassage(product: {
   name: string;
@@ -183,83 +442,126 @@ export function buildProductPassage(product: {
   }>;
 }): string {
   const parts: string[] = [];
+  const nameClean = (product.name || '').trim();
+  const nameLower = nameClean.toLowerCase();
 
-  // 1. Identitas Inti Produk
-  parts.push(`Nama Produk: ${product.name}`);
-  if (product.sku) parts.push(`SKU: ${product.sku}`);
-  if (product.barcode) parts.push(`Barcode: ${product.barcode}`);
+  // 1. Identitas Produk Natural
+  if (nameClean) {
+    parts.push(nameClean);
+  }
 
-  // 2. Taksonomi & Merek
-  if (product.category_name) parts.push(`Kategori: ${product.category_name}`);
-  if (product.brand) parts.push(`Merek: ${product.brand}`);
-  if (product.supplier_name) parts.push(`Supplier: ${product.supplier_name}`);
+  // 2. Taksonomi & Merek (hanya jika belum tercantum persis di nama)
+  const catClean = (product.category_name || '').trim();
+  if (catClean && !nameLower.includes(catClean.toLowerCase())) {
+    parts.push(`Kategori ${catClean}`);
+  }
 
-  // 3. Karakteristik Fisik & Spesifikasi
-  if (product.material) parts.push(`Material: ${product.material}`);
-  if (product.specifications) parts.push(`Spesifikasi: ${product.specifications}`);
-  if (product.description) parts.push(`Deskripsi: ${product.description}`);
+  const brandClean = (product.brand || '').trim();
+  if (brandClean && !hasWholeTerm(nameLower, brandClean)) {
+    parts.push(`Merek ${brandClean}`);
+  }
 
-  // 4. Informasi Varian & Satuan
+  // 3. Karakteristik Fisik, Spesifikasi & Deskripsi Ringkas
+  const matClean = (product.material || '').trim();
+  if (matClean) {
+    parts.push(`Material ${truncateClean(matClean, 80)}`);
+  }
+
+  const specsClean = (product.specifications || '').trim();
+  if (specsClean) {
+    parts.push(truncateClean(specsClean, 140));
+  }
+
+  const descClean = (product.description || '').trim();
+  if (descClean) {
+    parts.push(truncateClean(descClean, 200));
+  }
+
+  // 4. Varian & Satuan Ringkas (maks 8 varian agar vektor tetap tajam)
   if (Array.isArray(product.variants) && product.variants.length > 0) {
     const variantNames: string[] = [];
     const unitNames: string[] = [];
 
     for (const v of product.variants) {
-      if (v.variant_name && v.variant_name !== 'Default') {
-        variantNames.push(v.variant_name);
+      const vn = (v.variant_name || '').trim();
+      if (vn && vn.toLowerCase() !== 'default' && !variantNames.includes(vn)) {
+        variantNames.push(vn);
       }
       if (Array.isArray(v.units)) {
         for (const u of v.units) {
-          if (u.unit_name && !unitNames.includes(u.unit_name)) {
-            unitNames.push(u.unit_name);
+          const un = (u.unit_name || '').trim();
+          if (un && !unitNames.includes(un)) {
+            unitNames.push(un);
           }
         }
       }
     }
 
     if (variantNames.length > 0) {
-      parts.push(`Pilihan Varian: ${variantNames.join(', ')}`);
+      parts.push(`Varian ${variantNames.slice(0, 8).join(', ')}`);
     }
     if (unitNames.length > 0) {
-      parts.push(`Satuan: ${unitNames.join(', ')}`);
+      parts.push(`Satuan ${unitNames.slice(0, 5).join(', ')}`);
     }
   }
 
-  // 5. Ekstraksi Tag Domain & Sinonim Otomatis
-  const compositeSearchableText = [
-    product.name,
-    product.category_name,
-    product.brand,
-    product.material,
-    product.specifications,
-    product.description,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+  // 5. Tag Kegunaan & Sinonim Ketat (HANYA dari nama + kategori, dengan hasWholeTerm & negativeKeywords)
+  const coreIdentityText = `${nameClean} ${catClean}`.toLowerCase();
+  const useCaseTags = new Set<string>();
 
-  const domainTags = new Set<string>();
+  // Tambahkan padanan sinonim 1-ke-1 yang relevan dengan nama produk
+  for (const synGroup of EXACT_SYNONYM_GROUPS) {
+    if (synGroup.some((t) => hasWholeTerm(coreIdentityText, t))) {
+      for (const t of synGroup) {
+        if (!hasWholeTerm(coreIdentityText, t) && useCaseTags.size < 3) {
+          useCaseTags.add(t);
+        }
+      }
+    }
+  }
+
+  // Tambahkan maksimal 4 intent masalah dari grup domain yang BENAR-BENAR cocok pada identitas produk
   for (const group of TOKOBANGUNAN_SYNONYMS) {
-    const hasCategoryMatch = group.category.toLowerCase().split(/\s+/).some((w) => compositeSearchableText.includes(w));
-    const hasKeywordMatch = group.keywords.some((kw) => compositeSearchableText.includes(kw.toLowerCase()));
+    if (group.negativeKeywords?.some((neg) => hasWholeTerm(coreIdentityText, neg))) {
+      continue;
+    }
 
-    if (hasCategoryMatch || hasKeywordMatch) {
-      // Tambahkan istilah penting dan intent masalah ke passage produk
-      group.keywords.slice(0, 8).forEach((k) => domainTags.add(k));
-      group.intents.slice(0, 5).forEach((it) => domainTags.add(it));
+    const hasStrictKeywordMatch = group.keywords.some((kw) => hasWholeTerm(coreIdentityText, kw));
+    if (hasStrictKeywordMatch) {
+      for (const intent of group.intents.slice(0, 4)) {
+        if (useCaseTags.size < 6) {
+          useCaseTags.add(intent);
+        }
+      }
     }
   }
 
-  if (domainTags.size > 0) {
-    parts.push(`Istilah & Masalah Terkait: ${Array.from(domainTags).join(', ')}`);
+  if (useCaseTags.size > 0) {
+    parts.push(`Kegunaan: ${Array.from(useCaseTags).join(', ')}`);
   }
 
-  // Prefix 'passage: ' sesuai arsitektur multilingual-e5
+  // Prefix 'passage: ' wajib sesuai arsitektur multilingual-e5
   return `passage: ${parts.join('. ')}`;
 }
 
+export interface KeywordMatchOptions {
+  /** Aktifkan ekspansi istilah intent/masalah (true untuk hybrid/semantic, false untuk keyword ketat) */
+  includeIntentSynonyms?: boolean;
+  /** Aktifkan toleransi typo fuzzy Damerau-Levenshtein (default: true) */
+  includeFuzzy?: boolean;
+}
+
+export interface KeywordMatchResult {
+  score: number;
+  /** Skor kecocokan langsung (eksak, prefix, token, exact synonym, fuzzy) tanpa ekspansi intent */
+  directScore: number;
+  matchedTerms: string[];
+  fuzzyMatches: Array<{ queryToken: string; matchedWord: string; similarity: number }>;
+  matchedIntentCategories: string[];
+}
+
 /**
- * Menghitung skor kecocokan leksikal multi-field (BM25-style keyword matching)
+ * Menghitung skor kecocokan leksikal multi-field + Exact Synonym + Fuzzy Typo Tolerance.
  */
 export function scoreKeywordMatch(
   product: {
@@ -280,16 +582,34 @@ export function scoreKeywordMatch(
       units?: Array<{ unit_name?: string | null }>;
     }>;
   },
-  query: string
-): { score: number; matchedTerms: string[] } {
+  query: string,
+  options?: KeywordMatchOptions
+): KeywordMatchResult {
   if (!query || !query.trim()) {
-    return { score: 0, matchedTerms: [] };
+    return {
+      score: 0,
+      directScore: 0,
+      matchedTerms: [],
+      fuzzyMatches: [],
+      matchedIntentCategories: [],
+    };
   }
 
+  const includeIntentSynonyms = options?.includeIntentSynonyms ?? false;
+  const includeFuzzy = options?.includeFuzzy ?? true;
+
   const rawQ = query.trim().toLowerCase();
-  const { tokens, expandedTerms } = expandQueryTokens(rawQ);
+  const {
+    meaningfulTokens: tokens,
+    exactSynonyms,
+    intentTerms,
+    matchedCategories,
+  } = expandQueryTokens(rawQ);
+
   const matchedTerms = new Set<string>();
-  let score = 0;
+  const fuzzyMatches: Array<{ queryToken: string; matchedWord: string; similarity: number }> = [];
+  let directScore = 0;
+  let intentScore = 0;
 
   const pSku = (product.sku || '').toLowerCase();
   const pBarcode = (product.barcode || '').toLowerCase();
@@ -300,123 +620,184 @@ export function scoreKeywordMatch(
   const pSpecs = (product.specifications || '').toLowerCase();
   const pDesc = (product.description || '').toLowerCase();
 
-  // 1. Exact Match SKU / Barcode (Bobot tertinggi: 1000)
+  // 1. Exact / Prefix / Contains Match SKU & Barcode (Bobot tertinggi: 1000)
   if (pSku === rawQ || (pBarcode && pBarcode === rawQ)) {
-    score += 1000;
+    directScore += 1000;
     matchedTerms.add(rawQ);
   } else if (pSku.startsWith(rawQ) || (pBarcode && pBarcode.startsWith(rawQ))) {
-    score += 500;
+    directScore += 500;
     matchedTerms.add(rawQ);
   } else if (pSku.includes(rawQ) || (pBarcode && pBarcode.includes(rawQ))) {
-    score += 250;
+    directScore += 250;
     matchedTerms.add(rawQ);
   }
 
   // 2. Phrase & Prefix Match pada Nama Produk
   if (pName === rawQ) {
-    score += 800;
+    directScore += 800;
     matchedTerms.add(pName);
   } else if (pName.startsWith(rawQ)) {
-    score += 450;
+    directScore += 450;
+    matchedTerms.add(rawQ);
+  } else if (hasWholeTerm(pName, rawQ)) {
+    directScore += 300;
     matchedTerms.add(rawQ);
   } else if (pName.includes(rawQ)) {
-    score += 250;
+    directScore += 200;
     matchedTerms.add(rawQ);
   }
 
   // 2b. Brand Matching
-  if (pBrand === rawQ) {
-    score += 300;
+  if (pBrand && pBrand === rawQ) {
+    directScore += 300;
     matchedTerms.add(pBrand);
-  } else if (pBrand.startsWith(rawQ)) {
-    score += 180;
+  } else if (pBrand && pBrand.startsWith(rawQ)) {
+    directScore += 180;
     matchedTerms.add(pBrand);
-  } else if (pBrand.includes(rawQ)) {
-    score += 100;
+  } else if (pBrand && hasWholeTerm(pBrand, rawQ)) {
+    directScore += 120;
+    matchedTerms.add(pBrand);
+  } else if (pBrand && pBrand.includes(rawQ)) {
+    directScore += 80;
     matchedTerms.add(pBrand);
   }
 
   // 2c. Category Matching
-  if (pCategory === rawQ) {
-    score += 200;
+  if (pCategory && pCategory === rawQ) {
+    directScore += 200;
     matchedTerms.add(pCategory);
-  } else if (pCategory.startsWith(rawQ)) {
-    score += 120;
+  } else if (pCategory && pCategory.startsWith(rawQ)) {
+    directScore += 120;
     matchedTerms.add(pCategory);
-  } else if (pCategory.includes(rawQ)) {
-    score += 70;
+  } else if (pCategory && hasWholeTerm(pCategory, rawQ)) {
+    directScore += 90;
+    matchedTerms.add(pCategory);
+  } else if (pCategory && pCategory.includes(rawQ)) {
+    directScore += 60;
     matchedTerms.add(pCategory);
   }
 
   // 3. Varian SKU / Barcode / Variant Name Match
+  const variantTexts: string[] = [];
   if (Array.isArray(product.variants)) {
     for (const v of product.variants) {
       const vSku = (v.sku || '').toLowerCase();
       const vBarcode = (v.barcode || '').toLowerCase();
       const vName = (v.variant_name || '').toLowerCase();
+      if (vName && vName !== 'default') variantTexts.push(vName);
 
       if (vSku === rawQ || (vBarcode && vBarcode === rawQ)) {
-        score += 900;
+        directScore += 900;
         matchedTerms.add(rawQ);
       } else if (vSku.startsWith(rawQ) || (vBarcode && vBarcode.startsWith(rawQ))) {
-        score += 400;
+        directScore += 400;
         matchedTerms.add(rawQ);
       } else if (vSku.includes(rawQ) || (vBarcode && vBarcode.includes(rawQ))) {
-        score += 180;
+        directScore += 180;
         matchedTerms.add(rawQ);
       }
 
       if (vName && vName === rawQ) {
-        score += 250;
+        directScore += 250;
         matchedTerms.add(vName);
       } else if (vName && vName.startsWith(rawQ)) {
-        score += 150;
+        directScore += 150;
         matchedTerms.add(vName);
       } else if (vName && vName.includes(rawQ)) {
-        score += 80;
+        directScore += 80;
         matchedTerms.add(vName);
       }
     }
   }
+  const variantJoined = variantTexts.join(' ');
 
-  // 4. Token Matching Multi-Field
+  // Siapkan daftar kata kandidat untuk fuzzy matching (lazy only if needed)
+  let candidateWordsCache: string[] | null = null;
+  const getCandidateWords = () => {
+    if (!candidateWordsCache) {
+      candidateWordsCache = extractCandidateWords(
+        `${pName} ${pBrand} ${pCategory} ${pMaterial} ${variantJoined}`
+      );
+    }
+    return candidateWordsCache;
+  };
+
+  // 4. Token Matching Multi-Field (+ Fuzzy Fallback per token)
   let matchedTokenCount = 0;
   for (const token of tokens) {
     let tokenMatched = false;
 
     if (pName.startsWith(token)) {
-      score += 80;
+      directScore += 85;
       tokenMatched = true;
       matchedTerms.add(token);
-    } else if (pName.includes(token)) {
-      score += 50;
+    } else if (hasWholeTerm(pName, token)) {
+      directScore += 75;
       tokenMatched = true;
       matchedTerms.add(token);
-    }
-    if (pBrand.includes(token)) {
-      score += 45;
-      tokenMatched = true;
-      matchedTerms.add(token);
-    }
-    if (pCategory.includes(token)) {
-      score += 35;
+    } else if (token.length >= 3 && pName.includes(token)) {
+      directScore += 40;
       tokenMatched = true;
       matchedTerms.add(token);
     }
-    if (pMaterial.includes(token)) {
-      score += 30;
+
+    if (pBrand && hasWholeTerm(pBrand, token)) {
+      directScore += 55;
+      tokenMatched = true;
+      matchedTerms.add(token);
+    } else if (pBrand && token.length >= 3 && pBrand.includes(token)) {
+      directScore += 30;
       tokenMatched = true;
       matchedTerms.add(token);
     }
-    if (pSpecs.includes(token)) {
-      score += 25;
+
+    if (pCategory && hasWholeTerm(pCategory, token)) {
+      directScore += 45;
+      tokenMatched = true;
+      matchedTerms.add(token);
+    } else if (pCategory && token.length >= 3 && pCategory.includes(token)) {
+      directScore += 25;
       tokenMatched = true;
       matchedTerms.add(token);
     }
-    if (pDesc.includes(token)) {
-      score += 15;
+
+    if (pMaterial && hasWholeTerm(pMaterial, token)) {
+      directScore += 35;
       tokenMatched = true;
       matchedTerms.add(token);
+    }
+
+    if (pSpecs && hasWholeTerm(pSpecs, token)) {
+      directScore += 30;
+      tokenMatched = true;
+      matchedTerms.add(token);
+    }
+
+    if (variantJoined && hasWholeTerm(variantJoined, token)) {
+      directScore += 40;
+      tokenMatched = true;
+      matchedTerms.add(token);
+    }
+
+    if (pDesc && hasWholeTerm(pDesc, token)) {
+      directScore += 18;
+      tokenMatched = true;
+      matchedTerms.add(token);
+    }
+
+    // Jika token belum cocok secara literal, coba Fuzzy Typo Matching (Damerau-Levenshtein + Trigram)
+    if (!tokenMatched && includeFuzzy && token.length >= 4) {
+      const fuzzy = scoreFuzzyTokenMatch(token, getCandidateWords());
+      if (fuzzy.matched && fuzzy.bestWord) {
+        directScore += Math.round(52 * fuzzy.similarity);
+        tokenMatched = true;
+        matchedTerms.add(fuzzy.bestWord);
+        fuzzyMatches.push({
+          queryToken: token,
+          matchedWord: fuzzy.bestWord,
+          similarity: fuzzy.similarity,
+        });
+      }
     }
 
     if (tokenMatched) {
@@ -424,22 +805,64 @@ export function scoreKeywordMatch(
     }
   }
 
-  // Bonus jika semua kata kueri ditemukan
+  // Bonus jika semua kata kueri bermakna ditemukan
   if (tokens.length > 1 && matchedTokenCount === tokens.length) {
-    score += 150;
+    directScore += 200;
   }
 
-  // 5. Pencocokan Istilah Sinonim / Masalah Pelanggan
-  for (const syn of expandedTerms) {
-    const s = syn.toLowerCase();
-    if (pName.includes(s) || pCategory.includes(s) || pBrand.includes(s) || pSpecs.includes(s) || pDesc.includes(s)) {
-      score += 40;
+  // 5. Pencocokan Exact Synonyms 1-ke-1 (aktif di semua mode, ketat dengan hasWholeTerm)
+  let exactSynHits = 0;
+  for (const syn of exactSynonyms) {
+    if (exactSynHits >= 2) break;
+    if (hasWholeTerm(pName, syn)) {
+      directScore += 160;
       matchedTerms.add(syn);
+      exactSynHits++;
+    } else if (hasWholeTerm(pCategory, syn) || hasWholeTerm(pSpecs, syn)) {
+      directScore += 80;
+      matchedTerms.add(syn);
+      exactSynHits++;
+    }
+  }
+
+  // Guard Cakupan Multi-Kata (Anti-Halusinasi untuk kueri >= 3 kata):
+  // Jika pengguna mengetik >= 3 kata (misal "obat sakit kepala" atau "sepatu lari nike")
+  // dan produk hanya kebetulan cocok 1 kata tunggal (cakupan < 50%) tanpa kecocokan frase/SKU/sinonim,
+  // abaikan kecocokan insidental tersebut.
+  if (
+    tokens.length >= 3 &&
+    exactSynHits === 0 &&
+    directScore < 200 &&
+    matchedTokenCount < Math.ceil(tokens.length / 2)
+  ) {
+    directScore = 0;
+    matchedTerms.clear();
+  }
+
+  // 6. Pencocokan Istilah Intent / Masalah Pelanggan (HANYA jika includeIntentSynonyms === true)
+  // Dibatasi maks 3 kecocokan (maks +120 poin) agar tidak pernah menenggelamkan kecocokan literal
+  if (includeIntentSynonyms && intentTerms.length > 0) {
+    let intentHits = 0;
+    const identityAndSpec = `${pName} ${pCategory} ${pBrand} ${pMaterial} ${pSpecs} ${pDesc}`;
+    for (const term of intentTerms) {
+      if (intentHits >= 3) break;
+      if (hasWholeTerm(pName, term)) {
+        intentScore += 45;
+        matchedTerms.add(term);
+        intentHits++;
+      } else if (hasWholeTerm(identityAndSpec, term)) {
+        intentScore += 30;
+        matchedTerms.add(term);
+        intentHits++;
+      }
     }
   }
 
   return {
-    score,
+    score: directScore + intentScore,
+    directScore,
     matchedTerms: Array.from(matchedTerms),
+    fuzzyMatches,
+    matchedIntentCategories: matchedCategories,
   };
 }

@@ -2,8 +2,14 @@ import type { Pool, PoolClient } from 'pg';
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 import { BrandService } from './brandService.js';
-import { EmbeddingService } from './embeddingService.js';
-import { scoreKeywordMatch } from '../utils/searchSynonyms.js';
+import { EmbeddingService, type SemanticSearchResult } from './embeddingService.js';
+import { RerankerService } from './rerankerService.js';
+import { buildProductPassage, hasWholeTerm, scoreKeywordMatch } from '../utils/searchSynonyms.js';
+import {
+  analyzeSearchQuery,
+  evaluateAttributeCompatibility,
+  isProductHeadCompatible,
+} from '../utils/searchQueryAnalyzer.js';
 import { logger } from '../utils/logger.js';
 
 type Queryable = Pool | PoolClient;
@@ -105,7 +111,7 @@ export class ProductService {
       offset?: number;
       minScore?: number;
     },
-    options?: { includeBuyPrice?: boolean }
+    options?: { includeBuyPrice?: boolean; waitForReranker?: boolean }
   ) {
     const searchMode = filters?.searchMode || filters?.mode || 'keyword';
     const rawSearch = (filters?.search || '').trim();
@@ -208,33 +214,117 @@ export class ProductService {
       }
     }
 
-    // Jika ada parameter kueri pencarian, terapkan scoring & RRF
+    // Jika ada parameter kueri pencarian, terapkan Query Intent Routing + Hybrid Gating + RRF + Guard + Reranker
     if (isSearching) {
       const qLower = rawSearch.toLowerCase();
       const productIds = rows.map((r) => r.id);
+      const analyzed = analyzeSearchQuery(rawSearch);
 
-      // 1. Keyword scoring
-      const kwMap = new Map<string, { score: number; matchedTerms: string[]; isExact: boolean }>();
-      let hasExactSkuMatch = false;
+      // 1. Keyword scoring (Word-Boundary + Exact Synonyms + Fuzzy Typo; Intent Synonyms hanya untuk hybrid/semantic)
+      const kwMap = new Map<
+        string,
+        {
+          score: number;
+          directScore: number;
+          matchedTerms: string[];
+          isExact: boolean;
+        }
+      >();
+      let hasExactMatch = false;
+      let strongKwCount = 0;
 
       for (const p of rows) {
-        const kw = scoreKeywordMatch(p, rawSearch);
+        const kw = scoreKeywordMatch(p, rawSearch, {
+          includeIntentSynonyms:
+            searchMode !== 'keyword' && analyzed.intentType === 'descriptive_intent',
+          includeFuzzy: true,
+        });
         const pSku = (p.sku || '').toLowerCase();
         const pBarcode = (p.barcode || '').toLowerCase();
         const pName = (p.name || '').toLowerCase();
-        const isExact = pSku === qLower || pBarcode === qLower || pName === qLower;
-        if (isExact) hasExactSkuMatch = true;
-        kwMap.set(p.id, { score: kw.score, matchedTerms: kw.matchedTerms, isExact });
+        const variantExact =
+          Array.isArray(p.variants) &&
+          p.variants.some(
+            (v: any) =>
+              (v.sku && String(v.sku).toLowerCase() === qLower) ||
+              (v.barcode && String(v.barcode).toLowerCase() === qLower)
+          );
+        const isExact = pSku === qLower || pBarcode === qLower || pName === qLower || variantExact;
+        if (isExact) hasExactMatch = true;
+        if (isExact || kw.directScore >= 140) strongKwCount++;
+
+        kwMap.set(p.id, {
+          score: kw.score,
+          directScore: kw.directScore,
+          matchedTerms: kw.matchedTerms,
+          isExact,
+        });
       }
 
-      // 2. Semantic vector search (hanya jika mode !== 'keyword')
-      const semanticMap = new Map<string, { rawScore: number; similarityScore: number; rank: number }>();
-      if (searchMode !== 'keyword') {
+      // 2. Hybrid Gating: Tentukan bobot dinamis, topK, dan Z-score multiplier berdasarkan intentType
+      let shouldRunSemantic = searchMode !== 'keyword';
+      let wKw = 1.0;
+      let wSem = 0.0;
+      let semTopK = 12;
+      let semZMultiplier = EmbeddingService.Z_SCORE_MULTIPLIER;
+      let semRelativeGap = EmbeddingService.RAW_CUTOFF_RELATIVE_GAP;
+
+      if (searchMode === 'hybrid') {
+        if (analyzed.intentType === 'code_or_sku') {
+          // SKU / Barcode: jangan nyalakan semantik jika sudah ada kecocokan langsung
+          shouldRunSemantic = strongKwCount === 0 && !hasExactMatch;
+          wKw = 1.0;
+          wSem = shouldRunSemantic ? 0.5 : 0.0;
+          semTopK = 5;
+          semZMultiplier = 2.0;
+          semRelativeGap = 0.020;
+        } else if (analyzed.intentType === 'short_exact') {
+          if (strongKwCount >= 3) {
+            wKw = 1.0;
+            wSem = 0.35;
+            semTopK = 8;
+            semZMultiplier = 1.9;
+            semRelativeGap = 0.022;
+          } else {
+            wKw = 1.0;
+            wSem = 0.75;
+            semTopK = 12;
+            semZMultiplier = 1.65;
+            semRelativeGap = 0.028;
+          }
+        } else if (analyzed.intentType === 'attribute_specific') {
+          wKw = 1.0;
+          wSem = 0.60;
+          semTopK = 12;
+          semZMultiplier = 1.7;
+          semRelativeGap = 0.026;
+        } else {
+          // descriptive_intent (kueri masalah/kebutuhan >= 2 kata)
+          wKw = 0.85;
+          wSem = 1.0;
+          semTopK = 15;
+          semZMultiplier = 1.6;
+          semRelativeGap = 0.028;
+        }
+      } else if (searchMode === 'semantic') {
+        wKw = 0.25;
+        wSem = 1.0;
+        semTopK = 15;
+        semZMultiplier = 1.65;
+        semRelativeGap = 0.028;
+      }
+
+      // 3. Semantic vector search dengan Adaptive Z-Score Cutoff
+      const semanticMap = new Map<string, SemanticSearchResult>();
+      if (shouldRunSemantic) {
         try {
           const semResults = await EmbeddingService.searchSimilarProducts(rawSearch, {
             candidateIds: productIds,
-            topK: 25,
-            hasExactMatch: hasExactSkuMatch,
+            topK: semTopK,
+            minSimilarity: filters?.minScore,
+            hasExactMatch: hasExactMatch || strongKwCount >= 3,
+            zMultiplier: semZMultiplier,
+            relativeGap: semRelativeGap,
           });
           for (const s of semResults) {
             semanticMap.set(s.productId, s);
@@ -244,7 +334,7 @@ export class ProductService {
         }
       }
 
-      // 3. Peringkatkan urutan keyword (Dense Ranking: skor sama mendapat peringkat sama)
+      // 4. Peringkatkan urutan keyword (Dense Ranking: skor sama mendapat peringkat sama)
       const sortedByKw = [...rows]
         .map((p) => ({ id: p.id, score: kwMap.get(p.id)?.score || 0 }))
         .filter((item) => item.score > 0)
@@ -259,13 +349,9 @@ export class ProductService {
         kwRankMap.set(sortedByKw[i].id, currentRank);
       }
 
-      // 4. Bobot RRF berdasarkan mode
-      const wKw = searchMode === 'semantic' ? 0.2 : 1.0;
-      const wSem = searchMode === 'keyword' ? 0.0 : 1.0;
+      // 5. Hitung Skor RRF + Hard Attribute Guard + Head-Noun Guard
       const k = 60;
-
-      // 5. Hitung Skor RRF dan Filter Relevansi
-      const scoredProducts: Array<any> = [];
+      let scoredProducts: Array<any> = [];
 
       for (const p of rows) {
         const kw = kwMap.get(p.id);
@@ -274,11 +360,62 @@ export class ProductService {
         const semRank = sem?.rank;
 
         const kwScore = kw?.score || 0;
+        const directScore = kw?.directScore || 0;
         const isExact = Boolean(kw?.isExact);
 
         // Abaikan produk yang sama sekali tidak cocok leksikal maupun semantik
         if (kwScore <= 0 && !sem) {
           continue;
+        }
+
+        // Di mode semantic murni: jika tidak lolos semantik DAN hanya kecocokan leksikal lemah, abaikan
+        if (searchMode === 'semantic' && !sem && !isExact && directScore < 160) {
+          continue;
+        }
+
+        // Di mode hybrid saat sudah ada banyak kecocokan leksikal kuat untuk kueri pendek,
+        // syaratkan kandidat murni semantik (directScore === 0) punya zScore sangat tinggi
+        if (
+          searchMode === 'hybrid' &&
+          analyzed.intentType === 'short_exact' &&
+          strongKwCount >= 3 &&
+          kwScore === 0 &&
+          sem &&
+          sem.zScore < 2.2
+        ) {
+          continue;
+        }
+
+        // Evaluasi Hard Attribute Guard (ukuran/dimensi/berat spesifik seperti 10mm, 1/2", 40kg)
+        const variantNamesText = Array.isArray(p.variants)
+          ? p.variants.map((v: any) => v.variant_name || '').join(' ')
+          : '';
+        const productAttrText = `${p.name || ''} ${p.specifications || ''} ${variantNamesText}`;
+        const attrCheck = analyzed.hasNumericConstraint
+          ? evaluateAttributeCompatibility(analyzed.attributes, productAttrText)
+          : { status: 'neutral' as const, matchedCount: 0, conflictCount: 0 };
+
+        if (analyzed.hasNumericConstraint && attrCheck.status === 'conflict' && !isExact) {
+          // Drop kandidat murni semantik yang ukurannya bertentangan
+          if (directScore === 0 || (searchMode === 'semantic' && !kwRank)) {
+            continue;
+          }
+        }
+
+        // Evaluasi Indonesian Head-Noun Guard (Hukum DM: "cat besi" -> inti "cat", "besi 10mm" -> inti "besi")
+        // Menolak produk yang tipe utamanya berbeda (misal "Cat Besi" / "Mata Bor Besi" untuk kueri "besi 10mm")
+        let headNounMatched = true;
+        if (analyzed.headNoun && analyzed.headNounVariants.length > 0 && !isExact) {
+          headNounMatched = isProductHeadCompatible(
+            analyzed.headNounVariants,
+            p.name || '',
+            p.category_name
+          );
+
+          // Drop kandidat murni semantik yang tidak cocok kata inti utamanya
+          if (!headNounMatched && directScore === 0) {
+            continue;
+          }
         }
 
         // Reciprocal Rank Fusion (hitung dengan presisi floating point penuh)
@@ -288,6 +425,20 @@ export class ProductService {
         }
         if (semRank) {
           rawRrfScore += wSem * (1 / (k + semRank));
+        }
+
+        // Penyesuaian skor dari Hard Attribute Guard
+        if (analyzed.hasNumericConstraint) {
+          if (attrCheck.status === 'match') {
+            rawRrfScore += 0.012;
+          } else if (attrCheck.status === 'conflict' && !isExact) {
+            rawRrfScore *= 0.25;
+          }
+        }
+
+        // Penyesuaian skor dari Head-Noun Guard (turunkan drastis jika hanya cocok kata penjelas)
+        if (!headNounMatched && !isExact) {
+          rawRrfScore *= 0.18;
         }
 
         // Exact match boost (SKU / Barcode / Nama persis mendapat prioritas tertinggi mutlak)
@@ -320,30 +471,147 @@ export class ProductService {
           rrf_score: Math.round(rawRrfScore * 10000) / 10000,
           _raw_rrf_score: rawRrfScore,
           _kw_score: kwScore,
+          _direct_score: directScore,
+          _is_exact: isExact,
+          _head_noun_matched: headNounMatched,
+          _attr_status: attrCheck.status,
           matched_terms: kw?.matchedTerms || [],
         });
       }
 
-      // Urutkan dari produk yang paling relevan (skor relevansi tertinggi ke terendah)
-      scoredProducts.sort((a, b) => {
-        // 1. Raw RRF score tertinggi (termasuk exact match boost)
-        if (b._raw_rrf_score !== a._raw_rrf_score) {
-          return b._raw_rrf_score - a._raw_rrf_score;
+      // Post-filter Head-Noun Guard:
+      // Jika kueri memiliki Head-Noun (misal "cat besi") dan ada produk yang cocok Head-Noun tersebut,
+      // buang kandidat non-eksak yang tidak cocok Head-Noun (misal "Besi Beton") agar tidak mengotori hasil.
+      if (analyzed.headNoun && scoredProducts.some((item) => item._head_noun_matched)) {
+        scoredProducts = scoredProducts.filter(
+          (item) => item._is_exact || item._head_noun_matched
+        );
+      }
+
+      // Post-filter Hard Attribute Guard:
+      // Jika kueri mensyaratkan ukuran spesifik dan ada produk yang ukurannya cocok persis,
+      // buang kandidat yang ukurannya jelas bertentangan (misal "pipa 4 inch" tidak menampilkan "pipa 1/2 inch").
+      if (
+        analyzed.hasNumericConstraint &&
+        scoredProducts.some((item) => item._attr_status === 'match')
+      ) {
+        scoredProducts = scoredProducts.filter(
+          (item) => item._is_exact || item._attr_status !== 'conflict'
+        );
+      }
+
+      const sortScored = (list: Array<any>) => {
+        list.sort((a, b) => {
+          if (b._raw_rrf_score !== a._raw_rrf_score) {
+            return b._raw_rrf_score - a._raw_rrf_score;
+          }
+          if (b._kw_score !== a._kw_score) {
+            return b._kw_score - a._kw_score;
+          }
+          if ((b.similarity_score || 0) !== (a.similarity_score || 0)) {
+            return (b.similarity_score || 0) - (a.similarity_score || 0);
+          }
+          return a.name.localeCompare(b.name);
+        });
+      };
+
+      // Urutkan sementara sebelum Tahap 3 (Cross-Encoder Reranker)
+      sortScored(scoredProducts);
+
+      // 6. Tahap 3: Local Cross-Encoder Reranker (Two-Stage Retrieval, jika RERANKER_ENABLED=true)
+      const isSingleStrongDirect =
+        scoredProducts.length === 1 &&
+        (scoredProducts[0]._is_exact || scoredProducts[0]._direct_score >= 200);
+
+      if (
+        searchMode !== 'keyword' &&
+        RerankerService.isEnabled() &&
+        scoredProducts.length > 0 &&
+        !isSingleStrongDirect &&
+        !(analyzed.intentType === 'code_or_sku' && hasExactMatch)
+      ) {
+        const topKForRerank = RerankerService.getTopK();
+        const minRerankScore = RerankerService.getMinScore();
+        const rerankSlice = scoredProducts.slice(0, topKForRerank);
+
+        const rerankInput = rerankSlice.map((item) => ({
+          id: item.id,
+          text: EmbeddingService.getPassageText(item.id) || buildProductPassage(item),
+        }));
+
+        const rerankScores = await RerankerService.rerank(rawSearch, rerankInput, {
+          waitForLoad: options?.waitForReranker,
+        });
+
+        if (rerankScores && rerankScores.size > 0) {
+          // Normalisasi skor RRF non-exact untuk digabung proporsional dengan skor sigmoid Cross-Encoder
+          const nonExactRrfValues = rerankSlice
+            .filter((item) => !item._is_exact)
+            .map((item) => item._raw_rrf_score);
+          const maxRrf = nonExactRrfValues.length > 0 ? Math.max(...nonExactRrfValues, 0.0001) : 1;
+
+          const rerankedList: Array<any> = [];
+          for (const item of scoredProducts) {
+            const rr = rerankScores.get(item.id);
+            if (!rr) {
+              // Pertahankan item di luar Top-K HANYA jika punya kecocokan leksikal langsung yang kuat
+              if (item._is_exact || item._direct_score >= 120) {
+                rerankedList.push(item);
+              }
+              continue;
+            }
+
+            // Hard Drop: buang kandidat murni semantik / tidak terkoroborasi yang ditolak Cross-Encoder
+            // (Contoh: "obat sakit kepala" -> "Damdex Obat Cor" memiliki _kw_score = 0 & rr.score < 0.25 -> DROP)
+            // Kandidat hybrid yang terkoroborasi kamus domain + E5 tetap dipertahankan & diurutkan ulang.
+            if (!item._is_exact && item._kw_score < 35 && rr.score < minRerankScore) {
+              continue;
+            }
+
+            const baseNorm = item._is_exact ? 1 : item._raw_rrf_score / maxRrf;
+            const blended = item._is_exact
+              ? 1000 + rr.score
+              : 0.45 * baseNorm + 0.55 * rr.score;
+
+            const calibratedDisplay = item._is_exact
+              ? 1.0
+              : Math.min(
+                  0.99,
+                  Math.max(
+                    item.similarity_score && rr.score < minRerankScore ? item.similarity_score : 0.60,
+                    Math.round(rr.score * 100) / 100
+                  )
+                );
+
+            rerankedList.push({
+              ...item,
+              rerank_score: rr.score,
+              similarity_score:
+                item.match_type === 'semantic' || item.match_type === 'hybrid'
+                  ? calibratedDisplay
+                  : item.similarity_score,
+              rrf_score: Math.round(blended * 10000) / 10000,
+              _raw_rrf_score: blended,
+            });
+          }
+
+          scoredProducts = rerankedList;
+          sortScored(scoredProducts);
         }
-        // 2. Keyword score tertinggi
-        if (b._kw_score !== a._kw_score) {
-          return b._kw_score - a._kw_score;
-        }
-        // 3. Similarity score semantik tertinggi
-        if ((b.similarity_score || 0) !== (a.similarity_score || 0)) {
-          return (b.similarity_score || 0) - (a.similarity_score || 0);
-        }
-        // 4. Nama produk secara alfabetis (A-Z)
-        return a.name.localeCompare(b.name);
-      });
+      }
 
       // Bersihkan properti penunjang sorting internal
-      rows = scoredProducts.map(({ _raw_rrf_score, _kw_score, ...rest }) => rest);
+      rows = scoredProducts.map(
+        ({
+          _raw_rrf_score,
+          _kw_score,
+          _direct_score,
+          _is_exact,
+          _head_noun_matched,
+          _attr_status,
+          ...rest
+        }) => rest
+      );
     }
 
     if (filters?.limit && filters.limit > 0) {
@@ -640,7 +908,7 @@ export class ProductService {
       material?: string | null;
       specifications?: string | null;
     },
-    options?: { includeBuyPrice?: boolean }
+    options?: { includeBuyPrice?: boolean; waitForReranker?: boolean }
   ) {
     const fields: string[] = [];
     const values: any[] = [];
