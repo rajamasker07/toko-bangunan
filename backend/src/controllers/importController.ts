@@ -54,6 +54,7 @@ function buildImportContext(req: Request): ImportExecutionContext {
     createdBy: req.user!.full_name || req.user!.username || 'Admin',
     allowBuyPrice: hasPermission(role, 'products:view_buy_price'),
     allowPricingWrite: hasPermission(role, 'pricing:write'),
+    filename: req.file?.originalname || null,
   };
 }
 

@@ -1,9 +1,12 @@
-import React, { useState, useMemo } from 'react';
-import { Product, ProductVariant } from '../types';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Product, ProductVariant, ProductPriceAnalytics } from '../types';
 import { api } from '../services/api';
 import { formatRupiah, formatStock } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { Pagination } from './common/Pagination';
+import { PriceTrendChart } from './common/PriceTrendChart';
+import { BulkPriceUpdateModal } from './BulkPriceUpdateModal';
+import { formatIdNumber } from './common/NumericInput';
 import { 
   ArrowLeft, 
   Package, 
@@ -35,7 +38,9 @@ import {
   X,
   Sparkles,
   Wand2,
-  BookmarkPlus
+  BookmarkPlus,
+  TrendingUp,
+  RefreshCw,
 } from 'lucide-react';
 
 interface ProductDetailViewProps {
@@ -78,6 +83,9 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
   const canUpdate = can('products:update');
   const canDelete = can('products:delete');
   const canAdjust = can('stock:adjust');
+  const canViewBuyPrice = can('products:view_buy_price');
+  const canViewPricingAnalytics = can('pricing:analytics');
+  const canWritePricing = can('pricing:write');
 
   // Multi-selection for variants
   const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
@@ -86,8 +94,32 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
   const [variantSearch, setVariantSearch] = useState<string>('');
   const [selectedAttributes, setSelectedAttributes] = useState<Record<string, string>>({});
 
-  // View Mode: 'list' (default) vs 'matrix' (2D Grid)
-  const [viewMode, setViewMode] = useState<'list' | 'matrix'>('list');
+  // View Mode: 'list' (default) vs 'matrix' (2D Grid) vs 'analytics'
+  const [viewMode, setViewMode] = useState<'list' | 'matrix' | 'analytics'>('list');
+
+  // Product price analytics state
+  const [priceAnalytics, setPriceAnalytics] = useState<ProductPriceAnalytics | null>(null);
+  const [loadingPriceAnalytics, setLoadingPriceAnalytics] = useState<boolean>(false);
+  const [isBulkPricingModalOpen, setIsBulkPricingModalOpen] = useState<boolean>(false);
+
+  const fetchPriceAnalytics = useCallback(async () => {
+    if (!canViewPricingAnalytics) return;
+    try {
+      setLoadingPriceAnalytics(true);
+      const data = await api.getProductPriceAnalytics(product.id);
+      setPriceAnalytics(data);
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setLoadingPriceAnalytics(false);
+    }
+  }, [product.id, canViewPricingAnalytics]);
+
+  useEffect(() => {
+    if (viewMode === 'analytics') {
+      fetchPriceAnalytics();
+    }
+  }, [viewMode, fetchPriceAnalytics]);
 
   // Auto-Extract Attributes Modal state (Tahap 2)
   const [isExtractModalOpen, setIsExtractModalOpen] = useState<boolean>(false);
@@ -621,7 +653,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                 </button>
               )}
 
-              {/* Toggle View Mode: List vs Matrix */}
+              {/* Toggle View Mode: List vs Matrix vs Analytics */}
               <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
                 <button
                   type="button"
@@ -649,7 +681,35 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
                   <Grid className="w-3.5 h-3.5" />
                   <span>Matriks 2D</span>
                 </button>
+                {canViewPricingAnalytics && (
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('analytics')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      viewMode === 'analytics'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                    title="Tampilan Analitik & Tren Riwayat Harga Varian"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>Tren Harga</span>
+                  </button>
+                )}
               </div>
+
+              {/* Bulk Price Update Button for this product */}
+              {canWritePricing && rawVariants.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsBulkPricingModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-300 dark:border-emerald-800/60 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 transition-colors shadow-2xs"
+                  title="Sesuaikan harga varian produk ini secara massal"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>Update Harga Massal</span>
+                </button>
+              )}
 
               {/* Selection Actions (Move & Bulk Tag) */}
               {canUpdate && rawVariants.length > 0 && (
@@ -1297,6 +1357,171 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
             )}
           </div>
         )}
+
+        {/* ========================================================= */}
+        {/* VIEW MODE 3: ANALYTICS (TREN & HISTORI HARGA VARIAN)      */}
+        {/* ========================================================= */}
+        {viewMode === 'analytics' && canViewPricingAnalytics && (
+          <div className="space-y-6 animate-in fade-in">
+            {/* SVG Price Trend Chart across variants */}
+            <PriceTrendChart
+              data={priceAnalytics?.time_series || []}
+              canViewBuyPrice={canViewBuyPrice}
+              height={300}
+              title={`Tren Riwayat Harga Produk: ${product.name}`}
+            />
+
+            {/* Variants Pricing Table */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-emerald-500" />
+                    <span>Daftar Harga & Gross Margin Seluruh Varian</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Ringkasan performa harga dan marjin kotor per satuan untuk setiap varian
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchPriceAnalytics}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingPriceAnalytics ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+
+              {loadingPriceAnalytics ? (
+                <div className="p-12 text-center text-xs text-slate-400">
+                  <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-emerald-500" />
+                  <span>Memuat analitik harga varian...</span>
+                </div>
+              ) : !priceAnalytics || priceAnalytics.variants_summary.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400">
+                  Belum ada data harga varian yang dapat ditampilkan.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-600 dark:text-slate-300 font-bold">
+                      <tr>
+                        <th className="p-3">Nama Varian & SKU</th>
+                        <th className="p-3">Satuan</th>
+                        <th className="p-3">Harga Jual Saat Ini</th>
+                        {canViewBuyPrice && <th className="p-3">Harga Modal</th>}
+                        {canViewBuyPrice && <th className="p-3">Gross Margin</th>}
+                        <th className="p-3">Rentang Jual (Min - Max)</th>
+                        <th className="p-3">Perubahan Sejak Awal</th>
+                        <th className="p-3 text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {priceAnalytics.variants_summary.map((vSummary) => {
+                        const matchedVariant = rawVariants.find((v) => v.id === vSummary.variant_id);
+                        return vSummary.units.map((unitSummary, uIdx) => (
+                          <tr
+                            key={`${vSummary.variant_id}-${unitSummary.unit_id}`}
+                            className="hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                          >
+                            {uIdx === 0 ? (
+                              <td
+                                rowSpan={vSummary.units.length}
+                                className="p-3 border-r border-slate-100 dark:border-slate-800 align-top"
+                              >
+                                <span className="font-bold text-slate-900 dark:text-white block">
+                                  {vSummary.variant_name}
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  {vSummary.sku}
+                                </span>
+                              </td>
+                            ) : null}
+
+                            <td className="p-3">
+                              <span className="font-semibold text-slate-900 dark:text-white">
+                                {unitSummary.unit_name}
+                              </span>
+                              {unitSummary.is_base_unit && (
+                                <span className="ml-1 text-[9px] uppercase font-bold px-1.5 py-0.5 bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 rounded">
+                                  Dasar
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">
+                              Rp {formatIdNumber(unitSummary.current_sell_price, false)}
+                            </td>
+
+                            {canViewBuyPrice && (
+                              <td className="p-3 font-mono text-slate-600 dark:text-slate-400">
+                                {unitSummary.current_buy_price !== null
+                                  ? `Rp ${formatIdNumber(unitSummary.current_buy_price, false)}`
+                                  : '-'}
+                              </td>
+                            )}
+
+                            {canViewBuyPrice && (
+                              <td className="p-3">
+                                {unitSummary.current_gross_margin !== null ? (
+                                  <span
+                                    className={`font-black text-xs ${
+                                      unitSummary.current_gross_margin <= 0
+                                        ? 'text-rose-600 dark:text-rose-400'
+                                        : unitSummary.current_gross_margin < 10
+                                        ? 'text-amber-600 dark:text-amber-400'
+                                        : 'text-emerald-600 dark:text-emerald-400'
+                                    }`}
+                                  >
+                                    {unitSummary.current_gross_margin.toFixed(1).replace('.', ',')}%
+                                  </span>
+                                ) : (
+                                  '-'
+                                )}
+                              </td>
+                            )}
+
+                            <td className="p-3 font-mono text-slate-500 text-[11px]">
+                              Rp {formatIdNumber(unitSummary.min_sell_price, false)} - Rp {formatIdNumber(unitSummary.max_sell_price, false)}
+                            </td>
+
+                            <td className="p-3 font-mono text-[11px]">
+                              {unitSummary.all_time_sell_diff > 0 ? (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                  +{formatIdNumber(unitSummary.all_time_sell_diff, false)} (+
+                                  {unitSummary.all_time_sell_percent_change.toFixed(1).replace('.', ',')}%)
+                                </span>
+                              ) : unitSummary.all_time_sell_diff < 0 ? (
+                                <span className="text-rose-600 dark:text-rose-400 font-bold">
+                                  -{formatIdNumber(Math.abs(unitSummary.all_time_sell_diff), false)} (
+                                  {unitSummary.all_time_sell_percent_change.toFixed(1).replace('.', ',')}%)
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">Tetap (0%)</span>
+                              )}
+                            </td>
+
+                            <td className="p-3 text-right">
+                              {matchedVariant && (
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectVariant(matchedVariant)}
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                                >
+                                  Detail Varian →
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ));
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ========================================================= */}
@@ -1612,6 +1837,18 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Bulk Price Update Modal */}
+      <BulkPriceUpdateModal
+        isOpen={isBulkPricingModalOpen}
+        onClose={() => setIsBulkPricingModalOpen(false)}
+        product={product}
+        onSuccess={() => {
+          fetchPriceAnalytics();
+          if (onRefresh) onRefresh();
+        }}
+        showToast={showToast}
+      />
     </div>
   );
 };

@@ -1,5 +1,6 @@
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
+import { PriceHistoryService } from './priceHistoryService.js';
 
 export type StockActionType = 
   | 'STOCK_OPNAME'       // Penyesuaian fisik opname
@@ -14,6 +15,18 @@ export type StockActionType =
   | 'RESERVATION_RELEASE' // Pelepasan penahanan stok karena reservasi batal
   | 'VARIANT_MOVED';     // Jejak audit pemindahan varian antar produk
 
+export interface PriceUpdateOnRestock {
+  unit_id: string;
+  buy_price?: number;
+  new_buy_price?: number;
+  sell_price?: number;
+  new_sell_price?: number;
+  wholesale_price?: number | null;
+  new_wholesale_price?: number | null;
+  reason?: string;
+  reference_no?: string;
+}
+
 export interface AdjustStockInput {
   variant_id: string;
   adjustment_mode: 'SET' | 'ADD' | 'SUBTRACT'; 
@@ -23,6 +36,8 @@ export interface AdjustStockInput {
   notes: string;
   user_id?: string | null;
   created_by?: string;
+  price_update?: PriceUpdateOnRestock;
+  allow_buy_price?: boolean;
 }
 
 export class StockService {
@@ -100,6 +115,71 @@ export class StockService {
           userId
         ]
       );
+
+      // 4. Update harga jika disediakan saat RESTOCK
+      let priceUpdated = false;
+      if (input.price_update && input.movement_type === 'PURCHASE_RESTOCK') {
+        const pu = input.price_update;
+        const unitRes = await client.query(
+          `SELECT vu.*, p.supplier_id
+           FROM variant_units vu
+           JOIN product_variants pv ON vu.variant_id = pv.id
+           JOIN products p ON pv.product_id = p.id
+           WHERE vu.id = $1 AND vu.variant_id = $2
+           FOR UPDATE`,
+          [pu.unit_id, input.variant_id]
+        );
+
+        if (unitRes.rows.length > 0) {
+          const uRow = unitRes.rows[0];
+          const oldBuy = Number(uRow.buy_price) || 0;
+          const oldSell = Number(uRow.sell_price) || 0;
+          const oldWholesale = uRow.wholesale_price !== null ? Number(uRow.wholesale_price) : null;
+
+          const allowBuy = input.allow_buy_price ?? true;
+          const buyInput = pu.buy_price !== undefined ? pu.buy_price : pu.new_buy_price;
+          const sellInput = pu.sell_price !== undefined ? pu.sell_price : pu.new_sell_price;
+          const wholesaleInput = pu.wholesale_price !== undefined ? pu.wholesale_price : pu.new_wholesale_price;
+
+          const targetBuy = (buyInput !== undefined && allowBuy) ? Number(buyInput) || 0 : oldBuy;
+          const targetSell = sellInput !== undefined ? Number(sellInput) || 0 : oldSell;
+          const targetWholesale = wholesaleInput !== undefined ? (wholesaleInput !== null ? Number(wholesaleInput) : null) : oldWholesale;
+
+          const buyChanged = allowBuy && buyInput !== undefined && Math.abs(targetBuy - oldBuy) > 0.001;
+          const sellChanged = sellInput !== undefined && Math.abs(targetSell - oldSell) > 0.001;
+          const wholesaleChanged = wholesaleInput !== undefined && targetWholesale !== oldWholesale;
+
+          if (buyChanged || sellChanged || wholesaleChanged) {
+            await client.query(
+              `UPDATE variant_units
+               SET buy_price = $1, sell_price = $2, wholesale_price = $3, updated_at = CURRENT_TIMESTAMP
+               WHERE id = $4`,
+              [targetBuy, targetSell, targetWholesale, pu.unit_id]
+            );
+
+            await PriceHistoryService.recordChange(client, {
+              productId: variant.product_id,
+              variantId: input.variant_id,
+              variantUnitId: pu.unit_id,
+              unitName: uRow.unit_name,
+              supplierId: uRow.supplier_id,
+              oldBuyPrice: oldBuy,
+              newBuyPrice: targetBuy,
+              oldSellPrice: oldSell,
+              newSellPrice: targetSell,
+              oldWholesalePrice: oldWholesale,
+              newWholesalePrice: targetWholesale,
+              changeSource: 'PURCHASE_RESTOCK',
+              referenceNo: pu.reference_no || refNo,
+              reason: pu.reason || input.notes || 'Pembaruan harga saat restock barang',
+              userId,
+              createdBy: creator,
+            });
+
+            priceUpdated = true;
+          }
+        }
+      }
 
       await client.query('COMMIT');
 
