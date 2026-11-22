@@ -216,6 +216,11 @@ router.post(
   requirePermission('products:create'),
   VariantController.addVariant
 );
+router.put(
+  '/products/:productId/variants/bulk-attributes',
+  requirePermission('products:update'),
+  VariantController.bulkUpdateAttributes
+);
 router.put('/variants/:id', requirePermission('products:update'), VariantController.updateVariant);
 router.patch(
   '/variants/:id/toggle-status',

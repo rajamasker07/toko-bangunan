@@ -127,6 +127,7 @@ export interface ProductVariant {
   available_stock?: number | string;
   min_stock: number | string;
   is_active?: boolean;
+  attributes?: Record<string, string>;
   units: VariantUnit[];
 }
 
@@ -178,6 +179,7 @@ export interface Product {
   min_stock_alert: number | string;
   is_active: boolean;
   has_variants: boolean;
+  variant_options?: string[];
   total_stock: number | string;
   total_reserved_stock?: number | string;
   total_available_stock?: number | string;

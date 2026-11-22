@@ -37,6 +37,7 @@ export class VariantService {
       barcode?: string;
       initial_stock?: number;
       min_stock?: number;
+      attributes?: Record<string, string>;
       units?: Array<{
         unit_name: string;
         conversion_factor?: number;
@@ -69,9 +70,9 @@ export class VariantService {
       await client.query('UPDATE products SET has_variants = true WHERE id = $1', [productId]);
 
       await client.query(
-        `INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, current_stock, min_stock)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [variantId, productId, data.variant_name, sku, data.barcode || null, initialStock, minStock]
+        `INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, current_stock, min_stock, attributes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [variantId, productId, data.variant_name, sku, data.barcode || null, initialStock, minStock, JSON.stringify(data.attributes || {})]
       );
 
       if (data.units && data.units.length > 0) {
@@ -128,6 +129,7 @@ export class VariantService {
     barcode?: string;
     min_stock?: number;
     is_active?: boolean;
+    attributes?: Record<string, string>;
   }) {
     const fields: string[] = [];
     const values: any[] = [];
@@ -151,6 +153,10 @@ export class VariantService {
     if (data.is_active !== undefined) {
       values.push(data.is_active);
       fields.push(`is_active = $${values.length}`);
+    }
+    if (data.attributes !== undefined) {
+      values.push(JSON.stringify(data.attributes || {}));
+      fields.push(`attributes = $${values.length}`);
     }
 
     if (fields.length === 0) return null;
@@ -292,5 +298,66 @@ export class VariantService {
       EmbeddingService.syncProductEmbedding(productId).catch(() => {});
     }
     return res.rows[0];
+  }
+
+  /**
+   * Bulk update attributes for multiple variants of a product
+   */
+  static async bulkUpdateAttributes(
+    productId: string,
+    updates: Array<{ variant_id: string; attributes: Record<string, string> }>,
+    variantOptions?: string[]
+  ) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const item of updates) {
+        await client.query(
+          `UPDATE product_variants 
+           SET attributes = $1, updated_at = CURRENT_TIMESTAMP 
+           WHERE id = $2 AND product_id = $3`,
+          [JSON.stringify(item.attributes || {}), item.variant_id, productId]
+        );
+      }
+
+      if (variantOptions && Array.isArray(variantOptions)) {
+        await client.query(
+          `UPDATE products 
+           SET variant_options = $1, updated_at = CURRENT_TIMESTAMP 
+           WHERE id = $2`,
+          [JSON.stringify(variantOptions), productId]
+        );
+      } else {
+        // Collect all distinct attribute keys from all variants of this product
+        const allVarsRes = await client.query(
+          `SELECT attributes FROM product_variants WHERE product_id = $1`,
+          [productId]
+        );
+        const keysSet = new Set<string>();
+        for (const row of allVarsRes.rows) {
+          if (row.attributes && typeof row.attributes === 'object') {
+            Object.keys(row.attributes).forEach((k) => {
+              if (k && k.trim()) keysSet.add(k.trim());
+            });
+          }
+        }
+        await client.query(
+          `UPDATE products 
+           SET variant_options = $1, updated_at = CURRENT_TIMESTAMP 
+           WHERE id = $2`,
+          [JSON.stringify(Array.from(keysSet)), productId]
+        );
+      }
+
+      await client.query('COMMIT');
+      EmbeddingService.syncProductEmbedding(productId).catch(() => {});
+      return { count: updates.length };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }

@@ -57,6 +57,7 @@ interface FlattenedVariant {
   available_stock: number;
   units: VariantUnit[];
   baseUnitName: string;
+  attributes?: Record<string, string>;
 }
 
 interface CreateReservationModalProps {
@@ -169,6 +170,7 @@ export const CreateReservationModal: React.FC<CreateReservationModalProps> = ({
           available_stock: availStock,
           units: v.units || [],
           baseUnitName: baseUnit,
+          attributes: v.attributes,
         });
       }
     }
@@ -203,7 +205,8 @@ export const CreateReservationModal: React.FC<CreateReservationModalProps> = ({
           v.sku.toLowerCase().includes(q) ||
           (v.barcode && v.barcode.toLowerCase().includes(q)) ||
           (v.brand && v.brand.toLowerCase().includes(q)) ||
-          (v.category_name && v.category_name.toLowerCase().includes(q))
+          (v.category_name && v.category_name.toLowerCase().includes(q)) ||
+          (v.attributes && Object.values(v.attributes).some((val) => String(val).toLowerCase().includes(q)))
         );
       });
     }
@@ -878,6 +881,21 @@ export const CreateReservationModal: React.FC<CreateReservationModalProps> = ({
                             <Tag className="w-3 h-3 text-slate-400" />
                             SKU: {v.sku}
                           </p>
+
+                          {/* Dynamic Attribute Badges */}
+                          {v.attributes && Object.keys(v.attributes).length > 0 && (
+                            <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                              {Object.entries(v.attributes).map(([attrKey, attrVal]) => (
+                                <span
+                                  key={attrKey}
+                                  className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200/50"
+                                >
+                                  <span className="text-slate-400 font-normal">{attrKey}:</span>
+                                  <span>{attrVal}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* Bottom: Stock Information */}

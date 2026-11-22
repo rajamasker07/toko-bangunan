@@ -42,6 +42,7 @@ export interface FlattenedVariant {
   brand?: string | null;
   supplier_name?: string | null;
   product_is_active?: boolean;
+  attributes?: Record<string, string>;
   _searchIndex: string;
 }
 
@@ -113,6 +114,21 @@ const VariantListItem = React.memo<VariantListItemProps>(({
               </span>
             )}
           </div>
+
+          {/* Dynamic Variant Attributes Badges */}
+          {v.attributes && Object.keys(v.attributes).length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap pt-0.5">
+              {Object.entries(v.attributes).map(([attrKey, attrVal]) => (
+                <span
+                  key={attrKey}
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200/50 dark:border-amber-800/50"
+                >
+                  <span className="text-slate-400 font-normal">{attrKey}:</span>
+                  <span>{attrVal}</span>
+                </span>
+              ))}
+            </div>
+          )}
 
           <div className="flex items-center gap-2.5 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
             <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
@@ -227,8 +243,9 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
     for (const p of products) {
       const vars = p.variants || [];
       for (const v of vars) {
-        // Pre-normalize search tokens into a single lowercase index for O(1) matching including materials & specifications
-        const searchIndex = `${p.name} ${v.variant_name} ${v.sku} ${p.sku} ${v.barcode || ''} ${p.category_name || ''} ${p.brand || ''} ${p.material || ''} ${p.specifications || ''} ${p.description || ''}`.toLowerCase();
+        // Pre-normalize search tokens into a single lowercase index for O(1) matching including materials, specifications, and dynamic attributes
+        const attrTokens = v.attributes ? Object.entries(v.attributes).map(([k, val]) => `${k} ${val}`).join(' ') : '';
+        const searchIndex = `${p.name} ${v.variant_name} ${v.sku} ${p.sku} ${v.barcode || ''} ${p.category_name || ''} ${p.brand || ''} ${p.material || ''} ${p.specifications || ''} ${p.description || ''} ${attrTokens}`.toLowerCase();
         list.push({
           id: v.id,
           variant_name: v.variant_name,
@@ -238,6 +255,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
           min_stock: Number(v.min_stock) || 0,
           is_active: v.is_active !== false,
           units: v.units || [],
+          attributes: v.attributes,
           product_id: p.id,
           product_name: p.name,
           product_sku: p.sku,

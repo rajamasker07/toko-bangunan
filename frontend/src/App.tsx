@@ -809,6 +809,11 @@ export const App: React.FC = () => {
                   onMergeProduct={(p) => handleOpenMergeProduct(p)}
                   onAbsorbProducts={(targetProd) => handleOpenBulkMerge([], targetProd)}
                   onMoveVariants={(vars) => handleOpenMoveVariants(selectedProduct, vars)}
+                  onRefresh={() => {
+                    loadProducts();
+                    loadSummary();
+                  }}
+                  showToast={showToast}
                 />
               ) : null}
             </>
@@ -957,6 +962,7 @@ export const App: React.FC = () => {
           onClose={() => setIsAddVariantOpen(false)}
           productId={addVariantProductId}
           productName={addVariantProductName}
+          product={selectedProduct || products.find((p) => p.id === addVariantProductId)}
           onSuccess={() => {
             loadProducts();
             loadSummary();
@@ -991,6 +997,7 @@ export const App: React.FC = () => {
           }}
           variant={editingVariant}
           productName={editingVariantProductName}
+          product={selectedProduct || products.find((p) => p.variants?.some((v) => v.id === editingVariant?.id))}
           onSuccess={() => {
             loadProducts();
             loadSummary();

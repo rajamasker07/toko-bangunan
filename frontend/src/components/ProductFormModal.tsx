@@ -129,6 +129,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       barcode: '',
       initial_stock: 0,
       min_stock: 5,
+      attributes: {} as Record<string, string>,
       units: [
         {
           id: createUniqueId('unit'),
@@ -165,6 +166,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
     // Multi-variant Form States
     setVariantsList(getDefaultVariantsList());
+    setVariantOptions([]);
+    setNewOptionInput('');
+    setMatrixValues({});
+    setMatrixRawInputs({});
+    setBulkAttrKey('');
+    setBulkAttrVal('');
+    setBulkSellPrice(0);
+    setBulkBuyPrice(0);
 
     // Physical Dimensions & Specs (Tahap 3)
     setWeight('');
@@ -467,6 +476,18 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   }>>([]);
 
   // Multi-variant Form States
+  const [variantOptions, setVariantOptions] = useState<string[]>([]);
+  const [newOptionInput, setNewOptionInput] = useState<string>('');
+  const [matrixValues, setMatrixValues] = useState<Record<string, string[]>>({});
+  const [matrixRawInputs, setMatrixRawInputs] = useState<Record<string, string>>({});
+  const [isMatrixGeneratorOpen, setIsMatrixGeneratorOpen] = useState<boolean>(true);
+
+  // Bulk Price by Attribute States
+  const [bulkAttrKey, setBulkAttrKey] = useState<string>('');
+  const [bulkAttrVal, setBulkAttrVal] = useState<string>('');
+  const [bulkSellPrice, setBulkSellPrice] = useState<number>(0);
+  const [bulkBuyPrice, setBulkBuyPrice] = useState<number>(0);
+
   const [variantsList, setVariantsList] = useState<Array<{
     id: string;
     variant_name: string;
@@ -474,6 +495,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     barcode: string;
     initial_stock: number;
     min_stock: number;
+    attributes?: Record<string, string>;
     units: Array<{
       id: string;
       unit_name: string;
@@ -491,6 +513,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       barcode: '',
       initial_stock: 0,
       min_stock: 5,
+      attributes: {},
       units: [
         {
           id: 'unit-init-1',
@@ -651,6 +674,195 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     } catch (err: any) {
       showToast(err.message || 'Gagal menambahkan supplier baru', 'error');
     }
+  };
+
+  // Variant Dynamic Attribute Handlers
+  const handleAddVariantOption = (optionName: string) => {
+    const trimmed = optionName.trim();
+    if (!trimmed) return;
+    if (variantOptions.some((opt) => opt.toLowerCase() === trimmed.toLowerCase())) {
+      showToast(`Atribut "${trimmed}" sudah ada`, 'error');
+      return;
+    }
+    setVariantOptions((prev) => [...prev, trimmed]);
+    setNewOptionInput('');
+  };
+
+  const handleRemoveVariantOption = (optionName: string) => {
+    setVariantOptions((prev) => prev.filter((opt) => opt !== optionName));
+    setMatrixValues((prev) => {
+      const copy = { ...prev };
+      delete copy[optionName];
+      return copy;
+    });
+    setMatrixRawInputs((prev) => {
+      const copy = { ...prev };
+      delete copy[optionName];
+      return copy;
+    });
+    // Remove attribute from existing variants
+    setVariantsList((prev) =>
+      prev.map((v) => {
+        if (!v.attributes) return v;
+        const copyAttrs = { ...v.attributes };
+        delete copyAttrs[optionName];
+        return { ...v, attributes: copyAttrs };
+      })
+    );
+  };
+
+  const handleAddMatrixTag = (attrKey: string, val: string) => {
+    const trimmed = val.trim();
+    if (!trimmed) return;
+    setMatrixValues((prev) => {
+      const currentList = prev[attrKey] || [];
+      if (currentList.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+        return prev;
+      }
+      return { ...prev, [attrKey]: [...currentList, trimmed] };
+    });
+    setMatrixRawInputs((prev) => ({ ...prev, [attrKey]: '' }));
+  };
+
+  const handleRemoveMatrixTag = (attrKey: string, tagIndex: number) => {
+    setMatrixValues((prev) => {
+      const currentList = prev[attrKey] || [];
+      return {
+        ...prev,
+        [attrKey]: currentList.filter((_, idx) => idx !== tagIndex),
+      };
+    });
+  };
+
+  // Cartesian Product Generator for Variant Combinations
+  const handleGenerateMatrixVariants = () => {
+    const activeOptions = variantOptions.filter(
+      (opt) => (matrixValues[opt] || []).length > 0
+    );
+
+    if (activeOptions.length === 0) {
+      showToast('Masukkan minimal 1 nilai tag pada atribut sebelum membuat matriks kombinasi!', 'error');
+      return;
+    }
+
+    // Cartesian product helper
+    const cartesian = (arrays: string[][]): string[][] => {
+      return arrays.reduce(
+        (acc, curr) => acc.flatMap((d) => curr.map((e) => [...d, e])),
+        [[]] as string[][]
+      );
+    };
+
+    const valueArrays = activeOptions.map((opt) => matrixValues[opt]);
+    const combinations = cartesian(valueArrays);
+
+    if (combinations.length === 0) {
+      showToast('Gagal menghasilkan kombinasi varian', 'error');
+      return;
+    }
+
+    // Retain default base unit if present in current first variant
+    const existingBaseUnit = variantsList[0]?.units?.find((u) => u.is_base_unit);
+    const defaultBaseUnitName = existingBaseUnit?.unit_name || 'Pcs';
+    const defaultBuyPrice = existingBaseUnit?.buy_price || 0;
+    const defaultSellPrice = existingBaseUnit?.sell_price || 0;
+
+    const newVariants = combinations.map((combo, idx) => {
+      const attributes: Record<string, string> = {};
+      activeOptions.forEach((opt, optIdx) => {
+        attributes[opt] = combo[optIdx];
+      });
+
+      const variantName = combo.join(' - ');
+      const skuSuffix = combo
+        .map((c) => c.replace(/\s+/g, '').slice(0, 3).toUpperCase())
+        .join('-');
+      const generatedSku = sku.trim() ? `${sku.trim()}-${skuSuffix}-${idx + 1}` : '';
+
+      return {
+        id: createUniqueId('var-mat'),
+        variant_name: variantName,
+        sku: generatedSku,
+        barcode: '',
+        initial_stock: 0,
+        min_stock: 5,
+        attributes,
+        units: [
+          {
+            id: createUniqueId('unit'),
+            unit_name: defaultBaseUnitName,
+            conversion_factor: 1,
+            is_base_unit: true,
+            buy_price: defaultBuyPrice,
+            sell_price: defaultSellPrice,
+          },
+        ],
+      };
+    });
+
+    setVariantsList(newVariants);
+    showToast(
+      `Sukses me-generate ${newVariants.length} varian otomatis dari kombinasi atribut!`,
+      'success'
+    );
+  };
+
+  // Bulk set prices for all variants matching a specific attribute value
+  const handleApplyBulkPriceByAttribute = () => {
+    if (!bulkAttrKey || !bulkAttrVal) {
+      showToast('Pilih atribut dan nilai atribut terlebih dahulu!', 'error');
+      return;
+    }
+    if (bulkSellPrice <= 0) {
+      showToast('Harga jual harus lebih dari 0', 'error');
+      return;
+    }
+
+    let affectedCount = 0;
+    setVariantsList((prev) =>
+      prev.map((v) => {
+        if (v.attributes?.[bulkAttrKey] === bulkAttrVal) {
+          affectedCount++;
+          return {
+            ...v,
+            units: v.units.map((u) => {
+              if (u.is_base_unit) {
+                return {
+                  ...u,
+                  sell_price: Number(bulkSellPrice),
+                  ...(canViewBuyPrice && bulkBuyPrice > 0 ? { buy_price: Number(bulkBuyPrice) } : {}),
+                };
+              }
+              return u;
+            }),
+          };
+        }
+        return v;
+      })
+    );
+
+    if (affectedCount > 0) {
+      showToast(`Harga berhasil diterapkan ke ${affectedCount} varian dengan ${bulkAttrKey} = "${bulkAttrVal}"`, 'success');
+    } else {
+      showToast(`Tidak ada varian yang memiliki atribut ${bulkAttrKey} = "${bulkAttrVal}"`, 'info');
+    }
+  };
+
+  const handleVariantAttributeChange = (variantId: string, attrKey: string, val: string) => {
+    setVariantsList((prev) =>
+      prev.map((v) => {
+        if (v.id !== variantId) return v;
+        const newAttrs = { ...(v.attributes || {}), [attrKey]: val };
+        // Auto compose variant name if name is empty or matches previous auto-composition
+        const autoName = variantOptions.map((opt) => newAttrs[opt]).filter(Boolean).join(' - ');
+        const isDefaultName = !v.variant_name.trim() || variantOptions.some((opt) => v.variant_name.includes(v.attributes?.[opt] || '___'));
+        return {
+          ...v,
+          attributes: newAttrs,
+          variant_name: isDefaultName && autoName ? autoName : v.variant_name,
+        };
+      })
+    );
   };
 
   // Variant handlers
@@ -862,6 +1074,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
         payload = {
           ...payload,
+          variant_options: variantOptions.length > 0 ? variantOptions : undefined,
           variants: variantsList.map((v) => {
             const baseUnit = v.units.find((x) => x.is_base_unit);
             return {
@@ -870,6 +1083,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               barcode: v.barcode.trim() || undefined,
               initial_stock: Number(v.initial_stock) || 0,
               min_stock: Number(v.min_stock) || 5,
+              attributes: v.attributes && Object.keys(v.attributes).length > 0 ? v.attributes : undefined,
               units: v.units.map((u) => {
                 const effectiveBuy = Number(u.buy_price) || (
                   !u.is_base_unit && baseUnit && baseUnit.buy_price > 0
@@ -1708,9 +1922,294 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           {/* Multi-Variant Configuration Form */}
           {hasVariants && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              {/* 2.A: Definisi Opsi Atribut Produk (Dinamis) */}
+              <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Definisi Atribut Varian Dinamis</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Tentukan atribut varian produk ini (misal: Kemasan, Warna, Ukuran, Panjang) untuk mempermudah pencarian dan filter kasir.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Quick attribute suggestion pills */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-semibold text-slate-400 mr-1">Rekomendasi Cepat:</span>
+                  {['Kemasan', 'Warna', 'Ukuran', 'Panjang', 'Ketebalan', 'Tipe', 'Finishing'].map((sug) => {
+                    const isAdded = variantOptions.includes(sug);
+                    return (
+                      <button
+                        key={sug}
+                        type="button"
+                        onClick={() => (isAdded ? handleRemoveVariantOption(sug) : handleAddVariantOption(sug))}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                          isAdded
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {isAdded ? `✓ ${sug}` : `+ ${sug}`}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom attribute input and active tags */}
+                <div className="flex items-center gap-2 flex-wrap pt-1">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={newOptionInput}
+                      onChange={(e) => setNewOptionInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddVariantOption(newOptionInput);
+                        }
+                      }}
+                      placeholder="Nama Atribut Lain (cth: Daya, Voltase)..."
+                      className="px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleAddVariantOption(newOptionInput)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-colors"
+                    >
+                      Tambah
+                    </button>
+                  </div>
+
+                  {/* Active Options Tags */}
+                  {variantOptions.map((opt) => (
+                    <span
+                      key={opt}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-300/60 dark:border-amber-800/60"
+                    >
+                      <span>{opt}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveVariantOption(opt)}
+                        className="text-amber-500 hover:text-rose-600 transition-colors ml-0.5"
+                        title={`Hapus atribut ${opt}`}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2.B: Generator Matriks Varian Otomatis (Cartesian Product) */}
+              {variantOptions.length > 0 && (
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-indigo-500/10 border border-amber-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-amber-600 animate-pulse" />
+                        <span>Generator Matriks Kombinasi Varian Otomatis</span>
+                      </h4>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                        Ketik nilai untuk tiap atribut (pisahkan dengan koma atau Enter). Sistem akan membuat seluruh varian kombinasi dalam 1 klik!
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsMatrixGeneratorOpen(!isMatrixGeneratorOpen)}
+                      className="text-xs font-bold text-amber-700 dark:text-amber-400 hover:underline"
+                    >
+                      {isMatrixGeneratorOpen ? 'Tutup Generator' : 'Buka Generator'}
+                    </button>
+                  </div>
+
+                  {isMatrixGeneratorOpen && (
+                    <div className="space-y-3 pt-2 border-t border-amber-200/50 dark:border-amber-800/50">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {variantOptions.map((opt) => {
+                          const tags = matrixValues[opt] || [];
+                          return (
+                            <div key={opt} className="p-3 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                                  <Tag className="w-3 h-3 text-amber-500" />
+                                  Nilai {opt}:
+                                </span>
+                                <span className="text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400">
+                                  {tags.length} nilai
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="text"
+                                  value={matrixRawInputs[opt] || ''}
+                                  onChange={(e) => setMatrixRawInputs({ ...matrixRawInputs, [opt]: e.target.value })}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ',') {
+                                      e.preventDefault();
+                                      handleAddMatrixTag(opt, matrixRawInputs[opt] || '');
+                                    }
+                                  }}
+                                  placeholder={`Contoh: ${opt === 'Kemasan' ? '1kg, 0.5kg' : opt === 'Warna' ? 'Black, White' : '3m, 4m'}`}
+                                  className="flex-1 px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddMatrixTag(opt, matrixRawInputs[opt] || '')}
+                                  className="px-2.5 py-1 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors"
+                                >
+                                  +
+                                </button>
+                              </div>
+
+                              {/* Tags preview */}
+                              <div className="flex items-center gap-1 flex-wrap min-h-[26px]">
+                                {tags.map((tag, tIdx) => (
+                                  <span
+                                    key={tag}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300/50"
+                                  >
+                                    <span>{tag}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveMatrixTag(opt, tIdx)}
+                                      className="hover:text-rose-600 font-bold ml-0.5"
+                                    >
+                                      ×
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Action Button & Combination Counter */}
+                      {(() => {
+                        const activeOpts = variantOptions.filter((opt) => (matrixValues[opt] || []).length > 0);
+                        const totalCombos = activeOpts.length > 0
+                          ? activeOpts.reduce((acc, opt) => acc * (matrixValues[opt]?.length || 1), 1)
+                          : 0;
+
+                        return (
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                            <span className="text-xs text-slate-600 dark:text-slate-300">
+                              {totalCombos > 0 ? (
+                                <>
+                                  Akan dihasilkan: <strong>{totalCombos} Varian</strong> (
+                                  {activeOpts.map((opt) => `${opt}: ${matrixValues[opt]?.length}`).join(' × ')})
+                                </>
+                              ) : (
+                                'Ketik dan tambahkan nilai pada kolom atribut di atas untuk mulai membuat kombinasi.'
+                              )}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={handleGenerateMatrixVariants}
+                              disabled={totalCombos === 0}
+                              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white shadow-sm transition-all"
+                            >
+                              <Sparkles className="w-4 h-4" />
+                              <span>Buat {totalCombos > 0 ? `${totalCombos} ` : ''}Kombinasi Varian Sekarang</span>
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 2.C: Samakan Harga per Atribut (Bulk Price Tool) */}
+              {variantOptions.length > 0 && variantsList.length > 1 && (
+                <div className="p-3.5 rounded-2xl bg-slate-100/80 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Coins className="w-4 h-4 text-amber-500" />
+                      Set Cepat Harga per Atribut:
+                    </span>
+                    <select
+                      value={bulkAttrKey}
+                      onChange={(e) => {
+                        setBulkAttrKey(e.target.value);
+                        setBulkAttrVal('');
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                    >
+                      <option value="">-- Pilih Atribut --</option>
+                      {variantOptions.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+
+                    {bulkAttrKey && (
+                      <select
+                        value={bulkAttrVal}
+                        onChange={(e) => setBulkAttrVal(e.target.value)}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                      >
+                        <option value="">-- Pilih Nilai --</option>
+                        {Array.from(
+                          new Set(
+                            variantsList
+                              .map((v) => v.attributes?.[bulkAttrKey])
+                              .filter(Boolean)
+                          )
+                        ).map((val) => (
+                          <option key={val as string} value={val as string}>
+                            {val as string}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {bulkAttrVal && (
+                      <>
+                        <div className="flex items-center gap-1">
+                          <span className="text-slate-500">Harga Jual:</span>
+                          <input
+                            type="number"
+                            value={bulkSellPrice || ''}
+                            onChange={(e) => setBulkSellPrice(Number(e.target.value))}
+                            placeholder="Rp"
+                            className="w-28 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                          />
+                        </div>
+                        {canViewBuyPrice && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-slate-500">Harga Beli:</span>
+                            <input
+                              type="number"
+                              value={bulkBuyPrice || ''}
+                              onChange={(e) => setBulkBuyPrice(Number(e.target.value))}
+                              placeholder="Rp (Opsional)"
+                              className="w-28 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                            />
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleApplyBulkPriceByAttribute}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition-colors"
+                        >
+                          Terapkan
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-1">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  2. Konfigurasi Varian & Multi-Satuan
+                  Daftar Varian ({variantsList.length})
                 </h4>
                 <button
                   type="button"
@@ -1743,6 +2242,44 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                         </button>
                       )}
                     </div>
+
+                    {/* Dynamic Variant Attributes for this variant */}
+                    {variantOptions.length > 0 && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20 space-y-2">
+                        <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                          <Tag className="w-3 h-3 text-amber-500" />
+                          Nilai Atribut Varian Ini:
+                        </span>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {variantOptions.map((opt) => (
+                            <div key={opt}>
+                              <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                                {opt}:
+                              </label>
+                              <input
+                                type="text"
+                                list={`datalist-opt-${opt}`}
+                                value={variant.attributes?.[opt] || ''}
+                                onChange={(e) => handleVariantAttributeChange(variant.id, opt, e.target.value)}
+                                placeholder={`Nilai ${opt}...`}
+                                className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                              />
+                              <datalist id={`datalist-opt-${opt}`}>
+                                {Array.from(
+                                  new Set(
+                                    (matrixValues[opt] || []).concat(
+                                      variantsList.map((v) => v.attributes?.[opt]).filter(Boolean) as string[]
+                                    )
+                                  )
+                                ).map((val) => (
+                                  <option key={val} value={val} />
+                                ))}
+                              </datalist>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
                       <div className="sm:col-span-2">

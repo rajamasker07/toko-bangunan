@@ -266,6 +266,25 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                 )}
                 <span>• ID Varian: <code className="font-mono">{variant.id.slice(0, 10)}...</code></span>
               </div>
+
+              {/* Dynamic Variant Attributes Badges */}
+              {variant.attributes && Object.keys(variant.attributes).length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                  <span className="text-[11px] font-medium text-slate-400 flex items-center gap-1">
+                    <Tag className="w-3 h-3 text-amber-500" />
+                    Atribut Varian:
+                  </span>
+                  {Object.entries(variant.attributes).map(([attrKey, attrVal]) => (
+                    <span
+                      key={attrKey}
+                      className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60"
+                    >
+                      <span className="text-slate-500 dark:text-slate-400 font-normal">{attrKey}:</span>
+                      <span>{attrVal}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
