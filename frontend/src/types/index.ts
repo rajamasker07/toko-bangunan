@@ -654,6 +654,10 @@ export interface PriceHistoryEntry {
   gross_margin_after: number | null;
   markup_before: number | null;
   markup_after: number | null;
+  discount_pct?: number | null;
+  discount_amount?: number | null;
+  tax_pct?: number | null;
+  tax_amount?: number | null;
   change_direction: PriceChangeDirection;
   changed_fields: string[];
   change_source: PriceChangeSource;
@@ -824,6 +828,12 @@ export interface BulkPriceUpdatePayload {
   value: number;
   rounding?: 'NONE' | 'HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND';
   auto_maintain_margin?: boolean;
+  discount_type?: 'PERCENT' | 'AMOUNT';
+  discount_pct?: number;
+  discount_amount?: number;
+  tax_type?: 'PERCENT' | 'AMOUNT';
+  tax_pct?: number;
+  tax_amount?: number;
   reason: string;
   reference_no?: string;
 }
@@ -843,6 +853,10 @@ export interface BulkPricePreviewItem {
   next_wholesale_price: number | null;
   current_margin: number | null;
   next_margin: number | null;
+  discount_pct?: number;
+  discount_amount?: number;
+  tax_pct?: number;
+  tax_amount?: number;
   warning: string | null;
 }
 

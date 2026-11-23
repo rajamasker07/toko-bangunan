@@ -32,6 +32,11 @@ export interface RecordPriceChangeInput {
   referenceNo?: string | null;
   reason?: string | null;
 
+  discountPct?: number | null;
+  discountAmount?: number | null;
+  taxPct?: number | null;
+  taxAmount?: number | null;
+
   userId?: string | null;
   createdBy?: string;
 }
@@ -67,6 +72,13 @@ export interface BulkPriceUpdateInput {
   auto_maintain_margin?: boolean; // if updating buy_price, auto-adjust sell_price to keep gross margin %
   rounding?: 'NONE' | 'HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND';
   rounding_step?: number;
+
+  discount_type?: 'PERCENT' | 'AMOUNT';
+  discount_pct?: number;
+  discount_amount?: number;
+  tax_type?: 'PERCENT' | 'AMOUNT';
+  tax_pct?: number;
+  tax_amount?: number;
 
   reason?: string;
   reference_no?: string;
@@ -183,13 +195,15 @@ export class PriceHistoryService {
         old_buy_price, new_buy_price, old_sell_price, new_sell_price, old_wholesale_price, new_wholesale_price,
         buy_price_diff, buy_price_change_pct, sell_price_diff, sell_price_change_pct,
         old_margin_pct, new_margin_pct, change_direction, changed_fields, change_source,
+        discount_pct, discount_amount, tax_pct, tax_amount,
         batch_id, reference_no, reason, user_id, created_by, created_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
         $7, $8, $9, $10, $11, $12,
         $13, $14, $15, $16,
         $17, $18, $19, $20, $21,
-        $22, $23, $24, $25, $26, CURRENT_TIMESTAMP
+        $22, $23, $24, $25,
+        $26, $27, $28, $29, $30, CURRENT_TIMESTAMP
       )`,
       [
         historyId,
@@ -213,6 +227,10 @@ export class PriceHistoryService {
         direction,
         JSON.stringify(changedFields),
         source,
+        input.discountPct || 0,
+        input.discountAmount || 0,
+        input.taxPct || 0,
+        input.taxAmount || 0,
         input.batchId || null,
         input.referenceNo || null,
         input.reason || null,
@@ -398,6 +416,14 @@ export class PriceHistoryService {
           row.old_wholesale_price !== null ? Number(row.old_wholesale_price) : null,
         new_wholesale_price:
           row.new_wholesale_price !== null ? Number(row.new_wholesale_price) : null,
+        discount_pct:
+          options.includeBuyPrice && row.discount_pct !== null ? Number(row.discount_pct) : 0,
+        discount_amount:
+          options.includeBuyPrice && row.discount_amount !== null ? Number(row.discount_amount) : 0,
+        tax_pct:
+          options.includeBuyPrice && row.tax_pct !== null ? Number(row.tax_pct) : 0,
+        tax_amount:
+          options.includeBuyPrice && row.tax_amount !== null ? Number(row.tax_amount) : 0,
       };
     });
 
@@ -1262,17 +1288,38 @@ export class PriceHistoryService {
       let nextBuy = curBuy;
       let nextSell = curSell;
       let nextWholesale = curWholesale;
+      let discountVal = 0;
+      let taxVal = 0;
 
       // 1. Hitung harga beli baru
       if (input.target_field === 'buy_price' || input.target_field === 'both_buy_and_sell') {
+        let baseAdjustedBuy = curBuy;
         if (input.adjustment_mode === 'PERCENT') {
-          nextBuy = curBuy * (1 + input.value / 100);
+          baseAdjustedBuy = curBuy * (1 + input.value / 100);
         } else if (input.adjustment_mode === 'FIXED_AMOUNT') {
-          nextBuy = Math.max(0, curBuy + input.value);
+          baseAdjustedBuy = Math.max(0, curBuy + input.value);
         } else if (input.adjustment_mode === 'SET_VALUE') {
-          nextBuy = Math.max(0, input.value);
+          baseAdjustedBuy = Math.max(0, input.value);
         }
-        nextBuy = this.applyRounding(nextBuy, step);
+
+        // Terapkan Diskon Supplier (opsional)
+        if (input.discount_pct && input.discount_pct > 0) {
+          discountVal = Number((baseAdjustedBuy * (input.discount_pct / 100)).toFixed(2));
+        } else if (input.discount_amount && input.discount_amount > 0) {
+          discountVal = Math.min(baseAdjustedBuy, input.discount_amount);
+        }
+
+        const netBeforeTax = Math.max(0, baseAdjustedBuy - discountVal);
+
+        // Terapkan PPN Supplier (opsional)
+        if (input.tax_pct && input.tax_pct > 0) {
+          taxVal = Number((netBeforeTax * (input.tax_pct / 100)).toFixed(2));
+        } else if (input.tax_amount && input.tax_amount > 0) {
+          taxVal = input.tax_amount;
+        }
+
+        const effectiveBuy = netBeforeTax + taxVal;
+        nextBuy = this.applyRounding(effectiveBuy, step);
       }
 
       // 2. Hitung harga jual baru
@@ -1362,6 +1409,11 @@ export class PriceHistoryService {
             ? Number((nextMargin - curMargin).toFixed(2))
             : null,
 
+        discount_pct: input.discount_pct || 0,
+        discount_amount: discountVal,
+        tax_pct: input.tax_pct || 0,
+        tax_amount: taxVal,
+
         warning,
       });
     }
@@ -1411,8 +1463,16 @@ export class PriceHistoryService {
       await client.query('BEGIN');
 
       const batchId = generateUUIDv7();
-      const reason = input.reason || 'Update harga massal';
+      const baseReason = input.reason || 'Update harga massal';
       const referenceNo = input.reference_no || `BULK-${Date.now().toString().slice(-6)}`;
+
+      const auditNotes: string[] = [];
+      if (input.discount_pct && input.discount_pct > 0) auditNotes.push(`Diskon: ${input.discount_pct}%`);
+      else if (input.discount_amount && input.discount_amount > 0) auditNotes.push(`Diskon: Rp ${input.discount_amount.toLocaleString('id-ID')}`);
+      if (input.tax_pct && input.tax_pct > 0) auditNotes.push(`PPN: ${input.tax_pct}%`);
+      else if (input.tax_amount && input.tax_amount > 0) auditNotes.push(`PPN: Rp ${input.tax_amount.toLocaleString('id-ID')}`);
+
+      const reason = auditNotes.length > 0 ? `${baseReason} [${auditNotes.join(', ')}]` : baseReason;
 
       let updatedCount = 0;
 
@@ -1448,6 +1508,10 @@ export class PriceHistoryService {
           newSellPrice: item.new_sell_price,
           oldWholesalePrice: item.old_wholesale_price,
           newWholesalePrice: item.new_wholesale_price,
+          discountPct: actor.allowBuyPrice ? (item.discount_pct || null) : null,
+          discountAmount: actor.allowBuyPrice ? (item.discount_amount || null) : null,
+          taxPct: actor.allowBuyPrice ? (item.tax_pct || null) : null,
+          taxAmount: actor.allowBuyPrice ? (item.tax_amount || null) : null,
           changeSource: 'BULK_UPDATE',
           batchId,
           referenceNo,

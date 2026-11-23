@@ -32,8 +32,16 @@ import {
   CheckSquare,
   Square,
   RefreshCw,
+  Plus,
+  Minus,
+  Receipt,
+  Tag,
+  ShieldCheck,
+  Calculator,
 } from 'lucide-react';
-import { formatIdNumber } from './common/NumericInput';
+import { NumericInput, formatIdNumber, parseIdNumber } from './common/NumericInput';
+import { SearchableSelect, SearchableOption } from './common/SearchableSelect';
+import { Pagination } from './common/Pagination';
 
 interface BulkPriceUpdateModalProps {
   isOpen: boolean;
@@ -96,6 +104,8 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
   const [productCategoryFilter, setProductCategoryFilter] = useState<string>('');
   const [productBrandFilter, setProductBrandFilter] = useState<string>('');
   const [productSupplierFilter, setProductSupplierFilter] = useState<string>('');
+  const [productPage, setProductPage] = useState<number>(1);
+  const [productPageSize, setProductPageSize] = useState<number>(12);
 
   // STEP 2: Variant Selection & Filters
   const [selectedVariantIds, setSelectedVariantIds] = useState<Set<string>>(new Set());
@@ -105,16 +115,28 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
   const [variantAttrKeyFilter, setVariantAttrKeyFilter] = useState<string>('');
   const [variantAttrValFilter, setVariantAttrValFilter] = useState<string>('');
   const [variantStockFilter, setVariantStockFilter] = useState<'ALL' | 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK'>('ALL');
+  const [variantPage, setVariantPage] = useState<number>(1);
+  const [variantPageSize, setVariantPageSize] = useState<number>(20);
 
   // STEP 3: Price Configuration
   const [targetField, setTargetField] = useState<'sell_price' | 'buy_price' | 'wholesale_price'>('sell_price');
   const [targetUnits, setTargetUnits] = useState<'BASE_ONLY' | 'ALL_UNITS'>('ALL_UNITS');
   const [adjustmentMode, setAdjustmentMode] = useState<'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE'>('PERCENT');
-  const [value, setValue] = useState<number>(5);
+  const [adjustmentDirection, setAdjustmentDirection] = useState<'+' | '-'>('+');
+  const [adjustmentValue, setAdjustmentValue] = useState<number>(5);
   const [rounding, setRounding] = useState<'NONE' | 'HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND'>('THOUSAND');
   const [autoMaintainMargin, setAutoMaintainMargin] = useState<boolean>(false);
   const [reason, setReason] = useState<string>('');
   const [referenceNo, setReferenceNo] = useState<string>('');
+
+  // STEP 3: Supplier Tax & Discount (Optional for buy_price)
+  const [applySupplierTaxDiscount, setApplySupplierTaxDiscount] = useState<boolean>(false);
+  const [discountType, setDiscountType] = useState<'PERCENT' | 'AMOUNT'>('PERCENT');
+  const [discountPct, setDiscountPct] = useState<number>(0);
+  const [discountAmount, setDiscountAmount] = useState<number>(0);
+  const [taxType, setTaxType] = useState<'PERCENT' | 'AMOUNT'>('PERCENT');
+  const [taxPct, setTaxPct] = useState<number>(11); // Default standard PPN Indonesia 11%
+  const [taxAmount, setTaxAmount] = useState<number>(0);
 
   // STEP 4: Simulation & Preview
   const [isLoadingPreview, setIsLoadingPreview] = useState<boolean>(false);
@@ -162,20 +184,30 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       setProductCategoryFilter('');
       setProductBrandFilter('');
       setProductSupplierFilter('');
+      setProductPage(1);
       setVariantSearch('');
       setVariantProductFilter('');
       setVariantUnitFilter('');
       setVariantAttrKeyFilter('');
       setVariantAttrValFilter('');
       setVariantStockFilter('ALL');
+      setVariantPage(1);
       setTargetField('sell_price');
       setTargetUnits('ALL_UNITS');
       setAdjustmentMode('PERCENT');
-      setValue(5);
+      setAdjustmentDirection('+');
+      setAdjustmentValue(5);
       setRounding('THOUSAND');
       setAutoMaintainMargin(false);
       setReason('');
       setReferenceNo('');
+      setApplySupplierTaxDiscount(false);
+      setDiscountType('PERCENT');
+      setDiscountPct(0);
+      setDiscountAmount(0);
+      setTaxType('PERCENT');
+      setTaxPct(11);
+      setTaxAmount(0);
       setPreviewResult(null);
       setConfirmedCommit(false);
       setCommitResult(null);
@@ -183,6 +215,81 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       loadInitialData();
     }
   }, [isOpen, product]);
+
+  // Reset product page when product filters change
+  useEffect(() => {
+    setProductPage(1);
+  }, [productSearch, productCategoryFilter, productBrandFilter, productSupplierFilter]);
+
+  // Reset variant page when variant filters change
+  useEffect(() => {
+    setVariantPage(1);
+  }, [variantSearch, variantProductFilter, variantUnitFilter, variantAttrKeyFilter, variantAttrValFilter, variantStockFilter]);
+
+  // =========================================================================
+  // REQUIREMENT 1.b: Dynamic Filter Options (HANYA MEMUAT DATA YANG DITAMPILKAN)
+  // =========================================================================
+  const availableCategoryOptions: SearchableOption[] = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; count: number }>();
+    allProducts.forEach((p) => {
+      if (p.category_id && p.category_name) {
+        const existing = map.get(p.category_id);
+        if (existing) {
+          existing.count++;
+        } else {
+          map.set(p.category_id, { id: p.category_id, name: p.category_name, count: 1 });
+        }
+      }
+    });
+
+    return Array.from(map.values())
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((c) => ({
+        value: c.id,
+        label: `${c.name} (${c.count})`,
+        subtitle: `${c.count} produk aktif`,
+      }));
+  }, [allProducts]);
+
+  const availableBrandOptions: SearchableOption[] = useMemo(() => {
+    const map = new Map<string, number>();
+    allProducts.forEach((p) => {
+      if (p.brand && p.brand.trim()) {
+        const b = p.brand.trim();
+        map.set(b, (map.get(b) || 0) + 1);
+      }
+    });
+
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([brand, count]) => ({
+        value: brand,
+        label: `${brand} (${count})`,
+        subtitle: `${count} produk`,
+      }));
+  }, [allProducts]);
+
+  const availableSupplierOptions: SearchableOption[] = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; count: number }>();
+    allProducts.forEach((p) => {
+      if (p.supplier_id && p.supplier_name) {
+        const existing = map.get(p.supplier_id);
+        if (existing) {
+          existing.count++;
+        } else {
+          map.set(p.supplier_id, { id: p.supplier_id, name: p.supplier_name, count: 1 });
+        }
+      }
+    });
+
+    return Array.from(map.values())
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((s) => ({
+        value: s.id,
+        label: `${s.name} (${s.count})`,
+        subtitle: `${s.count} produk aktif`,
+      }));
+  }, [allProducts]);
 
   // Derived: Filtered products in Step 1
   const filteredProducts = useMemo(() => {
@@ -208,6 +315,12 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       return true;
     });
   }, [allProducts, product, productCategoryFilter, productBrandFilter, productSupplierFilter, productSearch]);
+
+  // REQUIREMENT 1.c: Paginated products to prevent heavy memory / DOM overload
+  const paginatedProducts = useMemo(() => {
+    const start = (productPage - 1) * productPageSize;
+    return filteredProducts.slice(start, start + productPageSize);
+  }, [filteredProducts, productPage, productPageSize]);
 
   // Derived: All variants belonging to selected products
   const variantsOfSelectedProducts = useMemo(() => {
@@ -311,12 +424,17 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     variantSearch,
   ]);
 
+  // REQUIREMENT 2.a: Paginated variants to prevent heavy memory / DOM overhead
+  const paginatedVariants = useMemo(() => {
+    const start = (variantPage - 1) * variantPageSize;
+    return filteredVariants.slice(start, start + variantPageSize);
+  }, [filteredVariants, variantPage, variantPageSize]);
+
   // Handlers for Step 1
   const toggleSelectProduct = (productId: string) => {
     const next = new Set(selectedProductIds);
     if (next.has(productId)) {
       next.delete(productId);
-      // Also uncheck its variants
       const prod = allProducts.find((p) => p.id === productId);
       if (prod && prod.variants) {
         const nextVariants = new Set(selectedVariantIds);
@@ -325,7 +443,6 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       }
     } else {
       next.add(productId);
-      // Automatically select all variants of this added product
       const prod = allProducts.find((p) => p.id === productId);
       if (prod && prod.variants) {
         const nextVariants = new Set(selectedVariantIds);
@@ -334,6 +451,28 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       }
     }
     setSelectedProductIds(next);
+  };
+
+  const handleSelectPageProducts = () => {
+    const next = new Set(selectedProductIds);
+    const nextVariants = new Set(selectedVariantIds);
+    paginatedProducts.forEach((p) => {
+      next.add(p.id);
+      (p.variants || []).forEach((v) => nextVariants.add(v.id));
+    });
+    setSelectedProductIds(next);
+    setSelectedVariantIds(nextVariants);
+  };
+
+  const handleDeselectPageProducts = () => {
+    const next = new Set(selectedProductIds);
+    const nextVariants = new Set(selectedVariantIds);
+    paginatedProducts.forEach((p) => {
+      next.delete(p.id);
+      (p.variants || []).forEach((v) => nextVariants.delete(v.id));
+    });
+    setSelectedProductIds(next);
+    setSelectedVariantIds(nextVariants);
   };
 
   const handleSelectAllFilteredProducts = () => {
@@ -369,6 +508,18 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     setSelectedVariantIds(next);
   };
 
+  const handleSelectPageVariants = () => {
+    const next = new Set(selectedVariantIds);
+    paginatedVariants.forEach((v) => next.add(v.id));
+    setSelectedVariantIds(next);
+  };
+
+  const handleDeselectPageVariants = () => {
+    const next = new Set(selectedVariantIds);
+    paginatedVariants.forEach((v) => next.delete(v.id));
+    setSelectedVariantIds(next);
+  };
+
   const handleSelectAllFilteredVariants = () => {
     const next = new Set(selectedVariantIds);
     filteredVariants.forEach((v) => next.add(v.id));
@@ -381,14 +532,29 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     setSelectedVariantIds(next);
   };
 
+  // Effective signed value for calculation
+  const effectiveValue = useMemo(() => {
+    if (adjustmentMode === 'SET_VALUE') {
+      return Math.abs(adjustmentValue);
+    }
+    return adjustmentDirection === '-' ? -Math.abs(adjustmentValue) : Math.abs(adjustmentValue);
+  }, [adjustmentMode, adjustmentDirection, adjustmentValue]);
+
+  // Validation for Adjustment Value
+  const isAdjustmentValid = useMemo(() => {
+    if (isNaN(adjustmentValue)) return false;
+    if (adjustmentMode === 'SET_VALUE') return adjustmentValue > 0;
+    return adjustmentValue > 0; // Absolute value entered in input must be positive
+  }, [adjustmentMode, adjustmentValue]);
+
   // Step 3 Validation & Transition to Step 4
   const handleProceedToSimulation = async () => {
     if (!reason.trim()) {
       triggerToast('Wajib mengisi alasan penyesuaian harga untuk jejak audit', 'error');
       return;
     }
-    if (isNaN(value)) {
-      triggerToast('Nilai penyesuaian harus berupa angka yang valid', 'error');
+    if (!isAdjustmentValid) {
+      triggerToast('Nilai penyesuaian harus lebih dari 0', 'error');
       return;
     }
 
@@ -407,9 +573,27 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
         target_field: targetField,
         target_units: targetUnits,
         adjustment_mode: adjustmentMode,
-        value: Number(value),
+        value: effectiveValue,
         rounding,
-        auto_maintain_margin: autoMaintainMargin,
+        auto_maintain_margin: targetField === 'buy_price' ? autoMaintainMargin : false,
+        discount_type: applySupplierTaxDiscount && targetField === 'buy_price' ? discountType : undefined,
+        discount_pct:
+          applySupplierTaxDiscount && targetField === 'buy_price' && discountType === 'PERCENT'
+            ? discountPct || 0
+            : undefined,
+        discount_amount:
+          applySupplierTaxDiscount && targetField === 'buy_price' && discountType === 'AMOUNT'
+            ? discountAmount || 0
+            : undefined,
+        tax_type: applySupplierTaxDiscount && targetField === 'buy_price' ? taxType : undefined,
+        tax_pct:
+          applySupplierTaxDiscount && targetField === 'buy_price' && taxType === 'PERCENT'
+            ? taxPct || 0
+            : undefined,
+        tax_amount:
+          applySupplierTaxDiscount && targetField === 'buy_price' && taxType === 'AMOUNT'
+            ? taxAmount || 0
+            : undefined,
         reason: reason.trim() || 'Penyesuaian harga massal',
         reference_no: referenceNo.trim() || undefined,
       };
@@ -445,9 +629,27 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
         target_field: targetField,
         target_units: targetUnits,
         adjustment_mode: adjustmentMode,
-        value: Number(value),
+        value: effectiveValue,
         rounding,
-        auto_maintain_margin: autoMaintainMargin,
+        auto_maintain_margin: targetField === 'buy_price' ? autoMaintainMargin : false,
+        discount_type: applySupplierTaxDiscount && targetField === 'buy_price' ? discountType : undefined,
+        discount_pct:
+          applySupplierTaxDiscount && targetField === 'buy_price' && discountType === 'PERCENT'
+            ? discountPct || 0
+            : undefined,
+        discount_amount:
+          applySupplierTaxDiscount && targetField === 'buy_price' && discountType === 'AMOUNT'
+            ? discountAmount || 0
+            : undefined,
+        tax_type: applySupplierTaxDiscount && targetField === 'buy_price' ? taxType : undefined,
+        tax_pct:
+          applySupplierTaxDiscount && targetField === 'buy_price' && taxType === 'PERCENT'
+            ? taxPct || 0
+            : undefined,
+        tax_amount:
+          applySupplierTaxDiscount && targetField === 'buy_price' && taxType === 'AMOUNT'
+            ? taxAmount || 0
+            : undefined,
         reason: reason.trim(),
         reference_no: referenceNo.trim() || undefined,
       };
@@ -485,6 +687,60 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       return true;
     });
   }, [previewResult, previewSearch, previewOnlyLoss]);
+
+  // Live simulation pipeline example calculation for Step 3
+  const samplePipeline = useMemo(() => {
+    const sampleBase = 100000;
+    let baseAdjusted = sampleBase;
+    if (adjustmentMode === 'PERCENT') {
+      baseAdjusted = sampleBase * (1 + effectiveValue / 100);
+    } else if (adjustmentMode === 'FIXED_AMOUNT') {
+      baseAdjusted = Math.max(0, sampleBase + effectiveValue);
+    } else if (adjustmentMode === 'SET_VALUE') {
+      baseAdjusted = Math.max(0, effectiveValue);
+    }
+
+    let discountVal = 0;
+    if (applySupplierTaxDiscount) {
+      if (discountType === 'PERCENT' && discountPct > 0) {
+        discountVal = baseAdjusted * (discountPct / 100);
+      } else if (discountType === 'AMOUNT' && discountAmount > 0) {
+        discountVal = Math.min(baseAdjusted, discountAmount);
+      }
+    }
+
+    const netBeforeTax = Math.max(0, baseAdjusted - discountVal);
+
+    let taxVal = 0;
+    if (applySupplierTaxDiscount) {
+      if (taxType === 'PERCENT' && taxPct > 0) {
+        taxVal = netBeforeTax * (taxPct / 100);
+      } else if (taxType === 'AMOUNT' && taxAmount > 0) {
+        taxVal = taxAmount;
+      }
+    }
+
+    const effectiveBuy = netBeforeTax + taxVal;
+
+    return {
+      sampleBase,
+      baseAdjusted,
+      discountVal,
+      netBeforeTax,
+      taxVal,
+      effectiveBuy,
+    };
+  }, [
+    adjustmentMode,
+    effectiveValue,
+    applySupplierTaxDiscount,
+    discountType,
+    discountPct,
+    discountAmount,
+    taxType,
+    taxPct,
+    taxAmount,
+  ]);
 
   if (!isOpen) return null;
 
@@ -578,7 +834,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
         {/* STEP CONTENT BODY (Scrollable) */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
           {/* ========================================================================= */}
-          {/* STEP 1: PILIH PRODUK                                                     */}
+          {/* STEP 1: PILIH PRODUK SASARAN                                              */}
           {/* ========================================================================= */}
           {currentStep === 'SELECT_PRODUCTS' && (
             <div className="space-y-4 animate-in fade-in duration-200">
@@ -599,7 +855,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 </div>
               </div>
 
-              {/* Filters for Products */}
+              {/* REQUIREMENT 1.a & 1.b: Searchable Filters with ONLY active data */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
@@ -607,71 +863,74 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     type="text"
                     value={productSearch}
                     onChange={(e) => setProductSearch(e.target.value)}
-                    placeholder="Cari produk / SKU / merek..."
-                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    placeholder="Cari nama / SKU produk..."
+                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
 
                 <div>
-                  <select
+                  <SearchableSelect
                     value={productCategoryFilter}
-                    onChange={(e) => setProductCategoryFilter(e.target.value)}
-                    className="w-full py-1.5 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="">Semua Kategori</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setProductCategoryFilter}
+                    options={availableCategoryOptions}
+                    placeholder="Semua Kategori"
+                    searchPlaceholder="Cari kategori produk..."
+                    allowClear={true}
+                    clearLabel="Semua Kategori"
+                    size="sm"
+                  />
                 </div>
 
                 <div>
-                  <select
+                  <SearchableSelect
                     value={productBrandFilter}
-                    onChange={(e) => setProductBrandFilter(e.target.value)}
-                    className="w-full py-1.5 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="">Semua Merek</option>
-                    {brands.map((b) => (
-                      <option key={b.id} value={b.name}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setProductBrandFilter}
+                    options={availableBrandOptions}
+                    placeholder="Semua Merek"
+                    searchPlaceholder="Cari merek produk..."
+                    allowClear={true}
+                    clearLabel="Semua Merek"
+                    size="sm"
+                  />
                 </div>
 
                 <div>
-                  <select
+                  <SearchableSelect
                     value={productSupplierFilter}
-                    onChange={(e) => setProductSupplierFilter(e.target.value)}
-                    className="w-full py-1.5 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="">Semua Supplier</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setProductSupplierFilter}
+                    options={availableSupplierOptions}
+                    placeholder="Semua Supplier"
+                    searchPlaceholder="Cari supplier..."
+                    allowClear={true}
+                    clearLabel="Semua Supplier"
+                    size="sm"
+                  />
                 </div>
               </div>
 
               {/* Bulk Select Actions for Filtered Products */}
-              <div className="flex items-center justify-between text-xs text-slate-500">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                 <span>
-                  Menampilkan <strong>{filteredProducts.length}</strong> produk dari total{' '}
-                  {allProducts.length} produk
+                  Menampilkan <strong>{paginatedProducts.length}</strong> produk di halaman ini (dari total{' '}
+                  <strong>{filteredProducts.length}</strong> produk terfilter)
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectPageProducts}
+                    className="text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    <span>Pilih Halaman Ini ({paginatedProducts.length})</span>
+                  </button>
+                  <span>•</span>
                   <button
                     type="button"
                     onClick={handleSelectAllFilteredProducts}
                     className="text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
                   >
                     <CheckSquare className="w-3.5 h-3.5" />
-                    <span>Pilih Semua yang Tampil</span>
+                    <span>Pilih Seluruh Hasil ({filteredProducts.length})</span>
                   </button>
                   <span>•</span>
                   <button
@@ -685,7 +944,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 </div>
               </div>
 
-              {/* Products List / Grid */}
+              {/* REQUIREMENT 1.c: Products Grid with Lazy Load / Pagination */}
               {isLoadingProducts ? (
                 <div className="p-12 text-center text-xs text-slate-400">
                   <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-500" />
@@ -696,60 +955,78 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   Tidak ada produk yang sesuai dengan filter pencarian.
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[460px] overflow-y-auto pr-1">
-                  {filteredProducts.map((p) => {
-                    const isSelected = selectedProductIds.has(p.id);
-                    const vCount = (p.variants || []).length;
-                    return (
-                      <div
-                        key={p.id}
-                        onClick={() => toggleSelectProduct(p.id)}
-                        className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
-                          isSelected
-                            ? 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700/60 shadow-xs'
-                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="pt-0.5">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}} // Handled by card click
-                            className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
-                          />
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[420px] overflow-y-auto pr-1">
+                    {paginatedProducts.map((p) => {
+                      const isSelected = selectedProductIds.has(p.id);
+                      const vCount = (p.variants || []).length;
+                      return (
+                        <div
+                          key={p.id}
+                          onClick={() => toggleSelectProduct(p.id)}
+                          className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
+                            isSelected
+                              ? 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700/60 shadow-xs'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="pt-0.5">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}} // Handled by card click
+                              className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
+                            />
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                {p.name}
+                              </span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
+                                {vCount} Varian
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
+                              <span className="font-mono text-slate-500">{p.sku}</span>
+                              {p.category_name && <span>• {p.category_name}</span>}
+                              {p.brand && <span>• {p.brand}</span>}
+                            </div>
+
+                            <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500">
+                              <span>
+                                Stok Total:{' '}
+                                <strong className="text-slate-800 dark:text-slate-200 font-bold">
+                                  {p.total_stock}
+                                </strong>
+                              </span>
+                              {p.supplier_name && (
+                                <span className="truncate max-w-[140px]">Supp: {p.supplier_name}</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
+                      );
+                    })}
+                  </div>
 
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                              {p.name}
-                            </span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
-                              {vCount} Varian
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
-                            <span className="font-mono text-slate-500">{p.sku}</span>
-                            {p.category_name && <span>• {p.category_name}</span>}
-                            {p.brand && <span>• {p.brand}</span>}
-                          </div>
-
-                          <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500">
-                            <span>
-                              Stok Total:{' '}
-                              <strong className="text-slate-800 dark:text-slate-200 font-bold">
-                                {p.total_stock}
-                              </strong>
-                            </span>
-                            {p.supplier_name && (
-                              <span className="truncate max-w-[140px]">Supp: {p.supplier_name}</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {/* Pagination Controls for Step 1 */}
+                  {filteredProducts.length > productPageSize && (
+                    <Pagination
+                      currentPage={productPage}
+                      totalItems={filteredProducts.length}
+                      pageSize={productPageSize}
+                      onPageChange={setProductPage}
+                      pageSizeOptions={[8, 12, 24, 48]}
+                      onPageSizeChange={(sz) => {
+                        setProductPageSize(sz);
+                        setProductPage(1);
+                      }}
+                      className="rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs"
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -767,7 +1044,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     <span>Langkah 2: Pilih Multi Varian dengan Filter</span>
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Saring dan pilih varian spesifik berdasarkan nama, SKU, produk induk, satuan, atau atribut dinamis (warna, ukuran, tebal, dll).
+                    Saring dan pilih varian spesifik berdasarkan nama, SKU, produk induk, satuan, atau atribut dinamis.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -793,7 +1070,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                       value={variantSearch}
                       onChange={(e) => setVariantSearch(e.target.value)}
                       placeholder="Cari varian / SKU / atribut..."
-                      className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
                   </div>
 
@@ -802,7 +1079,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     <select
                       value={variantProductFilter}
                       onChange={(e) => setVariantProductFilter(e.target.value)}
-                      className="w-full py-1.5 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full py-1.5 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                     >
                       <option value="">Semua Produk Induk ({selectedProductIds.size})</option>
                       {allProducts
@@ -820,7 +1097,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     <select
                       value={variantUnitFilter}
                       onChange={(e) => setVariantUnitFilter(e.target.value)}
-                      className="w-full py-1.5 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full py-1.5 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                     >
                       <option value="">Semua Satuan</option>
                       {availableUnitNames.map((u) => (
@@ -836,7 +1113,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     <select
                       value={variantStockFilter}
                       onChange={(e) => setVariantStockFilter(e.target.value as any)}
-                      className="w-full py-1.5 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full py-1.5 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                     >
                       <option value="ALL">Semua Status Stok</option>
                       <option value="IN_STOCK">Stok Tersedia (&gt; 0)</option>
@@ -856,7 +1133,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                         setVariantAttrKeyFilter(e.target.value);
                         setVariantAttrValFilter('');
                       }}
-                      className="py-1 px-2.5 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+                      className="py-1 px-2.5 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-1 focus:ring-amber-500"
                     >
                       <option value="">-- Pilih Kunci Atribut --</option>
                       {availableAttributeKeys.map((k) => (
@@ -870,7 +1147,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                       <select
                         value={variantAttrValFilter}
                         onChange={(e) => setVariantAttrValFilter(e.target.value)}
-                        className="py-1 px-2.5 text-[11px] rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 font-bold"
+                        className="py-1 px-2.5 text-[11px] rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 font-bold focus:outline-none focus:ring-1 focus:ring-amber-500"
                       >
                         <option value="">Semua Nilai ({variantAttrKeyFilter})</option>
                         {availableAttributeValues.map((val) => (
@@ -898,19 +1175,28 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
               </div>
 
               {/* Bulk Select Actions for Filtered Variants */}
-              <div className="flex items-center justify-between text-xs text-slate-500">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                 <span>
-                  Menampilkan <strong>{filteredVariants.length}</strong> varian dari total{' '}
-                  {variantsOfSelectedProducts.length} varian produk terpilih
+                  Menampilkan <strong>{paginatedVariants.length}</strong> varian di halaman ini (dari total{' '}
+                  <strong>{filteredVariants.length}</strong> varian terfilter)
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectPageVariants}
+                    className="text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    <span>Pilih Halaman Ini ({paginatedVariants.length})</span>
+                  </button>
+                  <span>•</span>
                   <button
                     type="button"
                     onClick={handleSelectAllFilteredVariants}
                     className="text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
                   >
                     <CheckSquare className="w-3.5 h-3.5" />
-                    <span>Pilih Semua yang Tampil ({filteredVariants.length})</span>
+                    <span>Pilih Seluruh Hasil ({filteredVariants.length})</span>
                   </button>
                   <span>•</span>
                   <button
@@ -924,115 +1210,133 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 </div>
               </div>
 
-              {/* Variants Grid / Cards */}
+              {/* REQUIREMENT 2.a: Paginated Variants List to prevent heavy memory overhead */}
               {filteredVariants.length === 0 ? (
                 <div className="p-12 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
                   Tidak ada varian yang cocok dengan filter di atas.
                 </div>
               ) : (
-                <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
-                  {filteredVariants.map((v) => {
-                    const isSelected = selectedVariantIds.has(v.id);
-                    const attrs = v.attributes && typeof v.attributes === 'object' ? Object.entries(v.attributes) : [];
+                <div className="space-y-3">
+                  <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                    {paginatedVariants.map((v) => {
+                      const isSelected = selectedVariantIds.has(v.id);
+                      const attrs = v.attributes && typeof v.attributes === 'object' ? Object.entries(v.attributes) : [];
 
-                    return (
-                      <div
-                        key={v.id}
-                        onClick={() => toggleSelectVariant(v.id)}
-                        className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
-                          isSelected
-                            ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700/60 shadow-xs'
-                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="pt-0.5">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}} // Handled by card click
-                            className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
-                          />
-                        </div>
+                      return (
+                        <div
+                          key={v.id}
+                          onClick={() => toggleSelectVariant(v.id)}
+                          className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
+                            isSelected
+                              ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700/60 shadow-xs'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="pt-0.5">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}} // Handled by card click
+                              className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
+                            />
+                          </div>
 
-                        <div className="flex-1 min-w-0 space-y-2">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                            <div>
-                              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">
-                                {v.parentProduct.name}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-xs text-slate-900 dark:text-white">
-                                  {v.variant_name}
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                              <div>
+                                <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">
+                                  {v.parentProduct.name}
                                 </span>
-                                <span className="text-[10px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded">
-                                  {v.sku}
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-xs text-slate-900 dark:text-white">
+                                    {v.variant_name}
+                                  </span>
+                                  <span className="text-[10px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded">
+                                    {v.sku}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="text-right shrink-0">
+                                <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                                  Stok: {v.current_stock}
                                 </span>
                               </div>
                             </div>
 
-                            <div className="text-right shrink-0">
-                              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
-                                Stok: {v.current_stock}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Dynamic Attribute Pills */}
-                          {attrs.length > 0 && (
-                            <div className="flex flex-wrap items-center gap-1">
-                              {attrs.map(([k, val]) => (
-                                <span
-                                  key={k}
-                                  className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/40 font-medium"
-                                >
-                                  <strong>{k}:</strong> {String(val)}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Units Pricing Table Preview */}
-                          <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-3 text-[11px]">
-                            {(v.units || []).map((u) => {
-                              const sell = Number(u.sell_price) || 0;
-                              const buy = Number(u.buy_price) || 0;
-                              const margin = sell > 0 ? ((sell - buy) / sell) * 100 : 0;
-
-                              return (
-                                <div
-                                  key={u.id}
-                                  className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2 py-0.5 rounded-lg border border-slate-200/60 dark:border-slate-700/60"
-                                >
-                                  <span className="font-bold text-slate-700 dark:text-slate-300">
-                                    {u.unit_name}:
+                            {/* Dynamic Attribute Pills */}
+                            {attrs.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1">
+                                {attrs.map(([k, val]) => (
+                                  <span
+                                    key={k}
+                                    className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/40 font-medium"
+                                  >
+                                    <strong>{k}:</strong> {String(val)}
                                   </span>
-                                  <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                                    Rp {formatIdNumber(sell, false)}
-                                  </span>
-                                  {canViewBuyPrice && (
-                                    <span className="text-[10px] text-slate-400 font-mono">
-                                      (M: {formatIdNumber(buy, false)})
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Units Pricing Table Preview */}
+                            <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-3 text-[11px]">
+                              {(v.units || []).map((u) => {
+                                const sell = Number(u.sell_price) || 0;
+                                const buy = Number(u.buy_price) || 0;
+                                const margin = sell > 0 ? ((sell - buy) / sell) * 100 : 0;
+
+                                return (
+                                  <div
+                                    key={u.id}
+                                    className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2 py-0.5 rounded-lg border border-slate-200/60 dark:border-slate-700/60"
+                                  >
+                                    <span className="font-bold text-slate-700 dark:text-slate-300">
+                                      {u.unit_name}:
                                     </span>
-                                  )}
-                                  {canViewBuyPrice && (
-                                    <span
-                                      className={`text-[9px] font-bold px-1 rounded ${
-                                        margin <= 0
-                                          ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
-                                          : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
-                                      }`}
-                                    >
-                                      {margin.toFixed(1)}%
+                                    <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                      Rp {formatIdNumber(sell, false)}
                                     </span>
-                                  )}
-                                </div>
-                              );
-                            })}
+                                    {canViewBuyPrice && (
+                                      <span className="text-[10px] text-slate-400 font-mono">
+                                        (M: {formatIdNumber(buy, false)})
+                                      </span>
+                                    )}
+                                    {canViewBuyPrice && (
+                                      <span
+                                        className={`text-[9px] font-bold px-1 rounded ${
+                                          margin <= 0
+                                            ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+                                            : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                                        }`}
+                                      >
+                                        {margin.toFixed(1)}%
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+
+                  {/* Pagination Controls for Step 2 */}
+                  {filteredVariants.length > variantPageSize && (
+                    <Pagination
+                      currentPage={variantPage}
+                      totalItems={filteredVariants.length}
+                      pageSize={variantPageSize}
+                      onPageChange={setVariantPage}
+                      pageSizeOptions={[10, 20, 50, 100]}
+                      onPageSizeChange={(sz) => {
+                        setVariantPageSize(sz);
+                        setVariantPage(1);
+                      }}
+                      className="rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs"
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -1049,7 +1353,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   <span>Langkah 3: Tentukan Parameter & Aturan Harga</span>
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Tentukan kolom harga yang diubah, metode formula (persen / nominal), pembulatan, dan alasan audit.
+                  Tentukan kolom harga sasaran, metode formula, pembulatan, PPN & diskon supplier (opsional), dan alasan audit.
                 </p>
               </div>
 
@@ -1129,15 +1433,52 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 </div>
               </div>
 
-              {/* Adjustment Mode & Value */}
+              {/* REQUIREMENT 3.a, 3.b, 3.c: Ergonomic Formatted Numeric Input with Direction Toggle & Presets */}
               <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
-                <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
-                  Metode & Nilai Penyesuaian:
-                </label>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Metode & Nilai Penyesuaian:
+                  </label>
+
+                  {/* Direction toggle for Percent & Fixed Amount */}
+                  {adjustmentMode !== 'SET_VALUE' && (
+                    <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                      <button
+                        type="button"
+                        onClick={() => setAdjustmentDirection('+')}
+                        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                          adjustmentDirection === '+'
+                            ? 'bg-emerald-500 text-white shadow-xs'
+                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                        }`}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Kenaikan (+)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAdjustmentDirection('-')}
+                        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                          adjustmentDirection === '-'
+                            ? 'bg-rose-500 text-white shadow-xs'
+                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                        }`}
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                        <span>Penurunan / Diskon (-)</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Adjustment Mode Selection */}
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
-                    onClick={() => setAdjustmentMode('PERCENT')}
+                    onClick={() => {
+                      setAdjustmentMode('PERCENT');
+                      if (adjustmentValue === 0) setAdjustmentValue(5);
+                    }}
                     className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
                       adjustmentMode === 'PERCENT'
                         ? 'bg-amber-500 border-amber-600 text-white font-bold shadow-xs'
@@ -1148,7 +1489,10 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAdjustmentMode('FIXED_AMOUNT')}
+                    onClick={() => {
+                      setAdjustmentMode('FIXED_AMOUNT');
+                      if (adjustmentValue === 0 || adjustmentValue < 100) setAdjustmentValue(1000);
+                    }}
                     className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
                       adjustmentMode === 'FIXED_AMOUNT'
                         ? 'bg-amber-500 border-amber-600 text-white font-bold shadow-xs'
@@ -1159,7 +1503,10 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAdjustmentMode('SET_VALUE')}
+                    onClick={() => {
+                      setAdjustmentMode('SET_VALUE');
+                      if (adjustmentValue < 100) setAdjustmentValue(50000);
+                    }}
                     className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
                       adjustmentMode === 'SET_VALUE'
                         ? 'bg-amber-500 border-amber-600 text-white font-bold shadow-xs'
@@ -1170,20 +1517,351 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   </button>
                 </div>
 
-                <div className="relative mt-2">
-                  <input
-                    type="number"
-                    step={adjustmentMode === 'PERCENT' ? '0.1' : '100'}
-                    value={value}
-                    onChange={(e) => setValue(Number(e.target.value))}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                    placeholder="Contoh: 10 untuk naik 10%, -5 untuk diskon 5%"
-                  />
-                  <span className="absolute right-4 top-3 text-xs font-bold text-slate-400">
-                    {adjustmentMode === 'PERCENT' ? '%' : 'Rupiah (IDR)'}
-                  </span>
+                {/* Formatted Numeric Input with Indonesian Separator & 2-Decimal Precision */}
+                <div className="space-y-1.5">
+                  {adjustmentMode === 'PERCENT' && (
+                    <NumericInput
+                      value={adjustmentValue}
+                      onChange={(v) => setAdjustmentValue(v)}
+                      allowDecimals={true}
+                      maxDecimals={2}
+                      min={0}
+                      suffixText="%"
+                      placeholder="Contoh: 10,00"
+                      className="font-bold text-sm"
+                    />
+                  )}
+
+                  {adjustmentMode === 'FIXED_AMOUNT' && (
+                    <NumericInput
+                      value={adjustmentValue}
+                      onChange={(v) => setAdjustmentValue(v)}
+                      allowDecimals={true}
+                      maxDecimals={2}
+                      min={0}
+                      prefixText="Rp"
+                      placeholder="Contoh: 5.000,00"
+                      className="font-bold text-sm"
+                    />
+                  )}
+
+                  {adjustmentMode === 'SET_VALUE' && (
+                    <NumericInput
+                      value={adjustmentValue}
+                      onChange={(v) => setAdjustmentValue(v)}
+                      allowDecimals={true}
+                      maxDecimals={2}
+                      min={0}
+                      prefixText="Rp"
+                      placeholder="Contoh: 75.000,00"
+                      className="font-bold text-sm"
+                    />
+                  )}
+
+                  {/* Validation message */}
+                  {!isAdjustmentValid && (
+                    <span className="text-[11px] font-semibold text-rose-500 block">
+                      ⚠️ Nilai penyesuaian harus lebih dari 0 dan valid.
+                    </span>
+                  )}
+                </div>
+
+                {/* Quick Presets Pills */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-slate-400 font-semibold mr-1">Rekomendasi Cepat:</span>
+                  {adjustmentMode === 'PERCENT' ? (
+                    <>
+                      {[2.5, 5, 10, 15, 20].map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => {
+                            setAdjustmentValue(pct);
+                            setAdjustmentDirection('+');
+                          }}
+                          className={`text-[10px] px-2 py-0.5 rounded-lg border font-mono transition-all ${
+                            adjustmentValue === pct && adjustmentDirection === '+'
+                              ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-300 text-amber-800 dark:text-amber-300 font-bold'
+                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100'
+                          }`}
+                        >
+                          +{pct}%
+                        </button>
+                      ))}
+                      {[5, 10].map((pct) => (
+                        <button
+                          key={`neg-${pct}`}
+                          type="button"
+                          onClick={() => {
+                            setAdjustmentValue(pct);
+                            setAdjustmentDirection('-');
+                          }}
+                          className={`text-[10px] px-2 py-0.5 rounded-lg border font-mono transition-all ${
+                            adjustmentValue === pct && adjustmentDirection === '-'
+                              ? 'bg-rose-100 dark:bg-rose-950/60 border-rose-300 text-rose-800 dark:text-rose-300 font-bold'
+                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100'
+                          }`}
+                        >
+                          -{pct}%
+                        </button>
+                      ))}
+                    </>
+                  ) : adjustmentMode === 'FIXED_AMOUNT' ? (
+                    <>
+                      {[500, 1000, 2000, 5000, 10000].map((amt) => (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => {
+                            setAdjustmentValue(amt);
+                            setAdjustmentDirection('+');
+                          }}
+                          className={`text-[10px] px-2 py-0.5 rounded-lg border font-mono transition-all ${
+                            adjustmentValue === amt && adjustmentDirection === '+'
+                              ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-300 text-amber-800 dark:text-amber-300 font-bold'
+                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100'
+                          }`}
+                        >
+                          +Rp {formatIdNumber(amt, false)}
+                        </button>
+                      ))}
+                    </>
+                  ) : null}
                 </div>
               </div>
+
+              {/* REQUIREMENT 3.d & 3.e: SUPPLIER PPN & DISCOUNT FORM (OPTIONAL) */}
+              {targetField === 'buy_price' && canViewBuyPrice && (
+                <div className="bg-gradient-to-br from-amber-500/5 via-slate-50 to-slate-50 dark:from-amber-500/10 dark:via-slate-800/40 dark:to-slate-800/40 p-4 rounded-2xl border border-amber-500/30 dark:border-amber-500/20 space-y-3.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2.5">
+                      <input
+                        type="checkbox"
+                        id="applySupplierTaxDiscountCheck"
+                        checked={applySupplierTaxDiscount}
+                        onChange={(e) => setApplySupplierTaxDiscount(e.target.checked)}
+                        className="mt-1 rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                      />
+                      <div>
+                        <label
+                          htmlFor="applySupplierTaxDiscountCheck"
+                          className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Receipt className="w-3.5 h-3.5 text-amber-500" />
+                          <span>Terapkan Diskon dan/atau PPN Pembelian Supplier (Opsional)</span>
+                        </label>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Gunakan jika faktur distributor menerapkan diskon bertingkat atau PPN pembelian (11% / 12%) pada harga modal dasar.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 shrink-0">
+                      Opsional Faktur
+                    </span>
+                  </div>
+
+                  {applySupplierTaxDiscount && (
+                    <div className="space-y-3 pt-2 border-t border-slate-200/60 dark:border-slate-700/60 animate-in fade-in duration-150">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/* Diskon Supplier */}
+                        <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                              <Tag className="w-3 h-3 text-emerald-500" />
+                              <span>Diskon Supplier:</span>
+                            </span>
+                            <div className="flex items-center gap-1 text-[10px] font-bold">
+                              <button
+                                type="button"
+                                onClick={() => setDiscountType('PERCENT')}
+                                className={`px-2 py-0.5 rounded ${
+                                  discountType === 'PERCENT'
+                                    ? 'bg-amber-500 text-white'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                                }`}
+                              >
+                                %
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDiscountType('AMOUNT')}
+                                className={`px-2 py-0.5 rounded ${
+                                  discountType === 'AMOUNT'
+                                    ? 'bg-amber-500 text-white'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                                }`}
+                              >
+                                Rp
+                              </button>
+                            </div>
+                          </div>
+
+                          {discountType === 'PERCENT' ? (
+                            <NumericInput
+                              value={discountPct}
+                              onChange={(v) => setDiscountPct(v)}
+                              allowDecimals={true}
+                              maxDecimals={2}
+                              min={0}
+                              max={100}
+                              suffixText="%"
+                              placeholder="0,00"
+                              size="sm"
+                              className="font-mono font-bold"
+                            />
+                          ) : (
+                            <NumericInput
+                              value={discountAmount}
+                              onChange={(v) => setDiscountAmount(v)}
+                              allowDecimals={true}
+                              maxDecimals={2}
+                              min={0}
+                              prefixText="Rp"
+                              placeholder="0"
+                              size="sm"
+                              className="font-mono font-bold"
+                            />
+                          )}
+
+                          {/* Quick discount pills */}
+                          <div className="flex items-center gap-1 pt-0.5">
+                            <span className="text-[9px] text-slate-400">Pilihan:</span>
+                            {[0, 2, 5, 10].map((d) => (
+                              <button
+                                key={d}
+                                type="button"
+                                onClick={() => {
+                                  setDiscountType('PERCENT');
+                                  setDiscountPct(d);
+                                }}
+                                className={`text-[9px] px-1.5 py-0.5 rounded border font-mono ${
+                                  discountType === 'PERCENT' && discountPct === d
+                                    ? 'bg-emerald-100 dark:bg-emerald-950/60 border-emerald-300 text-emerald-800 dark:text-emerald-300 font-bold'
+                                    : 'bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+                                }`}
+                              >
+                                {d}%
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* PPN Supplier */}
+                        <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                              <Receipt className="w-3 h-3 text-amber-500" />
+                              <span>PPN Supplier:</span>
+                            </span>
+                            <div className="flex items-center gap-1 text-[10px] font-bold">
+                              <button
+                                type="button"
+                                onClick={() => setTaxType('PERCENT')}
+                                className={`px-2 py-0.5 rounded ${
+                                  taxType === 'PERCENT'
+                                    ? 'bg-amber-500 text-white'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                                }`}
+                              >
+                                %
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setTaxType('AMOUNT')}
+                                className={`px-2 py-0.5 rounded ${
+                                  taxType === 'AMOUNT'
+                                    ? 'bg-amber-500 text-white'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                                }`}
+                              >
+                                Rp
+                              </button>
+                            </div>
+                          </div>
+
+                          {taxType === 'PERCENT' ? (
+                            <NumericInput
+                              value={taxPct}
+                              onChange={(v) => setTaxPct(v)}
+                              allowDecimals={true}
+                              maxDecimals={2}
+                              min={0}
+                              max={100}
+                              suffixText="%"
+                              placeholder="11,00"
+                              size="sm"
+                              className="font-mono font-bold"
+                            />
+                          ) : (
+                            <NumericInput
+                              value={taxAmount}
+                              onChange={(v) => setTaxAmount(v)}
+                              allowDecimals={true}
+                              maxDecimals={2}
+                              min={0}
+                              prefixText="Rp"
+                              placeholder="0"
+                              size="sm"
+                              className="font-mono font-bold"
+                            />
+                          )}
+
+                          {/* Quick tax pills */}
+                          <div className="flex items-center gap-1 pt-0.5">
+                            <span className="text-[9px] text-slate-400">Pilihan:</span>
+                            {[0, 11, 12].map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => {
+                                  setTaxType('PERCENT');
+                                  setTaxPct(t);
+                                }}
+                                className={`text-[9px] px-1.5 py-0.5 rounded border font-mono ${
+                                  taxType === 'PERCENT' && taxPct === t
+                                    ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-300 text-amber-800 dark:text-amber-300 font-bold'
+                                    : 'bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+                                }`}
+                              >
+                                {t}%{t === 11 ? ' (Standar)' : t === 12 ? ' (UU HPP)' : ''}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Interactive Visual Formula Pipeline */}
+                      <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-xs space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          <Calculator className="w-3.5 h-3.5 text-amber-500" />
+                          <span>Simulasi Rantai Perhitungan Modal (Contoh Nilai Dasar Rp 100.000):</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+                          <span className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
+                            Dasar: Rp {formatIdNumber(samplePipeline.baseAdjusted, false)}
+                          </span>
+                          <span className="text-slate-400 font-sans">➔</span>
+                          <span className="bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200/60 dark:border-emerald-800/40 text-emerald-700 dark:text-emerald-300">
+                            - Diskon: Rp {formatIdNumber(samplePipeline.discountVal, false)}
+                          </span>
+                          <span className="text-slate-400 font-sans">➔</span>
+                          <span className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400">
+                            DPP: Rp {formatIdNumber(samplePipeline.netBeforeTax, false)}
+                          </span>
+                          <span className="text-slate-400 font-sans">➔</span>
+                          <span className="bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200/60 dark:border-amber-800/40 text-amber-700 dark:text-amber-300">
+                            + PPN: Rp {formatIdNumber(samplePipeline.taxVal, false)}
+                          </span>
+                          <span className="text-slate-400 font-sans">➔</span>
+                          <span className="bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-200/60 dark:border-indigo-800/40 text-indigo-700 dark:text-indigo-300 font-bold">
+                            = Modal Akhir: Rp {formatIdNumber(samplePipeline.effectiveBuy, false)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Rounding & Margin Maintenance */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1194,7 +1872,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   <select
                     value={rounding}
                     onChange={(e) => setRounding(e.target.value as any)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-1 focus:ring-amber-500"
                   >
                     <option value="NONE">Tanpa Pembulatan</option>
                     <option value="HUNDRED">Bulatkan ke Ratusan Terdekat (100)</option>
@@ -1210,7 +1888,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                       id="autoMaintainMarginStep3"
                       checked={autoMaintainMargin}
                       onChange={(e) => setAutoMaintainMargin(e.target.checked)}
-                      className="mt-1 rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-4 h-4"
+                      className="mt-1 rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
                     />
                     <label
                       htmlFor="autoMaintainMarginStep3"
@@ -1253,7 +1931,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     onChange={(e) => setReason(e.target.value)}
                     required
                     placeholder="Contoh: Kenaikan harga pabrik kuartal 2"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white font-medium"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
 
@@ -1266,7 +1944,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     value={referenceNo}
                     onChange={(e) => setReferenceNo(e.target.value)}
                     placeholder="Contoh: SJ-2026/04/1102"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white font-mono"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
               </div>
@@ -1354,6 +2032,23 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     </div>
                   </div>
 
+                  {/* Supplier Diskon & PPN indicator badge if enabled */}
+                  {applySupplierTaxDiscount && targetField === 'buy_price' && (
+                    <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-900 dark:text-amber-200 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                        <span>
+                          <strong>Perhitungan Supplier Diterapkan:</strong> Diskon:{' '}
+                          {discountType === 'PERCENT' ? `${discountPct}%` : `Rp ${formatIdNumber(discountAmount)}`} | PPN:{' '}
+                          {taxType === 'PERCENT' ? `${taxPct}%` : `Rp ${formatIdNumber(taxAmount)}`}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono font-semibold bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-amber-300 dark:border-amber-700">
+                        Masuk Riwayat Audit
+                      </span>
+                    </div>
+                  )}
+
                   {/* Warning Box if potential losses */}
                   {previewResult.summary.potential_losses_count > 0 && (
                     <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-200 flex items-start gap-2.5 text-xs">
@@ -1377,7 +2072,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                         value={previewSearch}
                         onChange={(e) => setPreviewSearch(e.target.value)}
                         placeholder="Cari dalam hasil simulasi..."
-                        className="w-full pl-8 pr-3 py-1 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        className="w-full pl-8 pr-3 py-1 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                       />
                     </div>
 
@@ -1429,13 +2124,21 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                               </td>
                               {canViewBuyPrice && (
                                 <td className="p-3 font-mono text-slate-600 dark:text-slate-400">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="line-through text-slate-400 text-[11px]">
-                                      {formatIdNumber(item.current_buy_price, false)}
-                                    </span>
-                                    <span className="font-bold">
-                                      → {formatIdNumber(item.next_buy_price, false)}
-                                    </span>
+                                  <div className="flex flex-col gap-0.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="line-through text-slate-400 text-[11px]">
+                                        {formatIdNumber(item.current_buy_price, false)}
+                                      </span>
+                                      <span className="font-bold text-slate-900 dark:text-white">
+                                        → {formatIdNumber(item.next_buy_price, false)}
+                                      </span>
+                                    </div>
+                                    {(item.discount_amount || item.tax_amount) ? (
+                                      <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                                        {item.discount_amount ? `Disc: -Rp ${formatIdNumber(item.discount_amount, false)} ` : ''}
+                                        {item.tax_amount ? `PPN: +Rp ${formatIdNumber(item.tax_amount, false)}` : ''}
+                                      </span>
+                                    ) : null}
                                   </div>
                                 </td>
                               )}
@@ -1544,12 +2247,28 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   <span className="text-slate-400">Formula Penyesuaian:</span>
                   <span className="font-mono font-bold">
                     {adjustmentMode === 'PERCENT'
-                      ? `${value > 0 ? '+' : ''}${value}%`
+                      ? `${effectiveValue > 0 ? '+' : ''}${effectiveValue}%`
                       : adjustmentMode === 'FIXED_AMOUNT'
-                      ? `${value > 0 ? '+' : ''}Rp ${formatIdNumber(value, false)}`
-                      : `Rp ${formatIdNumber(value, false)}`}
+                      ? `${effectiveValue > 0 ? '+' : ''}Rp ${formatIdNumber(effectiveValue, false)}`
+                      : `Rp ${formatIdNumber(effectiveValue, false)}`}
                   </span>
                 </div>
+                {applySupplierTaxDiscount && targetField === 'buy_price' && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Diskon Supplier:</span>
+                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                        {discountType === 'PERCENT' ? `${discountPct}%` : `Rp ${formatIdNumber(discountAmount, false)}`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">PPN Supplier:</span>
+                      <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                        {taxType === 'PERCENT' ? `${taxPct}%` : `Rp ${formatIdNumber(taxAmount, false)}`}
+                      </span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between">
                   <span className="text-slate-400">Alasan:</span>
                   <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[200px]">
@@ -1661,7 +2380,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 <button
                   type="button"
                   onClick={handleProceedToSimulation}
-                  disabled={!reason.trim()}
+                  disabled={!reason.trim() || !isAdjustmentValid}
                   className="px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-md shadow-amber-600/20 flex items-center gap-1.5"
                 >
                   <Sparkles className="w-3.5 h-3.5" />

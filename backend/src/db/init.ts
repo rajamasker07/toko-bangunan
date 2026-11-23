@@ -522,10 +522,20 @@ export async function initializeDatabase() {
         reference_no VARCHAR(100),
         reason TEXT,
 
+        discount_pct NUMERIC(6, 2) DEFAULT 0,
+        discount_amount NUMERIC(14, 2) DEFAULT 0,
+        tax_pct NUMERIC(6, 2) DEFAULT 0,
+        tax_amount NUMERIC(14, 2) DEFAULT 0,
+
         user_id UUID REFERENCES users(id) ON DELETE SET NULL,
         created_by VARCHAR(100) NOT NULL DEFAULT 'Admin',
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(6, 2) DEFAULT 0;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(14, 2) DEFAULT 0;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS tax_pct NUMERIC(6, 2) DEFAULT 0;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS tax_amount NUMERIC(14, 2) DEFAULT 0;
       CREATE INDEX IF NOT EXISTS idx_price_history_product ON price_history(product_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_price_history_variant ON price_history(variant_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_price_history_unit ON price_history(variant_unit_id, created_at DESC);

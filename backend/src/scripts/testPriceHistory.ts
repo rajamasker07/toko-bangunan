@@ -237,7 +237,58 @@ async function runTests() {
       throw new Error('SQL dump should contain store_settings and price_history tables');
     }
 
-    console.log('\n✅ All 10 Price History & Analytics Verification Tests PASSED successfully!');
+    // 11. Bulk Price Update with Supplier Discount & PPN
+    console.log('\n--- Test 11: Bulk Price Update with Supplier Discount & PPN ---');
+    const previewWithTax = await PriceHistoryService.previewBulkPriceUpdate({
+      product_ids: [createdProduct.id],
+      target_field: 'buy_price',
+      adjustment_mode: 'PERCENT',
+      value: 10, // Kenaikan dasar 10%
+      discount_pct: 5, // Diskon supplier 5%
+      tax_pct: 11, // PPN 11%
+      auto_maintain_margin: true,
+      rounding_step: 1000,
+      reason: 'Faktur Supplier Semen Kuartal 3',
+    });
+    console.log(`Preview with tax items: ${previewWithTax.items.length}`);
+    const sampleUnit = previewWithTax.items[0];
+    console.log(`Cur Buy: ${sampleUnit.old_buy_price}, Next Buy: ${sampleUnit.new_buy_price}, Diskon: ${sampleUnit.discount_amount}, PPN: ${sampleUnit.tax_amount}, Next Sell: ${sampleUnit.new_sell_price}`);
+    if (sampleUnit.discount_amount === undefined || sampleUnit.tax_amount === undefined) {
+      throw new Error('Expected discount_amount and tax_amount in preview');
+    }
+
+    const commitTaxResult = await PriceHistoryService.commitBulkPriceUpdate(
+      {
+        product_ids: [createdProduct.id],
+        target_field: 'buy_price',
+        adjustment_mode: 'PERCENT',
+        value: 10,
+        discount_pct: 5,
+        tax_pct: 11,
+        auto_maintain_margin: true,
+        rounding_step: 1000,
+        reason: 'Faktur Supplier Semen Kuartal 3',
+      },
+      {
+        userId: null,
+        createdBy: 'Unit Tester',
+        allowBuyPrice: true,
+      }
+    );
+    console.log(`Commit with tax result: updated ${commitTaxResult.updated_count} units`);
+
+    // Verify history recorded discount_pct and tax_pct
+    const history6 = await PriceHistoryService.getHistory({ variant_id: variantId });
+    const taxEntry = history6.entries[0];
+    console.log(`Tax Entry Source: ${taxEntry.change_source}, Reason: ${taxEntry.reason}, Diskon: ${taxEntry.discount_pct}%, PPN: ${taxEntry.tax_pct}%`);
+    if (Number(taxEntry.discount_pct) !== 5 || Number(taxEntry.tax_pct) !== 11) {
+      throw new Error(`Expected discount_pct 5 and tax_pct 11, got discount_pct ${taxEntry.discount_pct} and tax_pct ${taxEntry.tax_pct}`);
+    }
+    if (!taxEntry.reason?.includes('[Diskon: 5%, PPN: 11%]')) {
+      throw new Error(`Expected audit notes in reason, got: ${taxEntry.reason}`);
+    }
+
+    console.log('\n✅ All 11 Price History & Analytics Verification Tests PASSED successfully!');
   } finally {
     await pool.end();
   }
