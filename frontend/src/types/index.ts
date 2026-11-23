@@ -658,6 +658,8 @@ export interface PriceHistoryEntry {
   discount_amount?: number | null;
   tax_pct?: number | null;
   tax_amount?: number | null;
+  additional_costs?: Array<{ name: string; amount: number }>;
+  total_additional_cost?: number | null;
   change_direction: PriceChangeDirection;
   changed_fields: string[];
   change_source: PriceChangeSource;
@@ -834,6 +836,8 @@ export interface BulkPriceUpdatePayload {
   tax_type?: 'PERCENT' | 'AMOUNT';
   tax_pct?: number;
   tax_amount?: number;
+  additional_costs?: Array<{ name: string; amount: number }>;
+  total_additional_cost?: number;
   reason: string;
   reference_no?: string;
 }
@@ -857,6 +861,8 @@ export interface BulkPricePreviewItem {
   discount_amount?: number;
   tax_pct?: number;
   tax_amount?: number;
+  additional_costs?: Array<{ name: string; amount: number }>;
+  total_additional_cost?: number;
   warning: string | null;
 }
 

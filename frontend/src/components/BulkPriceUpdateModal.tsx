@@ -38,6 +38,8 @@ import {
   Tag,
   ShieldCheck,
   Calculator,
+  Truck,
+  HelpCircle,
 } from 'lucide-react';
 import { NumericInput, formatIdNumber, parseIdNumber } from './common/NumericInput';
 import { SearchableSelect, SearchableOption } from './common/SearchableSelect';
@@ -64,7 +66,7 @@ interface StepItem {
 const STEPS: StepItem[] = [
   { id: 'SELECT_PRODUCTS', stepNumber: 1, title: 'Pilih Produk', subtitle: 'Pilih produk sasaran', icon: Package },
   { id: 'SELECT_VARIANTS', stepNumber: 2, title: 'Pilih Multi Varian', subtitle: 'Filter & pilih varian', icon: Layers },
-  { id: 'CONFIGURE_PRICE', stepNumber: 3, title: 'Tentukan Harga', subtitle: 'Atur formula & aturan', icon: Sliders },
+  { id: 'CONFIGURE_PRICE', stepNumber: 3, title: 'Tentukan Harga', subtitle: 'Atur formula & biaya', icon: Sliders },
   { id: 'SIMULATE_PRICE', stepNumber: 4, title: 'Simulasikan Harga', subtitle: 'Review dampak margin', icon: Sparkles },
   { id: 'COMPLETED', stepNumber: 5, title: 'Selesai', subtitle: 'Ringkasan perubahan', icon: CheckCircle2 },
 ];
@@ -138,6 +140,12 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
   const [taxPct, setTaxPct] = useState<number>(11); // Default standard PPN Indonesia 11%
   const [taxAmount, setTaxAmount] = useState<number>(0);
 
+  // STEP 3: Biaya Tambahan Pengadaan (Include ke Modal)
+  const [applyAdditionalCosts, setApplyAdditionalCosts] = useState<boolean>(false);
+  const [additionalCosts, setAdditionalCosts] = useState<Array<{ id: string; name: string; amount: number }>>([
+    { id: 'cost-1', name: 'Biaya Pengiriman', amount: 0 },
+  ]);
+
   // STEP 4: Simulation & Preview
   const [isLoadingPreview, setIsLoadingPreview] = useState<boolean>(false);
   const [previewResult, setPreviewResult] = useState<BulkPricePreviewResponse | null>(null);
@@ -208,6 +216,8 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       setTaxType('PERCENT');
       setTaxPct(11);
       setTaxAmount(0);
+      setApplyAdditionalCosts(false);
+      setAdditionalCosts([{ id: 'cost-1', name: 'Biaya Pengiriman', amount: 0 }]);
       setPreviewResult(null);
       setConfirmedCommit(false);
       setCommitResult(null);
@@ -532,6 +542,12 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     setSelectedVariantIds(next);
   };
 
+  // Total Additional Cost calculation
+  const totalAdditionalCost = useMemo(() => {
+    if (!applyAdditionalCosts) return 0;
+    return additionalCosts.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  }, [applyAdditionalCosts, additionalCosts]);
+
   // Effective signed value for calculation
   const effectiveValue = useMemo(() => {
     if (adjustmentMode === 'SET_VALUE') {
@@ -544,7 +560,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
   const isAdjustmentValid = useMemo(() => {
     if (isNaN(adjustmentValue)) return false;
     if (adjustmentMode === 'SET_VALUE') return adjustmentValue > 0;
-    return adjustmentValue > 0; // Absolute value entered in input must be positive
+    return adjustmentValue > 0;
   }, [adjustmentMode, adjustmentValue]);
 
   // Step 3 Validation & Transition to Step 4
@@ -566,6 +582,12 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
   const fetchSimulationPreview = async () => {
     try {
       setIsLoadingPreview(true);
+      const validExtraCosts = applyAdditionalCosts && targetField === 'buy_price'
+        ? additionalCosts
+            .filter((c) => c.name.trim() && c.amount > 0)
+            .map((c) => ({ name: c.name.trim(), amount: Number(c.amount) }))
+        : undefined;
+
       const payload: BulkPriceUpdatePayload = {
         scope: 'PRODUCTS',
         product_ids: Array.from(selectedProductIds),
@@ -594,6 +616,8 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
           applySupplierTaxDiscount && targetField === 'buy_price' && taxType === 'AMOUNT'
             ? taxAmount || 0
             : undefined,
+        additional_costs: validExtraCosts,
+        total_additional_cost: applyAdditionalCosts && targetField === 'buy_price' ? totalAdditionalCost : undefined,
         reason: reason.trim() || 'Penyesuaian harga massal',
         reference_no: referenceNo.trim() || undefined,
       };
@@ -622,6 +646,12 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
 
     try {
       setIsCommitting(true);
+      const validExtraCosts = applyAdditionalCosts && targetField === 'buy_price'
+        ? additionalCosts
+            .filter((c) => c.name.trim() && c.amount > 0)
+            .map((c) => ({ name: c.name.trim(), amount: Number(c.amount) }))
+        : undefined;
+
       const payload: BulkPriceUpdatePayload = {
         scope: 'PRODUCTS',
         product_ids: Array.from(selectedProductIds),
@@ -650,6 +680,8 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
           applySupplierTaxDiscount && targetField === 'buy_price' && taxType === 'AMOUNT'
             ? taxAmount || 0
             : undefined,
+        additional_costs: validExtraCosts,
+        total_additional_cost: applyAdditionalCosts && targetField === 'buy_price' ? totalAdditionalCost : undefined,
         reason: reason.trim(),
         reference_no: referenceNo.trim() || undefined,
       };
@@ -720,7 +752,20 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       }
     }
 
-    const effectiveBuy = netBeforeTax + taxVal;
+    const extraCost = applyAdditionalCosts ? totalAdditionalCost : 0;
+    const effectiveBuy = netBeforeTax + taxVal + extraCost;
+
+    // Pembulatan HANYA berlaku untuk harga jual
+    let sampleSell = effectiveBuy / (1 - 0.2); // estimasi margin 20%
+    if (autoMaintainMargin) {
+      let step = 0;
+      if (rounding === 'HUNDRED') step = 100;
+      else if (rounding === 'THOUSAND') step = 1000;
+      else if (rounding === 'FIVE_THOUSAND') step = 5000;
+      if (step > 1) {
+        sampleSell = Math.ceil(sampleSell / step) * step;
+      }
+    }
 
     return {
       sampleBase,
@@ -728,7 +773,9 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       discountVal,
       netBeforeTax,
       taxVal,
+      extraCost,
       effectiveBuy,
+      sampleSell,
     };
   }, [
     adjustmentMode,
@@ -740,6 +787,10 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     taxType,
     taxPct,
     taxAmount,
+    applyAdditionalCosts,
+    totalAdditionalCost,
+    autoMaintainMargin,
+    rounding,
   ]);
 
   if (!isOpen) return null;
@@ -974,7 +1025,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                             <input
                               type="checkbox"
                               checked={isSelected}
-                              onChange={() => {}} // Handled by card click
+                              onChange={() => {}}
                               className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
                             />
                           </div>
@@ -1236,7 +1287,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                             <input
                               type="checkbox"
                               checked={isSelected}
-                              onChange={() => {}} // Handled by card click
+                              onChange={() => {}}
                               className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
                             />
                           </div>
@@ -1353,7 +1404,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   <span>Langkah 3: Tentukan Parameter & Aturan Harga</span>
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Tentukan kolom harga sasaran, metode formula, pembulatan, PPN & diskon supplier (opsional), dan alasan audit.
+                  Tentukan kolom harga sasaran, metode formula, pembulatan harga jual, PPN/diskon, dan biaya tambahan modal.
                 </p>
               </div>
 
@@ -1630,7 +1681,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 </div>
               </div>
 
-              {/* REQUIREMENT 3.d & 3.e: SUPPLIER PPN & DISCOUNT FORM (OPTIONAL) */}
+              {/* SUPPLIER PPN & DISCOUNT FORM (OPTIONAL) */}
               {targetField === 'buy_price' && canViewBuyPrice && (
                 <div className="bg-gradient-to-br from-amber-500/5 via-slate-50 to-slate-50 dark:from-amber-500/10 dark:via-slate-800/40 dark:to-slate-800/40 p-4 rounded-2xl border border-amber-500/30 dark:border-amber-500/20 space-y-3.5">
                   <div className="flex items-start justify-between gap-3">
@@ -1829,57 +1880,272 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                           </div>
                         </div>
                       </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
-                      {/* Interactive Visual Formula Pipeline */}
-                      <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-xs space-y-1.5">
-                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                          <Calculator className="w-3.5 h-3.5 text-amber-500" />
-                          <span>Simulasi Rantai Perhitungan Modal (Contoh Nilai Dasar Rp 100.000):</span>
+              {/* FITUR BIAYA TAMBAHAN PENGADAAN (INCLUDE KE MODAL & TERCATAT DI RIWAYAT) */}
+              {targetField === 'buy_price' && canViewBuyPrice && (
+                <div className="bg-gradient-to-br from-indigo-500/5 via-slate-50 to-slate-50 dark:from-indigo-500/10 dark:via-slate-800/40 dark:to-slate-800/40 p-4 rounded-2xl border border-indigo-500/30 dark:border-indigo-500/20 space-y-3.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2.5">
+                      <input
+                        type="checkbox"
+                        id="applyAdditionalCostsCheck"
+                        checked={applyAdditionalCosts}
+                        onChange={(e) => setApplyAdditionalCosts(e.target.checked)}
+                        className="mt-1 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                      />
+                      <div>
+                        <label
+                          htmlFor="applyAdditionalCostsCheck"
+                          className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Truck className="w-3.5 h-3.5 text-indigo-500" />
+                          <span>Biaya Tambahan Pengadaan (Include ke Harga Modal)</span>
+                        </label>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Tambahkan komponen biaya logistik seperti ongkir/ekspedisi, kontainer, dan upah buruh bongkar. Biaya ini langsung di-include ke harga modal akhir barang dan dicatat pada riwayat audit.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shrink-0">
+                      Landed Cost
+                    </span>
+                  </div>
+
+                  {applyAdditionalCosts && (
+                    <div className="space-y-3 pt-2 border-t border-slate-200/60 dark:border-slate-700/60 animate-in fade-in duration-150">
+                      {/* List of Additional Costs */}
+                      <div className="space-y-2">
+                        {additionalCosts.map((cost, idx) => (
+                          <div
+                            key={cost.id}
+                            className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+                          >
+                            {/* Cost Name Input with quick presets */}
+                            <div className="flex-1 min-w-0">
+                              <input
+                                type="text"
+                                value={cost.name}
+                                onChange={(e) => {
+                                  const next = [...additionalCosts];
+                                  next[idx].name = e.target.value;
+                                  setAdditionalCosts(next);
+                                }}
+                                placeholder="Nama Biaya (cth: Biaya Pengiriman)"
+                                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                              />
+                            </div>
+
+                            {/* Cost Amount (NumericInput with Rp) */}
+                            <div className="w-full sm:w-48">
+                              <NumericInput
+                                value={cost.amount}
+                                onChange={(v) => {
+                                  const next = [...additionalCosts];
+                                  next[idx].amount = v;
+                                  setAdditionalCosts(next);
+                                }}
+                                allowDecimals={true}
+                                maxDecimals={2}
+                                min={0}
+                                prefixText="Rp"
+                                placeholder="0"
+                                size="sm"
+                                className="font-mono font-bold"
+                              />
+                            </div>
+
+                            {/* Remove Row Button */}
+                            {additionalCosts.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAdditionalCosts(additionalCosts.filter((_, i) => i !== idx));
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 self-end sm:self-auto transition-colors"
+                                title="Hapus baris biaya ini"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Quick Add Presets and Add More Button */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span className="text-[10px] text-slate-400 font-semibold mr-1">Tambah Cepat:</span>
+                          {[
+                            { name: 'Biaya Pengiriman', defaultAmt: 2000 },
+                            { name: 'Biaya Kontainer', defaultAmt: 5000 },
+                            { name: 'Biaya Buruh / Bongkar', defaultAmt: 1000 },
+                            { name: 'Asuransi Pengiriman', defaultAmt: 500 },
+                          ].map((preset) => (
+                            <button
+                              key={preset.name}
+                              type="button"
+                              onClick={() => {
+                                setAdditionalCosts((prev) => [
+                                  ...prev,
+                                  { id: `cost-${Date.now()}-${Math.random()}`, name: preset.name, amount: preset.defaultAmt },
+                                ]);
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 font-medium"
+                            >
+                              + {preset.name}
+                            </button>
+                          ))}
                         </div>
-                        <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
-                          <span className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
-                            Dasar: Rp {formatIdNumber(samplePipeline.baseAdjusted, false)}
-                          </span>
-                          <span className="text-slate-400 font-sans">➔</span>
-                          <span className="bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200/60 dark:border-emerald-800/40 text-emerald-700 dark:text-emerald-300">
-                            - Diskon: Rp {formatIdNumber(samplePipeline.discountVal, false)}
-                          </span>
-                          <span className="text-slate-400 font-sans">➔</span>
-                          <span className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400">
-                            DPP: Rp {formatIdNumber(samplePipeline.netBeforeTax, false)}
-                          </span>
-                          <span className="text-slate-400 font-sans">➔</span>
-                          <span className="bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200/60 dark:border-amber-800/40 text-amber-700 dark:text-amber-300">
-                            + PPN: Rp {formatIdNumber(samplePipeline.taxVal, false)}
-                          </span>
-                          <span className="text-slate-400 font-sans">➔</span>
-                          <span className="bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-200/60 dark:border-indigo-800/40 text-indigo-700 dark:text-indigo-300 font-bold">
-                            = Modal Akhir: Rp {formatIdNumber(samplePipeline.effectiveBuy, false)}
-                          </span>
-                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdditionalCosts((prev) => [
+                              ...prev,
+                              { id: `cost-${Date.now()}`, name: '', amount: 0 },
+                            ]);
+                          }}
+                          className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Tambah Biaya Lainnya</span>
+                        </button>
+                      </div>
+
+                      {/* Subtotal of Additional Costs */}
+                      <div className="p-2.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/70 dark:border-indigo-800/60 flex items-center justify-between text-xs">
+                        <span className="font-semibold text-indigo-900 dark:text-indigo-200">
+                          Total Biaya Tambahan yang Di-include ke Modal:
+                        </span>
+                        <span className="font-mono font-bold text-sm text-indigo-700 dark:text-indigo-300">
+                          Rp {formatIdNumber(totalAdditionalCost, false)} / satuan
+                        </span>
                       </div>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Rounding & Margin Maintenance */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
-                  <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
-                    Aturan Pembulatan (Rounding):
-                  </label>
-                  <select
-                    value={rounding}
-                    onChange={(e) => setRounding(e.target.value as any)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  >
-                    <option value="NONE">Tanpa Pembulatan</option>
-                    <option value="HUNDRED">Bulatkan ke Ratusan Terdekat (100)</option>
-                    <option value="THOUSAND">Bulatkan ke Ribuan Terdekat (1.000)</option>
-                    <option value="FIVE_THOUSAND">Bulatkan ke 5 Ribuan Terdekat (5.000)</option>
-                  </select>
+              {/* LIVE INTERACTIVE FORMULA PIPELINE (WHEN ADJUSTING BUY_PRICE) */}
+              {targetField === 'buy_price' && canViewBuyPrice && (
+                <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-xs space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <Calculator className="w-4 h-4 text-amber-500" />
+                    <span>Rantai Perhitungan Harga Modal & Jual (Contoh Nilai Dasar Rp 100.000):</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs">
+                    <span className="bg-white dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
+                      Dasar: Rp {formatIdNumber(samplePipeline.baseAdjusted, false)}
+                    </span>
+                    {samplePipeline.discountVal > 0 && (
+                      <>
+                        <span className="text-slate-400 font-sans">➔</span>
+                        <span className="bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-200/60 dark:border-emerald-800/40 text-emerald-700 dark:text-emerald-300">
+                          - Diskon: Rp {formatIdNumber(samplePipeline.discountVal, false)}
+                        </span>
+                      </>
+                    )}
+                    {samplePipeline.taxVal > 0 && (
+                      <>
+                        <span className="text-slate-400 font-sans">➔</span>
+                        <span className="bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-200/60 dark:border-amber-800/40 text-amber-700 dark:text-amber-300">
+                          + PPN: Rp {formatIdNumber(samplePipeline.taxVal, false)}
+                        </span>
+                      </>
+                    )}
+                    {samplePipeline.extraCost > 0 && (
+                      <>
+                        <span className="text-slate-400 font-sans">➔</span>
+                        <span className="bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 rounded-lg border border-indigo-200/60 dark:border-indigo-800/40 text-indigo-700 dark:text-indigo-300 font-semibold">
+                          + Biaya: Rp {formatIdNumber(samplePipeline.extraCost, false)}
+                        </span>
+                      </>
+                    )}
+                    <span className="text-slate-400 font-sans">➔</span>
+                    <span className="bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-2.5 py-1 rounded-lg border border-slate-800 font-bold">
+                      = Modal Akhir: Rp {formatIdNumber(samplePipeline.effectiveBuy, false)}
+                    </span>
+                    {autoMaintainMargin && (
+                      <>
+                        <span className="text-slate-400 font-sans">➔</span>
+                        <span className="bg-emerald-600 text-white px-2.5 py-1 rounded-lg font-bold shadow-xs">
+                          Jual: Rp {formatIdNumber(samplePipeline.sampleSell, false)} (Dibulatkan)
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
+              )}
+
+              {/* ATURAN PEMBULATAN (HANYA BERLAKU UNTUK HARGA JUAL) & AUTO MAINTAIN MARGIN */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {targetField === 'sell_price' ? (
+                  <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Aturan Pembulatan Harga Jual:
+                      </label>
+                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800/60">
+                        Khusus Harga Jual
+                      </span>
+                    </div>
+                    <select
+                      value={rounding}
+                      onChange={(e) => setRounding(e.target.value as any)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    >
+                      <option value="NONE">Tanpa Pembulatan (Sesuai Hasil)</option>
+                      <option value="HUNDRED">Bulatkan ke Ratusan Terdekat (100)</option>
+                      <option value="THOUSAND">Bulatkan ke Ribuan Terdekat (1.000)</option>
+                      <option value="FIVE_THOUSAND">Bulatkan ke 5 Ribuan Terdekat (5.000)</option>
+                    </select>
+                    <p className="text-[11px] text-slate-400">
+                      Membulatkan harga jual ke kelipatan tertentu agar kembalian kasir rapi.
+                    </p>
+                  </div>
+                ) : targetField === 'buy_price' && autoMaintainMargin ? (
+                  <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Pembulatan Harga Jual (Penyesuaian Margin):
+                      </label>
+                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800/60">
+                        Khusus Harga Jual
+                      </span>
+                    </div>
+                    <select
+                      value={rounding}
+                      onChange={(e) => setRounding(e.target.value as any)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    >
+                      <option value="NONE">Tanpa Pembulatan</option>
+                      <option value="HUNDRED">Bulatkan ke Ratusan Terdekat (100)</option>
+                      <option value="THOUSAND">Bulatkan ke Ribuan Terdekat (1.000)</option>
+                      <option value="FIVE_THOUSAND">Bulatkan ke 5 Ribuan Terdekat (5.000)</option>
+                    </select>
+                    <p className="text-[11px] text-slate-400">
+                      Hanya harga jual hasil penyesuaian yang dibulatkan. Harga modal tetap disimpan presisi.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-start gap-3">
+                    <div className="p-2 rounded-xl bg-slate-200/60 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300 mt-0.5">
+                      <HelpCircle className="w-4 h-4" />
+                    </div>
+                    <div className="text-xs">
+                      <span className="font-bold text-slate-700 dark:text-slate-300 block">
+                        Pembulatan Dinonaktifkan untuk Harga Modal
+                      </span>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Aturan pembulatan hanya berlaku untuk harga jual. Harga modal dicatat presisi sesuai faktur dan biaya tambahan.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {targetField === 'buy_price' && (
                   <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-start gap-2.5">
@@ -1896,7 +2162,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     >
                       Pertahankan Gross Margin Otomatis
                       <span className="block text-[11px] text-slate-400 font-normal mt-0.5">
-                        Otomatis naikkan harga jual proporsional agar % margin kotor toko tidak tergerus kenaikan modal.
+                        Otomatis naikkan harga jual proporsional agar % margin kotor toko tidak tergerus kenaikan modal dan biaya tambahan.
                       </span>
                     </label>
                   </div>
@@ -2049,6 +2315,26 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     </div>
                   )}
 
+                  {/* Additional Costs indicator badge if enabled */}
+                  {applyAdditionalCosts && targetField === 'buy_price' && totalAdditionalCost > 0 && (
+                    <div className="p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 text-indigo-900 dark:text-indigo-200 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <Truck className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        <span>
+                          <strong>Biaya Tambahan Di-include ke Modal:</strong> +Rp {formatIdNumber(totalAdditionalCost, false)} / satuan (
+                          {additionalCosts
+                            .filter((c) => c.name.trim() && c.amount > 0)
+                            .map((c) => `${c.name}: Rp ${formatIdNumber(c.amount, false)}`)
+                            .join(', ')}
+                          )
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono font-semibold bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-indigo-300 dark:border-indigo-700">
+                        Include Modal & Log
+                      </span>
+                    </div>
+                  )}
+
                   {/* Warning Box if potential losses */}
                   {previewResult.summary.potential_losses_count > 0 && (
                     <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-200 flex items-start gap-2.5 text-xs">
@@ -2095,7 +2381,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                           <th className="p-3">Produk & Varian</th>
                           <th className="p-3">Satuan</th>
                           <th className="p-3">Harga Jual</th>
-                          {canViewBuyPrice && <th className="p-3">Harga Modal</th>}
+                          {canViewBuyPrice && <th className="p-3">Harga Modal Akhir</th>}
                           {canViewBuyPrice && <th className="p-3">Gross Margin</th>}
                           <th className="p-3">Status</th>
                         </tr>
@@ -2133,11 +2419,24 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                                         → {formatIdNumber(item.next_buy_price, false)}
                                       </span>
                                     </div>
-                                    {(item.discount_amount || item.tax_amount) ? (
-                                      <span className="text-[10px] text-amber-600 dark:text-amber-400">
-                                        {item.discount_amount ? `Disc: -Rp ${formatIdNumber(item.discount_amount, false)} ` : ''}
-                                        {item.tax_amount ? `PPN: +Rp ${formatIdNumber(item.tax_amount, false)}` : ''}
-                                      </span>
+                                    {(item.discount_amount || item.tax_amount || item.total_additional_cost) ? (
+                                      <div className="text-[10px] flex flex-wrap gap-1 text-slate-500">
+                                        {item.discount_amount ? (
+                                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                                            Disc: -Rp {formatIdNumber(item.discount_amount, false)}
+                                          </span>
+                                        ) : null}
+                                        {item.tax_amount ? (
+                                          <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                                            PPN: +Rp {formatIdNumber(item.tax_amount, false)}
+                                          </span>
+                                        ) : null}
+                                        {item.total_additional_cost ? (
+                                          <span className="text-indigo-600 dark:text-indigo-400 font-bold">
+                                            Biaya: +Rp {formatIdNumber(item.total_additional_cost, false)}
+                                          </span>
+                                        ) : null}
+                                      </div>
                                     ) : null}
                                   </div>
                                 </td>
@@ -2268,6 +2567,19 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                       </span>
                     </div>
                   </>
+                )}
+                {applyAdditionalCosts && targetField === 'buy_price' && totalAdditionalCost > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Biaya Tambahan (Landed):</span>
+                    <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                      +Rp {formatIdNumber(totalAdditionalCost, false)} (
+                      {additionalCosts
+                        .filter((c) => c.name.trim() && c.amount > 0)
+                        .map((c) => c.name)
+                        .join(', ')}
+                      )
+                    </span>
+                  </div>
                 )}
                 <div className="flex justify-between">
                   <span className="text-slate-400">Alasan:</span>

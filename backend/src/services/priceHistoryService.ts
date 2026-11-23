@@ -37,8 +37,16 @@ export interface RecordPriceChangeInput {
   taxPct?: number | null;
   taxAmount?: number | null;
 
+  additionalCosts?: AdditionalCostItem[] | null;
+  totalAdditionalCost?: number | null;
+
   userId?: string | null;
   createdBy?: string;
+}
+
+export interface AdditionalCostItem {
+  name: string;
+  amount: number;
 }
 
 export interface PriceHistoryFilters {
@@ -79,6 +87,9 @@ export interface BulkPriceUpdateInput {
   tax_type?: 'PERCENT' | 'AMOUNT';
   tax_pct?: number;
   tax_amount?: number;
+
+  additional_costs?: AdditionalCostItem[];
+  total_additional_cost?: number;
 
   reason?: string;
   reference_no?: string;
@@ -196,6 +207,7 @@ export class PriceHistoryService {
         buy_price_diff, buy_price_change_pct, sell_price_diff, sell_price_change_pct,
         old_margin_pct, new_margin_pct, change_direction, changed_fields, change_source,
         discount_pct, discount_amount, tax_pct, tax_amount,
+        additional_costs, total_additional_cost,
         batch_id, reference_no, reason, user_id, created_by, created_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
@@ -203,7 +215,8 @@ export class PriceHistoryService {
         $13, $14, $15, $16,
         $17, $18, $19, $20, $21,
         $22, $23, $24, $25,
-        $26, $27, $28, $29, $30, CURRENT_TIMESTAMP
+        $26, $27,
+        $28, $29, $30, $31, $32, CURRENT_TIMESTAMP
       )`,
       [
         historyId,
@@ -231,6 +244,8 @@ export class PriceHistoryService {
         input.discountAmount || 0,
         input.taxPct || 0,
         input.taxAmount || 0,
+        JSON.stringify(input.additionalCosts || []),
+        input.totalAdditionalCost || 0,
         input.batchId || null,
         input.referenceNo || null,
         input.reason || null,
@@ -424,6 +439,12 @@ export class PriceHistoryService {
           options.includeBuyPrice && row.tax_pct !== null ? Number(row.tax_pct) : 0,
         tax_amount:
           options.includeBuyPrice && row.tax_amount !== null ? Number(row.tax_amount) : 0,
+        additional_costs:
+          options.includeBuyPrice && row.additional_costs ? row.additional_costs : [],
+        total_additional_cost:
+          options.includeBuyPrice && row.total_additional_cost !== null
+            ? Number(row.total_additional_cost)
+            : 0,
       };
     });
 
@@ -1318,8 +1339,16 @@ export class PriceHistoryService {
           taxVal = input.tax_amount;
         }
 
-        const effectiveBuy = netBeforeTax + taxVal;
-        nextBuy = this.applyRounding(effectiveBuy, step);
+        // Terapkan Biaya Tambahan (Pengiriman, Kontainer, Buruh, dll)
+        const totalAdditionalCost = (input.additional_costs || []).reduce(
+          (sum: number, c: any) => sum + (Number(c.amount) || 0),
+          0
+        );
+
+        // Biaya tambahan langsung di-include ke harga modal
+        const effectiveBuy = netBeforeTax + taxVal + totalAdditionalCost;
+        // PENTING: Aturan pembulatan HANYA berlaku untuk harga jual, TIDAK untuk harga modal!
+        nextBuy = Math.round(effectiveBuy * 100) / 100;
       }
 
       // 2. Hitung harga jual baru
@@ -1413,6 +1442,11 @@ export class PriceHistoryService {
         discount_amount: discountVal,
         tax_pct: input.tax_pct || 0,
         tax_amount: taxVal,
+        additional_costs: input.additional_costs || [],
+        total_additional_cost: (input.additional_costs || []).reduce(
+          (sum: number, c: any) => sum + (Number(c.amount) || 0),
+          0
+        ),
 
         warning,
       });
@@ -1472,6 +1506,15 @@ export class PriceHistoryService {
       if (input.tax_pct && input.tax_pct > 0) auditNotes.push(`PPN: ${input.tax_pct}%`);
       else if (input.tax_amount && input.tax_amount > 0) auditNotes.push(`PPN: Rp ${input.tax_amount.toLocaleString('id-ID')}`);
 
+      const extraCosts = input.additional_costs || [];
+      if (extraCosts.length > 0) {
+        const totalExtra = extraCosts.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+        const details = extraCosts
+          .map((c) => `${c.name}: Rp ${Number(c.amount).toLocaleString('id-ID')}`)
+          .join(', ');
+        auditNotes.push(`Biaya Tambahan: Rp ${totalExtra.toLocaleString('id-ID')} (${details})`);
+      }
+
       const reason = auditNotes.length > 0 ? `${baseReason} [${auditNotes.join(', ')}]` : baseReason;
 
       let updatedCount = 0;
@@ -1512,6 +1555,8 @@ export class PriceHistoryService {
           discountAmount: actor.allowBuyPrice ? (item.discount_amount || null) : null,
           taxPct: actor.allowBuyPrice ? (item.tax_pct || null) : null,
           taxAmount: actor.allowBuyPrice ? (item.tax_amount || null) : null,
+          additionalCosts: actor.allowBuyPrice ? (item.additional_costs || null) : null,
+          totalAdditionalCost: actor.allowBuyPrice ? (item.total_additional_cost || null) : null,
           changeSource: 'BULK_UPDATE',
           batchId,
           referenceNo,
