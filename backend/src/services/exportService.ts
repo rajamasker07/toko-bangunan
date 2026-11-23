@@ -43,6 +43,8 @@ export class ExportService {
       { tableName: 'stock_reservations', displayName: 'Nota Titip Barang (Reservasi)', description: 'Pesanan titipan simpan stok dan tempo ambil' },
       { tableName: 'stock_reservation_items', displayName: 'Item Titip Barang', description: 'Rincian produk dan kuantiti yang ditahan' },
       { tableName: 'stock_reservation_pickups', displayName: 'Log Pengambilan Titipan', description: 'Riwayat serah terima fisik barang bertahap' },
+      { tableName: 'price_history', displayName: 'Riwayat Perubahan Harga', description: 'Log perubahan harga modal, jual, grosir dan margin' },
+      { tableName: 'store_settings', displayName: 'Pengaturan Toko', description: 'Konfigurasi sistem & ambang batas margin' },
       { tableName: 'roles', displayName: 'Peran & Hak Akses (RBAC)', description: 'Definisi role staf dan matriks izin otorisasi' },
       { tableName: 'users', displayName: 'Akun Pengguna', description: 'Daftar pengguna terdaftar sistem toko' },
       { tableName: 'user_sessions', displayName: 'Sesi Login Pengguna', description: 'Token sesi aktif dan perangkat masuk' },
@@ -638,6 +640,130 @@ export class ExportService {
     };
   }
 
+  private static async buildPriceHistoryDataset(canViewBuyPrice: boolean): Promise<ExportDataset> {
+    const sql = `
+      SELECT
+        ph.id,
+        TO_CHAR(ph.created_at, 'YYYY-MM-DD HH24:MI:SS') as tanggal,
+        p.name as nama_produk,
+        p.sku as sku_produk,
+        pv.variant_name as nama_varian,
+        pv.sku as sku_varian,
+        ph.unit_name as satuan,
+        s.name as supplier_name,
+        ph.old_buy_price,
+        ph.new_buy_price,
+        ph.buy_price_diff,
+        ph.buy_price_change_pct,
+        ph.old_sell_price,
+        ph.new_sell_price,
+        ph.sell_price_diff,
+        ph.sell_price_change_pct,
+        ph.old_wholesale_price,
+        ph.new_wholesale_price,
+        ph.old_margin_pct,
+        ph.new_margin_pct,
+        ph.discount_pct,
+        ph.discount_tiers,
+        ph.discount_amount,
+        ph.tax_pct,
+        ph.tax_amount,
+        ph.total_additional_cost,
+        ph.change_direction,
+        ph.change_source,
+        ph.reference_no,
+        ph.reason,
+        ph.created_by
+      FROM price_history ph
+      JOIN products p ON ph.product_id = p.id
+      JOIN product_variants pv ON ph.variant_id = pv.id
+      LEFT JOIN suppliers s ON ph.supplier_id = s.id
+      ORDER BY ph.created_at DESC
+      LIMIT 10000
+    `;
+
+    const res = await query(sql);
+    const rows = res.rows.map((r) => ({
+      tanggal: r.tanggal || '',
+      sku_produk: r.sku_produk || '',
+      nama_produk: r.nama_produk || '',
+      sku_varian: r.sku_varian || '',
+      nama_varian: r.nama_varian || '',
+      satuan: r.satuan || '',
+      supplier: r.supplier_name || '-',
+      harga_modal_lama: canViewBuyPrice ? (r.old_buy_price !== null ? Number(r.old_buy_price) : '-') : 'SENSITIF',
+      harga_modal_baru: canViewBuyPrice ? Number(r.new_buy_price) || 0 : 'SENSITIF',
+      selisih_modal: canViewBuyPrice ? (r.buy_price_diff !== null ? Number(r.buy_price_diff) : 0) : 'SENSITIF',
+      persen_modal: canViewBuyPrice ? (r.buy_price_change_pct !== null ? `${r.buy_price_change_pct}%` : '-') : 'SENSITIF',
+      diskon_supplier: canViewBuyPrice
+        ? Array.isArray(r.discount_tiers) && r.discount_tiers.length > 1
+          ? `${r.discount_tiers.map((t: number) => `${t}%`).join('+')} (${Number(r.discount_pct)}%)`
+          : Number(r.discount_pct) > 0
+            ? `${Number(r.discount_pct)}%`
+            : Number(r.discount_amount) > 0
+              ? `Rp ${r.discount_amount}`
+              : '-'
+        : 'SENSITIF',
+      ppn_supplier: canViewBuyPrice ? (Number(r.tax_pct) > 0 ? `${r.tax_pct}%` : Number(r.tax_amount) > 0 ? `Rp ${r.tax_amount}` : '-') : 'SENSITIF',
+      biaya_tambahan: canViewBuyPrice ? (Number(r.total_additional_cost) > 0 ? `Rp ${r.total_additional_cost}` : '-') : 'SENSITIF',
+      harga_jual_lama: r.old_sell_price !== null ? Number(r.old_sell_price) : '-',
+      harga_jual_baru: Number(r.new_sell_price) || 0,
+      selisih_jual: r.sell_price_diff !== null ? Number(r.sell_price_diff) : 0,
+      persen_jual: r.sell_price_change_pct !== null ? `${r.sell_price_change_pct}%` : '-',
+      harga_grosir_lama: r.old_wholesale_price !== null ? Number(r.old_wholesale_price) : '-',
+      harga_grosir_baru: r.new_wholesale_price !== null ? Number(r.new_wholesale_price) : '-',
+      margin_lama: canViewBuyPrice ? (r.old_margin_pct !== null ? `${r.old_margin_pct}%` : '-') : 'SENSITIF',
+      margin_baru: canViewBuyPrice ? (r.new_margin_pct !== null ? `${r.new_margin_pct}%` : '-') : 'SENSITIF',
+      arah_perubahan: r.change_direction,
+      sumber: r.change_source,
+      no_referensi: r.reference_no || '-',
+      alasan: r.reason || '-',
+      operator: r.created_by || 'Sistem',
+    }));
+
+    const columns: ExportColumnDef[] = [
+      { key: 'tanggal', label: 'Waktu Perubahan', width: 20, isText: true },
+      { key: 'sku_produk', label: 'SKU Produk', width: 16, isText: true },
+      { key: 'nama_produk', label: 'Nama Produk', width: 30 },
+      { key: 'sku_varian', label: 'SKU Varian', width: 16, isText: true },
+      { key: 'nama_varian', label: 'Nama Varian', width: 22 },
+      { key: 'satuan', label: 'Satuan', width: 12 },
+      { key: 'supplier', label: 'Supplier', width: 22 },
+      ...(canViewBuyPrice ? [
+        { key: 'harga_modal_lama', label: 'Modal Lama (Rp)', width: 16 },
+        { key: 'harga_modal_baru', label: 'Modal Baru (Rp)', width: 16 },
+        { key: 'selisih_modal', label: 'Selisih Modal (Rp)', width: 16 },
+        { key: 'persen_modal', label: 'Perubahan Modal (%)', width: 18 },
+        { key: 'diskon_supplier', label: 'Diskon Supplier', width: 16 },
+        { key: 'ppn_supplier', label: 'PPN Supplier', width: 16 },
+        { key: 'biaya_tambahan', label: 'Biaya Tambahan (Landed)', width: 20 },
+      ] : []),
+      { key: 'harga_jual_lama', label: 'Jual Lama (Rp)', width: 16 },
+      { key: 'harga_jual_baru', label: 'Jual Baru (Rp)', width: 16 },
+      { key: 'selisih_jual', label: 'Selisih Jual (Rp)', width: 16 },
+      { key: 'persen_jual', label: 'Perubahan Jual (%)', width: 18 },
+      { key: 'harga_grosir_lama', label: 'Grosir Lama (Rp)', width: 16 },
+      { key: 'harga_grosir_baru', label: 'Grosir Baru (Rp)', width: 16 },
+      ...(canViewBuyPrice ? [
+        { key: 'margin_lama', label: 'Gross Margin Lama (%)', width: 20 },
+        { key: 'margin_baru', label: 'Gross Margin Baru (%)', width: 20 },
+      ] : []),
+      { key: 'arah_perubahan', label: 'Arah', width: 12 },
+      { key: 'sumber', label: 'Sumber Perubahan', width: 18 },
+      { key: 'no_referensi', label: 'No. Referensi / Nota', width: 20, isText: true },
+      { key: 'alasan', label: 'Alasan Perubahan', width: 35 },
+      { key: 'operator', label: 'Diubah Oleh', width: 18 },
+    ];
+
+    return {
+      entity: 'price_history',
+      title: 'Data Riwayat Perubahan Harga',
+      columns,
+      rows,
+      totalRows: rows.length,
+    };
+  }
+
   /**
    * Router untuk mengambil dataset berdasarkan nama entitas
    */
@@ -662,6 +788,8 @@ export class ExportService {
         return this.buildStockMovementsDataset();
       case 'reservations':
         return this.buildReservationsDataset();
+      case 'price_history':
+        return this.buildPriceHistoryDataset(canViewBuyPrice);
       default:
         throw new AppHttpError(400, `Entitas ekspor "${entity}" tidak didukung`);
     }
@@ -995,6 +1123,8 @@ export class ExportService {
       'products',
       'product_variants',
       'variant_units',
+      'price_history',
+      'store_settings',
       'stock_movements',
       'stock_reservations',
       'stock_reservation_items',

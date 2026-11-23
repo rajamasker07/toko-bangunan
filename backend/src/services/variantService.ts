@@ -1,6 +1,7 @@
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 import { EmbeddingService } from './embeddingService.js';
+import { PriceHistoryService } from './priceHistoryService.js';
 
 export class VariantService {
   private static async syncProductByVariantId(variantId: string) {
@@ -93,6 +94,21 @@ export class VariantService {
               u.wholesale_price ? Number(u.wholesale_price) : null
             ]
           );
+
+          await PriceHistoryService.recordChange(client, {
+            productId,
+            variantId,
+            variantUnitId: unitId,
+            unitName: u.unit_name,
+            newBuyPrice: allowBuyPrice ? Number(u.buy_price) || 0 : 0,
+            newSellPrice: Number(u.sell_price) || 0,
+            newWholesalePrice: u.wholesale_price ? Number(u.wholesale_price) : null,
+            changeSource: 'INITIAL_PRICE',
+            referenceNo: `ADD-${sku}`,
+            reason: 'Harga awal varian baru',
+            userId: actorId,
+            createdBy: actorName,
+          });
         }
       }
 
@@ -201,84 +217,230 @@ export class VariantService {
   }
 
   /**
-   * Add unit price to variant
+   * Add unit price to variant with transactional price history logging
    */
-  static async addUnit(variantId: string, unit: {
-    unit_name: string;
-    conversion_factor?: number;
-    is_base_unit?: boolean;
-    buy_price?: number;
-    sell_price: number;
-    wholesale_price?: number | null;
-  }) {
-    const id = generateUUIDv7();
-    const res = await query(
-      `INSERT INTO variant_units (
-        id, variant_id, unit_name, conversion_factor, is_base_unit, buy_price, sell_price, wholesale_price
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [
-        id,
+  static async addUnit(
+    variantId: string,
+    unit: {
+      unit_name: string;
+      conversion_factor?: number;
+      is_base_unit?: boolean;
+      buy_price?: number;
+      sell_price: number;
+      wholesale_price?: number | null;
+      reason?: string;
+      reference_no?: string;
+    },
+    options?: {
+      userId?: string | null;
+      createdBy?: string;
+      allowBuyPrice?: boolean;
+    }
+  ) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const allowBuyPrice = options?.allowBuyPrice ?? true;
+      const buyPrice = allowBuyPrice ? Number(unit.buy_price) || 0 : 0;
+      const sellPrice = Number(unit.sell_price) || 0;
+      const wholesalePrice = unit.wholesale_price ? Number(unit.wholesale_price) : null;
+      const actorName = (options?.createdBy || 'Admin').slice(0, 100);
+      const actorId = options?.userId || null;
+
+      // Ambil product_id & supplier_id
+      const varRes = await client.query(
+        `SELECT pv.product_id, p.supplier_id FROM product_variants pv JOIN products p ON pv.product_id = p.id WHERE pv.id = $1`,
+        [variantId]
+      );
+      if (varRes.rows.length === 0) {
+        throw new Error('Varian tidak ditemukan');
+      }
+      const { product_id: productId, supplier_id: supplierId } = varRes.rows[0];
+
+      const id = generateUUIDv7();
+      const res = await client.query(
+        `INSERT INTO variant_units (
+          id, variant_id, unit_name, conversion_factor, is_base_unit, buy_price, sell_price, wholesale_price
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [
+          id,
+          variantId,
+          unit.unit_name,
+          Number(unit.conversion_factor) || 1,
+          Boolean(unit.is_base_unit),
+          buyPrice,
+          sellPrice,
+          wholesalePrice,
+        ]
+      );
+
+      await PriceHistoryService.recordChange(client, {
+        productId,
         variantId,
-        unit.unit_name,
-        Number(unit.conversion_factor) || 1,
-        Boolean(unit.is_base_unit),
-        Number(unit.buy_price) || 0,
-        Number(unit.sell_price) || 0,
-        unit.wholesale_price ? Number(unit.wholesale_price) : null
-      ]
-    );
-    this.syncProductByVariantId(variantId);
-    return res.rows[0];
+        variantUnitId: id,
+        unitName: unit.unit_name,
+        supplierId,
+        newBuyPrice: buyPrice,
+        newSellPrice: sellPrice,
+        newWholesalePrice: wholesalePrice,
+        changeSource: 'INITIAL_PRICE',
+        referenceNo: unit.reference_no,
+        reason: unit.reason || 'Penambahan satuan baru',
+        userId: actorId,
+        createdBy: actorName,
+      });
+
+      await client.query('COMMIT');
+
+      this.syncProductByVariantId(variantId);
+      return res.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**
-   * Update unit price
+   * Update unit price with transactional price history logging & RBAC protection
    */
-  static async updateUnit(unitId: string, unit: {
-    unit_name?: string;
-    conversion_factor?: number;
-    is_base_unit?: boolean;
-    buy_price?: number;
-    sell_price?: number;
-    wholesale_price?: number | null;
-  }) {
-    const fields: string[] = [];
-    const values: any[] = [];
+  static async updateUnit(
+    unitId: string,
+    unit: {
+      unit_name?: string;
+      conversion_factor?: number;
+      is_base_unit?: boolean;
+      buy_price?: number;
+      sell_price?: number;
+      wholesale_price?: number | null;
+      reason?: string;
+      reference_no?: string;
+    },
+    options?: {
+      userId?: string | null;
+      createdBy?: string;
+      allowBuyPrice?: boolean;
+    }
+  ) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    if (unit.unit_name !== undefined) {
-      values.push(unit.unit_name);
-      fields.push(`unit_name = $${values.length}`);
-    }
-    if (unit.conversion_factor !== undefined) {
-      values.push(unit.conversion_factor);
-      fields.push(`conversion_factor = $${values.length}`);
-    }
-    if (unit.is_base_unit !== undefined) {
-      values.push(unit.is_base_unit);
-      fields.push(`is_base_unit = $${values.length}`);
-    }
-    if (unit.buy_price !== undefined) {
-      values.push(unit.buy_price);
-      fields.push(`buy_price = $${values.length}`);
-    }
-    if (unit.sell_price !== undefined) {
-      values.push(unit.sell_price);
-      fields.push(`sell_price = $${values.length}`);
-    }
-    if (unit.wholesale_price !== undefined) {
-      values.push(unit.wholesale_price);
-      fields.push(`wholesale_price = $${values.length}`);
-    }
+      const allowBuyPrice = options?.allowBuyPrice ?? true;
+      const actorName = (options?.createdBy || 'Admin').slice(0, 100);
+      const actorId = options?.userId || null;
 
-    if (fields.length === 0) return null;
+      // 1. Fetch existing unit with FOR UPDATE
+      const existingRes = await client.query(
+        `SELECT vu.*, pv.product_id, pv.id as variant_id, p.supplier_id
+         FROM variant_units vu
+         JOIN product_variants pv ON vu.variant_id = pv.id
+         JOIN products p ON pv.product_id = p.id
+         WHERE vu.id = $1
+         FOR UPDATE`,
+        [unitId]
+      );
 
-    values.push(unitId);
-    fields.push('updated_at = CURRENT_TIMESTAMP');
+      if (existingRes.rows.length === 0) {
+        throw new Error('Satuan tidak ditemukan');
+      }
 
-    const sql = `UPDATE variant_units SET ${fields.join(', ')} WHERE id = $${values.length} RETURNING *`;
-    const res = await query(sql, values);
-    this.syncProductByUnitId(unitId);
-    return res.rows[0];
+      const existing = existingRes.rows[0];
+      const oldBuy = Number(existing.buy_price) || 0;
+      const oldSell = Number(existing.sell_price) || 0;
+      const oldWholesale = existing.wholesale_price !== null ? Number(existing.wholesale_price) : null;
+
+      // Tentukan nilai baru
+      const targetUnitName = unit.unit_name !== undefined ? unit.unit_name.trim() : existing.unit_name;
+      const targetBuy =
+        unit.buy_price !== undefined
+          ? allowBuyPrice
+            ? Number(unit.buy_price) || 0
+            : oldBuy
+          : oldBuy;
+      const targetSell = unit.sell_price !== undefined ? Number(unit.sell_price) : oldSell;
+      const targetWholesale =
+        unit.wholesale_price !== undefined
+          ? unit.wholesale_price !== null
+            ? Number(unit.wholesale_price)
+            : null
+          : oldWholesale;
+
+      const fields: string[] = [];
+      const values: any[] = [];
+
+      if (unit.unit_name !== undefined) {
+        values.push(targetUnitName);
+        fields.push(`unit_name = $${values.length}`);
+      }
+      if (unit.conversion_factor !== undefined) {
+        values.push(Number(unit.conversion_factor) || 1);
+        fields.push(`conversion_factor = $${values.length}`);
+      }
+      if (unit.is_base_unit !== undefined) {
+        values.push(Boolean(unit.is_base_unit));
+        fields.push(`is_base_unit = $${values.length}`);
+      }
+      if (unit.buy_price !== undefined && allowBuyPrice) {
+        values.push(targetBuy);
+        fields.push(`buy_price = $${values.length}`);
+      }
+      if (unit.sell_price !== undefined) {
+        values.push(targetSell);
+        fields.push(`sell_price = $${values.length}`);
+      }
+      if (unit.wholesale_price !== undefined) {
+        values.push(targetWholesale);
+        fields.push(`wholesale_price = $${values.length}`);
+      }
+
+      if (fields.length > 0) {
+        values.push(unitId);
+        fields.push('updated_at = CURRENT_TIMESTAMP');
+        const sql = `UPDATE variant_units SET ${fields.join(', ')} WHERE id = $${values.length} RETURNING *`;
+        await client.query(sql, values);
+      }
+
+      // 2. Catat histori jika ada harga yang berubah
+      const buyChanged = allowBuyPrice && unit.buy_price !== undefined && Math.abs(targetBuy - oldBuy) > 0.001;
+      const sellChanged = unit.sell_price !== undefined && Math.abs(targetSell - oldSell) > 0.001;
+      const wholesaleChanged = unit.wholesale_price !== undefined && targetWholesale !== oldWholesale;
+
+      if (buyChanged || sellChanged || wholesaleChanged) {
+        await PriceHistoryService.recordChange(client, {
+          productId: existing.product_id,
+          variantId: existing.variant_id,
+          variantUnitId: unitId,
+          unitName: targetUnitName,
+          supplierId: existing.supplier_id,
+          oldBuyPrice: oldBuy,
+          newBuyPrice: targetBuy,
+          oldSellPrice: oldSell,
+          newSellPrice: targetSell,
+          oldWholesalePrice: oldWholesale,
+          newWholesalePrice: targetWholesale,
+          changeSource: 'MANUAL_EDIT',
+          referenceNo: unit.reference_no,
+          reason: unit.reason || 'Perubahan harga satuan',
+          userId: actorId,
+          createdBy: actorName,
+        });
+      }
+
+      await client.query('COMMIT');
+
+      this.syncProductByUnitId(unitId);
+
+      const finalRes = await query('SELECT * FROM variant_units WHERE id = $1', [unitId]);
+      return finalRes.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**

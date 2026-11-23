@@ -14,6 +14,7 @@ import { RoleController } from '../controllers/roleController.js';
 import { SupplierInvoiceController } from '../controllers/supplierInvoiceController.js';
 import { UserController } from '../controllers/userController.js';
 import { VariantController } from '../controllers/variantController.js';
+import { PriceHistoryController } from '../controllers/priceHistoryController.js';
 import { LogController } from '../controllers/logController.js';
 import {
   requireAnyPermission,
@@ -247,6 +248,48 @@ router.post(
 );
 router.put('/units/:id', requirePermission('pricing:write'), VariantController.updateUnit);
 router.delete('/units/:id', requirePermission('pricing:write'), VariantController.deleteUnit);
+
+// Price History & Analytics (Histori Perubahan Harga & Margin)
+router.get(
+  '/price-history',
+  requireAnyPermission('pricing:analytics', 'pricing:write', 'products:read'),
+  PriceHistoryController.getHistory
+);
+router.get(
+  '/price-analytics/overview',
+  requireAnyPermission('pricing:analytics', 'pricing:write'),
+  PriceHistoryController.getOverviewAnalytics
+);
+router.get(
+  '/pricing/threshold',
+  requireAnyPermission('pricing:analytics', 'pricing:write', 'pricing:threshold'),
+  PriceHistoryController.getThreshold
+);
+router.put(
+  '/pricing/threshold',
+  requirePermission('pricing:threshold'),
+  PriceHistoryController.updateThreshold
+);
+router.post(
+  '/pricing/bulk-update/preview',
+  requirePermission('pricing:write'),
+  PriceHistoryController.previewBulkUpdate
+);
+router.post(
+  '/pricing/bulk-update/commit',
+  requirePermission('pricing:write'),
+  PriceHistoryController.commitBulkUpdate
+);
+router.get(
+  '/products/:id/price-analytics',
+  requireAnyPermission('pricing:analytics', 'pricing:write', 'products:read'),
+  PriceHistoryController.getProductAnalytics
+);
+router.get(
+  '/variants/:id/price-analytics',
+  requireAnyPermission('pricing:analytics', 'pricing:write', 'products:read'),
+  PriceHistoryController.getVariantAnalytics
+);
 
 // Stock Adjustments & Movement Logs
 router.post('/stock/adjust', requirePermission('stock:adjust'), StockController.adjust);

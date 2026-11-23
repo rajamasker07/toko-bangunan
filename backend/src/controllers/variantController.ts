@@ -64,7 +64,12 @@ export class VariantController {
       if (!unit_name || sell_price === undefined) {
         return res.status(400).json({ success: false, message: 'Nama satuan dan harga jual wajib diisi' });
       }
-      const unit = await VariantService.addUnit(variantId, req.body);
+      const allowBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const unit = await VariantService.addUnit(variantId, req.body, {
+        userId: req.user!.id,
+        createdBy: req.user!.full_name,
+        allowBuyPrice,
+      });
       res.status(201).json({ success: true, data: unit, message: 'Satuan harga berhasil ditambahkan' });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
@@ -74,7 +79,12 @@ export class VariantController {
   static async updateUnit(req: Request, res: Response) {
     try {
       const id = String(req.params.id);
-      const unit = await VariantService.updateUnit(id, req.body);
+      const allowBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const unit = await VariantService.updateUnit(id, req.body, {
+        userId: req.user!.id,
+        createdBy: req.user!.full_name,
+        allowBuyPrice,
+      });
       res.json({ success: true, data: unit, message: 'Satuan harga berhasil diperbarui' });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });

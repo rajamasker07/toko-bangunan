@@ -46,6 +46,18 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
     description: 'Menambah, mengubah, dan menghapus harga jual satuan bertingkat (multi-satuan)',
     module: 'Harga & Satuan',
   },
+  {
+    id: 'pricing:analytics',
+    label: 'Lihat Analitik & Margin Harga',
+    description: 'Melihat histori perubahan harga modal/jual, grafik tren, alert margin, dan inflasi supplier',
+    module: 'Harga & Satuan',
+  },
+  {
+    id: 'pricing:threshold',
+    label: 'Atur Ambang Batas Margin',
+    description: 'Mengatur persentase ambang batas peringatan margin tipis/kritis untuk operasional toko',
+    module: 'Harga & Satuan',
+  },
   // Master Data
   {
     id: 'master:read',

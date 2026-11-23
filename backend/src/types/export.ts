@@ -6,7 +6,8 @@ export type ExportEntityType =
   | 'units'
   | 'supplier_invoices'
   | 'stock_movements'
-  | 'reservations';
+  | 'reservations'
+  | 'price_history';
 
 export type ExportFileFormat = 'xlsx' | 'csv' | 'json';
 

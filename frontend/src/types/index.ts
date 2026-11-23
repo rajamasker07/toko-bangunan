@@ -238,6 +238,9 @@ export interface DashboardSummary {
     product_name: string;
     category_name?: string;
   }>;
+  price_alerts_count?: number;
+  critical_margin_count?: number;
+  recent_price_changes?: PriceHistoryEntry[];
 }
 
 export type UserRole = 'owner' | 'admin' | 'gudang' | 'kasir' | string;
@@ -250,6 +253,8 @@ export type Permission =
   | 'products:delete'
   | 'products:view_buy_price'
   | 'pricing:write'
+  | 'pricing:analytics'
+  | 'pricing:threshold'
   | 'master:read'
   | 'suppliers:read'
   | 'master:write'
@@ -506,7 +511,8 @@ export type ExportEntityType =
   | 'units'
   | 'supplier_invoices'
   | 'stock_movements'
-  | 'reservations';
+  | 'reservations'
+  | 'price_history';
 
 export type ExportFileFormat = 'xlsx' | 'csv' | 'json';
 
@@ -614,5 +620,280 @@ export interface SimilarProductGroup {
   products: Product[];
   totalStock: number;
 }
+
+export type PriceChangeSource =
+  | 'INITIAL_PRICE'
+  | 'MANUAL_EDIT'
+  | 'PURCHASE_RESTOCK'
+  | 'BULK_UPDATE'
+  | 'EXCEL_IMPORT'
+  | 'SYSTEM_RESTRUCTURE';
+
+export type PriceChangeDirection = 'UP' | 'DOWN' | 'UNCHANGED';
+
+export interface PriceHistoryEntry {
+  id: string;
+  product_id: string;
+  variant_id: string;
+  variant_unit_id: string | null;
+  unit_name: string;
+  supplier_id: string | null;
+  old_buy_price: number | null;
+  new_buy_price: number | null;
+  buy_price_diff: number | null;
+  buy_price_percent_change: number | null;
+  old_sell_price: number;
+  new_sell_price: number;
+  sell_price_diff: number;
+  sell_price_percent_change: number;
+  old_wholesale_price: number | null;
+  new_wholesale_price: number | null;
+  wholesale_price_diff: number | null;
+  wholesale_price_percent_change: number | null;
+  gross_margin_before: number | null;
+  gross_margin_after: number | null;
+  markup_before: number | null;
+  markup_after: number | null;
+  discount_pct?: number | null;
+  discount_tiers?: number[];
+  discount_amount?: number | null;
+  tax_pct?: number | null;
+  tax_amount?: number | null;
+  additional_costs?: Array<{ name: string; amount: number }>;
+  total_additional_cost?: number | null;
+  change_direction: PriceChangeDirection;
+  changed_fields: string[];
+  change_source: PriceChangeSource;
+  batch_id: string | null;
+  reference_no: string | null;
+  reason: string | null;
+  user_id: string | null;
+  created_by: string | null;
+  created_by_username?: string | null;
+  created_by_fullname?: string | null;
+  created_by_role?: UserRole | null;
+  created_at: string;
+  product_name?: string;
+  variant_name?: string;
+  sku?: string;
+  category_name?: string;
+  supplier_name?: string;
+}
+
+export interface PriceTrendPoint {
+  date: string;
+  sell_price: number;
+  buy_price: number | null;
+  wholesale_price: number | null;
+  gross_margin: number | null;
+  markup: number | null;
+  unit_name: string;
+  reason?: string | null;
+  change_source?: string;
+  created_by?: string | null;
+}
+
+export interface VariantUnitPriceSummary {
+  unit_id: string;
+  unit_name: string;
+  conversion_factor: number;
+  is_base_unit: boolean;
+  current_buy_price: number | null;
+  current_sell_price: number;
+  current_wholesale_price: number | null;
+  current_gross_margin: number | null;
+  current_markup: number | null;
+  min_sell_price: number;
+  max_sell_price: number;
+  avg_sell_price: number;
+  all_time_sell_diff: number;
+  all_time_sell_percent_change: number;
+  history_count: number;
+  last_changed_at: string | null;
+  last_changed_by: string | null;
+  last_reason: string | null;
+}
+
+export interface VariantPriceAnalytics {
+  variant: {
+    id: string;
+    variant_name: string;
+    sku: string;
+    barcode: string | null;
+    product_id: string;
+    product_name: string;
+    category_name: string | null;
+    supplier_name: string | null;
+  };
+  units_summary: VariantUnitPriceSummary[];
+  time_series: PriceTrendPoint[];
+  total_changes: number;
+}
+
+export interface ProductPriceAnalytics {
+  product: {
+    id: string;
+    name: string;
+    sku: string;
+    category_name: string | null;
+    supplier_name: string | null;
+  };
+  variants_summary: Array<{
+    variant_id: string;
+    variant_name: string;
+    sku: string;
+    units: VariantUnitPriceSummary[];
+  }>;
+  time_series: PriceTrendPoint[];
+  total_changes: number;
+}
+
+export interface MarginAlertItem {
+  unit_id?: string;
+  variant_id: string;
+  variant_name: string;
+  product_id: string;
+  product_name: string;
+  sku: string;
+  variant_sku?: string;
+  unit_name: string;
+  buy_price: number | null;
+  sell_price: number;
+  wholesale_price?: number | null;
+  gross_margin?: number | null;
+  gross_margin_pct?: number | null;
+  markup?: number | null;
+  markup_pct?: number | null;
+  alert_level?: 'CRITICAL' | 'WARNING';
+  status: 'LOSS' | 'CRITICAL' | 'WARNING';
+  category_name?: string | null;
+  supplier_name?: string | null;
+  current_stock?: number;
+}
+
+export interface PriceOverviewAnalytics {
+  margin_threshold: number;
+  margin_threshold_pct?: number;
+  margin_alerts: MarginAlertItem[];
+  top_increases: Array<{
+    id?: string;
+    variant_id: string;
+    variant_name: string;
+    product_id: string;
+    product_name: string;
+    sku: string;
+    variant_sku?: string;
+    unit_name: string;
+    old_sell_price: number;
+    new_sell_price: number;
+    sell_price_diff: number;
+    sell_price_change_pct?: number;
+    sell_price_percent_change: number;
+    gross_margin_before?: number | null;
+    gross_margin_after?: number | null;
+    created_at: string;
+    date?: string;
+  }>;
+  supplier_inflation: Array<{
+    supplier_id: string | null;
+    supplier_name: string;
+    change_count: number;
+    increase_count?: number;
+    avg_buy_percent_change: number;
+    avg_increase_pct?: number;
+    last_changed_at?: string;
+  }>;
+  category_inflation: Array<{
+    category_id: string | null;
+    category_name: string;
+    change_count: number;
+    sell_increase_count?: number;
+    avg_sell_percent_change: number;
+    avg_sell_increase_pct?: number;
+    last_changed_at?: string;
+  }>;
+  summary: {
+    total_price_changes_30d: number;
+    price_increases_30d: number;
+    price_decreases_30d: number;
+    critical_margin_count: number;
+    loss_making_count: number;
+  };
+}
+
+export interface BulkPriceUpdatePayload {
+  scope: 'ALL' | 'CATEGORY' | 'BRAND' | 'SUPPLIER' | 'PRODUCTS';
+  category_id?: string;
+  brand_id?: string;
+  supplier_id?: string;
+  product_ids?: string[];
+  variant_ids?: string[];
+  target_field: 'sell_price' | 'buy_price' | 'wholesale_price';
+  target_units?: 'BASE_ONLY' | 'ALL_UNITS';
+  adjustment_mode: 'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE';
+  value: number;
+  rounding?: 'NONE' | 'FIVE_HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND';
+  auto_maintain_margin?: boolean;
+  manual_sell_adjustment_mode?: 'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE';
+  manual_sell_value?: number;
+  discount_type?: 'PERCENT' | 'AMOUNT';
+  discount_pct?: number;
+  discount_tiers?: number[];
+  discount_amount?: number;
+  tax_type?: 'PERCENT' | 'AMOUNT';
+  tax_pct?: number;
+  tax_amount?: number;
+  additional_costs?: Array<{ name: string; amount: number }>;
+  total_additional_cost?: number;
+  reason: string;
+  reference_no?: string;
+}
+
+export interface BulkPricePreviewItem {
+  product_id: string;
+  product_name: string;
+  variant_id: string;
+  variant_name: string;
+  unit_id: string;
+  unit_name: string;
+  conversion_factor?: number;
+  is_base_unit?: boolean;
+  current_buy_price: number;
+  next_buy_price: number;
+  current_sell_price: number;
+  next_sell_price: number;
+  current_wholesale_price: number | null;
+  next_wholesale_price: number | null;
+  current_margin: number | null;
+  next_margin: number | null;
+  discount_pct?: number;
+  discount_tiers?: number[];
+  discount_amount?: number;
+  tax_pct?: number;
+  tax_amount?: number;
+  additional_costs?: Array<{ name: string; amount: number }>;
+  total_additional_cost?: number;
+  warning: string | null;
+}
+
+export interface BulkPricePreviewResponse {
+  total_units_affected: number;
+  items: BulkPricePreviewItem[];
+  summary: {
+    avg_margin_before: number;
+    avg_margin_after: number;
+    potential_losses_count: number;
+  };
+}
+
+export interface PriceUpdateOnRestock {
+  unit_id: string;
+  new_buy_price?: number;
+  new_sell_price?: number;
+  new_wholesale_price?: number | null;
+  reason?: string;
+  reference_no?: string;
+}
+
 
 

@@ -18,6 +18,7 @@ import {
   ShoppingBag,
   FileUp,
   Download,
+  TrendingUp,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { AppTab } from '../utils/rbac';
@@ -47,6 +48,7 @@ interface SidebarProps {
   setActiveTab: (tab: ActiveTab) => void;
   lowStockCount?: number;
   alertCount?: number;
+  criticalMarginCount?: number;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -56,6 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   lowStockCount = 0,
   alertCount = 0,
+  criticalMarginCount = 0,
   isCollapsed = false,
   onToggleCollapse,
 }) => {
@@ -79,6 +82,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badgeIcon: AlertTriangle,
           badgeTitle: `${lowStockCount} varian dengan stok menipis`,
           badgeColor: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400',
+        },
+        {
+          id: 'price-analytics',
+          label: 'Analitik & Harga',
+          icon: TrendingUp,
+          badge: criticalMarginCount > 0 ? formatBadgeCount(criticalMarginCount) : null,
+          badgeIcon: AlertTriangle,
+          badgeTitle: `${criticalMarginCount} produk dengan margin kritis`,
+          badgeColor: 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400',
         },
         {
           id: 'adjust',

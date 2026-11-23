@@ -11,7 +11,7 @@ export async function seedDatabase() {
     await client.query('BEGIN');
 
     // Clean product/category/stock tables while preserving users, user_sessions, brands, suppliers, units
-    await client.query('TRUNCATE stock_movements, variant_units, product_variants, products, categories CASCADE;');
+    await client.query('TRUNCATE price_history, stock_movements, variant_units, product_variants, products, categories CASCADE;');
 
     const bootstrapOwner = await ensureBootstrapOwner(client);
 

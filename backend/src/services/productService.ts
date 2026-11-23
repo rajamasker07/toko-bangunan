@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 import { BrandService } from './brandService.js';
+import { PriceHistoryService } from './priceHistoryService.js';
 import { EmbeddingService, type SemanticSearchResult } from './embeddingService.js';
 import { RerankerService } from './rerankerService.js';
 import { buildProductPassage, hasWholeTerm, scoreKeywordMatch } from '../utils/searchSynonyms.js';
@@ -731,7 +732,11 @@ export class ProductService {
       const productId = generateUUIDv7();
       const productSku = data.sku || this.generateSKU(data.name);
 
-      const hasVariants = Boolean(data.has_variants && data.variants && data.variants.length > 0);
+      const hasVariants = Boolean(
+        (data.has_variants || (data.variants && data.variants.length > 0)) &&
+        data.variants &&
+        data.variants.length > 0
+      );
 
       // Resolve merek: pakai brand_id jika ada, atau cari/buat dari nama (anti-duplikat)
       const brandId = await this.resolveBrandId(data, client);
@@ -812,6 +817,22 @@ export class ProductService {
               u.wholesale_price ? Number(u.wholesale_price) : null
             ]
           );
+
+          await PriceHistoryService.recordChange(client, {
+            productId,
+            variantId,
+            variantUnitId: unitId,
+            unitName: u.unit_name,
+            supplierId: data.supplier_id || null,
+            newBuyPrice: allowBuyPrice ? Number(u.buy_price) || 0 : 0,
+            newSellPrice: Number(u.sell_price) || 0,
+            newWholesalePrice: u.wholesale_price ? Number(u.wholesale_price) : null,
+            changeSource: 'INITIAL_PRICE',
+            referenceNo: `INIT-${productSku}`,
+            reason: 'Harga awal produk baru',
+            userId: actorId,
+            createdBy: actorName,
+          });
         }
 
         // Log initial stock movement
@@ -858,6 +879,22 @@ export class ProductService {
                   u.wholesale_price ? Number(u.wholesale_price) : null
                 ]
               );
+
+              await PriceHistoryService.recordChange(client, {
+                productId,
+                variantId,
+                variantUnitId: unitId,
+                unitName: u.unit_name,
+                supplierId: data.supplier_id || null,
+                newBuyPrice: allowBuyPrice ? Number(u.buy_price) || 0 : 0,
+                newSellPrice: Number(u.sell_price) || 0,
+                newWholesalePrice: u.wholesale_price ? Number(u.wholesale_price) : null,
+                changeSource: 'INITIAL_PRICE',
+                referenceNo: `INIT-${variantSku}`,
+                reason: 'Harga awal varian baru',
+                userId: actorId,
+                createdBy: actorName,
+              });
             }
           }
 

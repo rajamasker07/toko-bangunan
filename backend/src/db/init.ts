@@ -491,6 +491,140 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_variant_units_variant ON variant_units(variant_id);
     `);
 
+    // 4b. Price History (Audit Trail & Log Perubahan Harga Modal, Jual, dan Grosir)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS price_history (
+        id UUID PRIMARY KEY,
+        product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        variant_id UUID NOT NULL REFERENCES product_variants(id) ON DELETE CASCADE,
+        variant_unit_id UUID REFERENCES variant_units(id) ON DELETE SET NULL,
+        unit_name VARCHAR(50) NOT NULL,
+        supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL,
+
+        old_buy_price NUMERIC(14, 2),
+        new_buy_price NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        old_sell_price NUMERIC(14, 2),
+        new_sell_price NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        old_wholesale_price NUMERIC(14, 2),
+        new_wholesale_price NUMERIC(14, 2),
+
+        buy_price_diff NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        buy_price_change_pct NUMERIC(8, 2),
+        sell_price_diff NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        sell_price_change_pct NUMERIC(8, 2),
+        old_margin_pct NUMERIC(8, 2),
+        new_margin_pct NUMERIC(8, 2),
+
+        change_direction VARCHAR(20) NOT NULL DEFAULT 'INITIAL',
+        changed_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+        change_source VARCHAR(40) NOT NULL DEFAULT 'MANUAL_EDIT',
+        batch_id UUID,
+        reference_no VARCHAR(100),
+        reason TEXT,
+
+        discount_pct NUMERIC(6, 2) DEFAULT 0,
+        discount_tiers JSONB DEFAULT '[]'::jsonb,
+        discount_amount NUMERIC(14, 2) DEFAULT 0,
+        tax_pct NUMERIC(6, 2) DEFAULT 0,
+        tax_amount NUMERIC(14, 2) DEFAULT 0,
+
+        additional_costs JSONB DEFAULT '[]'::jsonb,
+        total_additional_cost NUMERIC(14, 2) DEFAULT 0,
+
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_by VARCHAR(100) NOT NULL DEFAULT 'Admin',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(6, 2) DEFAULT 0;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_tiers JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(14, 2) DEFAULT 0;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS tax_pct NUMERIC(6, 2) DEFAULT 0;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS tax_amount NUMERIC(14, 2) DEFAULT 0;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS additional_costs JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS total_additional_cost NUMERIC(14, 2) DEFAULT 0;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS created_by VARCHAR(100) NOT NULL DEFAULT 'Admin';
+      CREATE INDEX IF NOT EXISTS idx_price_history_product ON price_history(product_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_price_history_variant ON price_history(variant_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_price_history_unit ON price_history(variant_unit_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_price_history_supplier ON price_history(supplier_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_price_history_user ON price_history(user_id);
+      CREATE INDEX IF NOT EXISTS idx_price_history_source ON price_history(change_source);
+      CREATE INDEX IF NOT EXISTS idx_price_history_batch ON price_history(batch_id) WHERE batch_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_price_history_created ON price_history(created_at DESC);
+    `);
+
+    // 4c. Store Settings (Pengaturan Global Toko Bangunan Termasuk Ambang Batas Margin)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS store_settings (
+        key VARCHAR(100) PRIMARY KEY,
+        value JSONB NOT NULL,
+        description VARCHAR(255),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_by UUID REFERENCES users(id) ON DELETE SET NULL
+      );
+    `);
+
+    await client.query(`
+      INSERT INTO store_settings (key, value, description)
+      VALUES (
+        'margin_alert_threshold',
+        '{"threshold_pct": 10.0}'::jsonb,
+        'Ambang batas persentase gross margin untuk peringatan margin tipis/kritis'
+      )
+      ON CONFLICT (key) DO NOTHING;
+    `);
+
+    // 4d. Snapshot baseline harga awal untuk varian yang sudah ada jika price_history masih kosong
+    const priceHistCount = await client.query('SELECT COUNT(*)::int AS count FROM price_history');
+    if (priceHistCount.rows[0].count === 0) {
+      const existingUnitsRes = await client.query(`
+        SELECT vu.id as unit_id, vu.unit_name, vu.buy_price, vu.sell_price, vu.wholesale_price,
+               pv.id as variant_id, pv.product_id, p.supplier_id
+        FROM variant_units vu
+        JOIN product_variants pv ON vu.variant_id = pv.id
+        JOIN products p ON pv.product_id = p.id
+      `);
+
+      if (existingUnitsRes.rows.length > 0) {
+        console.log(`📊 Menyiapkan snapshot baseline awal riwayat harga (${existingUnitsRes.rows.length} satuan)...`);
+        for (const row of existingUnitsRes.rows) {
+          const buyP = Number(row.buy_price) || 0;
+          const sellP = Number(row.sell_price) || 0;
+          const wholesaleP = row.wholesale_price !== null && row.wholesale_price !== undefined ? Number(row.wholesale_price) : null;
+          const marginPct = sellP > 0 ? Number((((sellP - buyP) / sellP) * 100).toFixed(2)) : null;
+
+          await client.query(`
+            INSERT INTO price_history (
+              id, product_id, variant_id, variant_unit_id, unit_name, supplier_id,
+              old_buy_price, new_buy_price, old_sell_price, new_sell_price, old_wholesale_price, new_wholesale_price,
+              buy_price_diff, buy_price_change_pct, sell_price_diff, sell_price_change_pct,
+              old_margin_pct, new_margin_pct, change_direction, changed_fields, change_source,
+              reason, created_by, created_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6,
+              NULL, $7, NULL, $8, NULL, $9,
+              0, NULL, 0, NULL,
+              NULL, $10, 'INITIAL', '["buy_price", "sell_price", "wholesale_price"]'::jsonb, 'INITIAL_SNAPSHOT',
+              'Baseline inisialisasi awal sistem histori harga', 'System', CURRENT_TIMESTAMP
+            )
+          `, [
+            generateUUIDv7(),
+            row.product_id,
+            row.variant_id,
+            row.unit_id,
+            row.unit_name,
+            row.supplier_id || null,
+            buyP,
+            sellP,
+            wholesaleP,
+            marginPct
+          ]);
+        }
+      }
+    }
+
     // 5. Stock Movements (Log Transaksi Perubahan Stok)
     await client.query(`
       CREATE TABLE IF NOT EXISTS stock_movements (

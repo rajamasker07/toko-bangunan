@@ -127,6 +127,16 @@ const ENTITY_CONFIGS: ExportEntityCardConfig[] = [
     roundTripCompatible: false,
     tableKeys: ['stock_reservations', 'stock_reservation_items', 'stock_reservation_pickups'],
   },
+  {
+    entity: 'price_history',
+    title: 'Riwayat & Audit Perubahan Harga',
+    badge: 'Analitik & Audit',
+    badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-800',
+    description:
+      'Log audit historis kenaikan/penurunan harga modal, harga jual, harga grosir, gross margin, alasan perubahan, dan user penanggung jawab.',
+    roundTripCompatible: false,
+    tableKeys: ['price_history'],
+  },
 ];
 
 export const ExportDataView: React.FC<ExportDataViewProps> = ({

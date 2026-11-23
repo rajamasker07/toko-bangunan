@@ -3,6 +3,7 @@ import { Permission, RoleDefinition, UserRole } from '../types';
 export type AppTab =
   | 'dashboard'
   | 'products'
+  | 'price-analytics'
   | 'adjust'
   | 'reservations'
   | 'categories'
@@ -21,6 +22,8 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'products:delete',
   'products:view_buy_price',
   'pricing:write',
+  'pricing:analytics',
+  'pricing:threshold',
   'master:read',
   'suppliers:read',
   'master:write',
@@ -149,6 +152,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'products:delete',
     'products:view_buy_price',
     'pricing:write',
+    'pricing:analytics',
+    'pricing:threshold',
     'master:read',
     'suppliers:read',
     'master:write',
@@ -174,6 +179,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'products:delete',
     'products:view_buy_price',
     'pricing:write',
+    'pricing:analytics',
+    'pricing:threshold',
     'master:read',
     'suppliers:read',
     'master:write',
@@ -354,6 +361,8 @@ export function canAccessTab(
       return hasPermission(permissions, role, 'dashboard:read');
     case 'products':
       return hasPermission(permissions, role, 'products:read');
+    case 'price-analytics':
+      return hasPermission(permissions, role, 'pricing:analytics');
     case 'adjust':
       return hasAnyPermission(permissions, role, ['stock:adjust', 'stock:read']);
     case 'reservations':

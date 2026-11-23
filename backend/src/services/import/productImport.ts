@@ -16,6 +16,7 @@ import {
 } from '../../utils/spreadsheetParser.js';
 import { generateUUIDv7 } from '../../utils/uuid.js';
 import { BrandService } from '../brandService.js';
+import { PriceHistoryService } from '../priceHistoryService.js';
 import { normalizeUnitName, unitKey, UnitService } from '../unitService.js';
 import {
   CategoryRegistry,
@@ -1048,6 +1049,7 @@ export async function runProductImport(
   let committedAutoUnit = 0;
 
   if (options.commit) {
+    const importBatchId = generateUUIDv7();
     // Reload category registry fresh for real DB writes (clear virtual dry-run nodes)
     const commitCategoryRegistry = await CategoryRegistry.load(db);
 
@@ -1289,26 +1291,57 @@ export async function runProductImport(
 
           const existingUnit = existingUnitsMap.get(r.unitKeyNorm!);
           if (!existingUnit) {
+            const unitId = generateUUIDv7();
+            const buyVal = ctx.allowBuyPrice ? (r.hargaBeli ?? 0) : 0;
+            const sellVal = r.hargaJual ?? 0;
+            const wholesaleVal = r.hargaGrosir;
+
             await db.query(
               `INSERT INTO variant_units (
                  id, variant_id, unit_name, conversion_factor, is_base_unit,
                  buy_price, sell_price, wholesale_price
                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
               [
-                generateUUIDv7(),
+                unitId,
                 variantId,
                 unit.name,
                 r.faktorKonversi,
                 r.resolvedIsBaseUnit,
-                ctx.allowBuyPrice ? (r.hargaBeli ?? 0) : 0,
-                r.hargaJual ?? 0,
-                r.hargaGrosir,
+                buyVal,
+                sellVal,
+                wholesaleVal,
               ]
             );
+
+            await PriceHistoryService.recordChange(db as any, {
+              productId,
+              variantId,
+              variantUnitId: unitId,
+              unitName: unit.name,
+              supplierId: grp.canonicalProduct.supplierId || null,
+              newBuyPrice: buyVal,
+              newSellPrice: sellVal,
+              newWholesalePrice: wholesaleVal,
+              changeSource: 'INITIAL_PRICE',
+              batchId: importBatchId,
+              referenceNo: ctx.filename || null,
+              reason: ctx.filename ? `Import produk: penambahan satuan baru (${ctx.filename})` : 'Import produk: penambahan satuan baru',
+              userId: ctx.userId,
+              createdBy: ctx.createdBy,
+            });
           } else {
+            const oldBuy = Number(existingUnit.buy_price) || 0;
+            const oldSell = Number(existingUnit.sell_price) || 0;
+            const oldWholesale = existingUnit.wholesale_price !== null ? Number(existingUnit.wholesale_price) : null;
+
             const nextBuyPrice = ctx.allowBuyPrice
-              ? (r.hargaBeli ?? Number(existingUnit.buy_price))
-              : Number(existingUnit.buy_price);
+              ? (r.hargaBeli ?? oldBuy)
+              : oldBuy;
+            const nextSellPrice = r.hargaJual ?? oldSell;
+            const nextWholesalePrice = r.hargaGrosir !== null && r.hargaGrosir !== undefined
+              ? r.hargaGrosir
+              : (existingUnit.wholesale_price !== null ? Number(existingUnit.wholesale_price) : null);
+
             await db.query(
               `UPDATE variant_units SET
                  unit_name = $1,
@@ -1324,11 +1357,31 @@ export async function runProductImport(
                 r.faktorKonversi,
                 r.resolvedIsBaseUnit,
                 nextBuyPrice,
-                r.hargaJual ?? Number(existingUnit.sell_price),
-                r.hargaGrosir !== null ? r.hargaGrosir : existingUnit.wholesale_price,
+                nextSellPrice,
+                nextWholesalePrice,
                 existingUnit.id,
               ]
             );
+
+            await PriceHistoryService.recordChange(db as any, {
+              productId,
+              variantId,
+              variantUnitId: existingUnit.id,
+              unitName: unit.name,
+              supplierId: grp.canonicalProduct.supplierId || null,
+              oldBuyPrice: oldBuy,
+              newBuyPrice: nextBuyPrice,
+              oldSellPrice: oldSell,
+              newSellPrice: nextSellPrice,
+              oldWholesalePrice: oldWholesale,
+              newWholesalePrice: nextWholesalePrice,
+              changeSource: 'EXCEL_IMPORT',
+              batchId: importBatchId,
+              referenceNo: ctx.filename || null,
+              reason: ctx.filename ? `Import data produk (${ctx.filename})` : 'Import data produk',
+              userId: ctx.userId,
+              createdBy: ctx.createdBy,
+            });
           }
         }
       }

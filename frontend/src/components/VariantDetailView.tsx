@@ -1,10 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Product, ProductVariant, StockMovement, VariantUnit } from '../types';
+import {
+  Product,
+  ProductVariant,
+  StockMovement,
+  VariantUnit,
+  VariantPriceAnalytics,
+  PriceHistoryEntry,
+} from '../types';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { formatRupiah, formatStock, formatDate } from '../utils/format';
 import { Pagination } from './common/Pagination';
 import { EditUnitModal } from './EditUnitModal';
+import { PriceTrendChart } from './common/PriceTrendChart';
+import { formatIdNumber } from './common/NumericInput';
 import { 
   ArrowLeft, 
   Layers, 
@@ -24,7 +33,10 @@ import {
   Edit2,
   Power,
   ArrowRightLeft,
-  ExternalLink
+  ExternalLink,
+  TrendingUp,
+  TrendingDown,
+  Sparkles,
 } from 'lucide-react';
 
 interface VariantDetailViewProps {
@@ -59,6 +71,17 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
   const canAdjustStock = can('stock:adjust');
   const canWritePricing = can('pricing:write');
   const canViewBuyPrice = can('products:view_buy_price');
+  const canViewPricingAnalytics = can('pricing:analytics');
+
+  // Sub-tab selection: 'pricing' | 'movements'
+  const [activeSubTab, setActiveSubTab] = useState<'pricing' | 'movements'>(
+    canViewPricingAnalytics ? 'pricing' : 'movements'
+  );
+
+  // Price analytics state
+  const [priceAnalytics, setPriceAnalytics] = useState<VariantPriceAnalytics | null>(null);
+  const [priceHistoryList, setPriceHistoryList] = useState<PriceHistoryEntry[]>([]);
+  const [loadingPriceAnalytics, setLoadingPriceAnalytics] = useState<boolean>(false);
 
   // Movements log state with paging
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -105,6 +128,30 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
   useEffect(() => {
     fetchVariantMovements();
   }, [fetchVariantMovements]);
+
+  // Fetch variant-specific price analytics and history
+  const fetchPriceAnalytics = useCallback(async () => {
+    if (!canViewPricingAnalytics) return;
+    try {
+      setLoadingPriceAnalytics(true);
+      const [analyticsData, historyData] = await Promise.all([
+        api.getVariantPriceAnalytics(variant.id),
+        api.getPriceHistory({ variant_id: variant.id, limit: 30 }),
+      ]);
+      setPriceAnalytics(analyticsData);
+      setPriceHistoryList(historyData.entries);
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setLoadingPriceAnalytics(false);
+    }
+  }, [variant.id, canViewPricingAnalytics]);
+
+  useEffect(() => {
+    if (activeSubTab === 'pricing') {
+      fetchPriceAnalytics();
+    }
+  }, [activeSubTab, fetchPriceAnalytics]);
 
   // Handle Add Unit Price
   const handleAddUnit = async (e: React.FormEvent) => {
@@ -525,13 +572,290 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
                     <span>{formatRupiah(u.wholesale_price)}</span>
                   </div>
                 )}
+                {canViewBuyPrice && (
+                  <div className="flex justify-between items-center text-[11px] pt-1 border-t border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-500 font-medium">Gross Margin:</span>
+                    {(() => {
+                      const sell = Number(u.sell_price) || 0;
+                      const buy = Number(u.buy_price) || 0;
+                      if (sell <= 0) return <span className="text-slate-400">-</span>;
+                      const margin = ((sell - buy) / sell) * 100;
+                      return (
+                        <span
+                          className={`font-black px-1.5 py-0.5 rounded-md text-[10px] ${
+                            margin <= 0
+                              ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+                              : margin < 10
+                              ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
+                              : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                          }`}
+                        >
+                          {margin.toFixed(1).replace('.', ',')}%
+                        </span>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Section: Riwayat Log Mutasi Stok Varian (DENGAN PAGINATION) */}
+      {/* Sub-Tabs: Analitik & Riwayat Harga VS Log Mutasi Stok */}
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800">
+        {canViewPricingAnalytics && (
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('pricing')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+              activeSubTab === 'pricing'
+                ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-300'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4" />
+            <span>Analitik & Riwayat Harga</span>
+            {priceAnalytics && priceAnalytics.total_changes > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                {priceAnalytics.total_changes}
+              </span>
+            )}
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('movements')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+            activeSubTab === 'movements'
+              ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+              : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-300'
+          }`}
+        >
+          <History className="w-4 h-4" />
+          <span>Log Riwayat Mutasi Stok</span>
+          {totalMovements > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+              {totalMovements}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Sub-Tab 1: Analitik & Riwayat Harga Varian */}
+      {activeSubTab === 'pricing' && canViewPricingAnalytics && (
+        <div className="space-y-6">
+          {/* SVG Price Trend Chart */}
+          <PriceTrendChart
+            data={priceAnalytics?.time_series || []}
+            canViewBuyPrice={canViewBuyPrice}
+            height={280}
+            title={`Tren Riwayat Harga Varian: ${variant.variant_name}`}
+          />
+
+          {/* Unit Price Performance Cards */}
+          {priceAnalytics && priceAnalytics.units_summary.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {priceAnalytics.units_summary.map((summary) => (
+                <div
+                  key={summary.unit_id}
+                  className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">
+                      Satuan: {summary.unit_name}
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      {summary.history_count}x penyesuaian
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Jual Terendah</span>
+                      <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                        Rp {formatIdNumber(summary.min_sell_price, false)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Jual Tertinggi</span>
+                      <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                        Rp {formatIdNumber(summary.max_sell_price, false)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                    <span className="text-[10px] text-slate-400">Rata-rata Jual:</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      Rp {formatIdNumber(Math.round(summary.avg_sell_price), false)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Price History Table for This Variant */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <History className="w-4 h-4 text-emerald-500" />
+                <span>Riwayat Audit Perubahan Harga Varian Ini</span>
+              </h3>
+              <button
+                type="button"
+                onClick={fetchPriceAnalytics}
+                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingPriceAnalytics ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+
+            {loadingPriceAnalytics ? (
+              <div className="p-8 text-center text-xs text-slate-400">
+                <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-emerald-500" />
+                <span>Memuat riwayat harga...</span>
+              </div>
+            ) : priceHistoryList.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400">
+                Belum ada riwayat perubahan harga untuk varian ini.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-600 dark:text-slate-300 font-bold">
+                    <tr>
+                      <th className="p-3">Waktu</th>
+                      <th className="p-3">Satuan</th>
+                      <th className="p-3">Harga Jual</th>
+                      {canViewBuyPrice && <th className="p-3">Harga Modal</th>}
+                      {canViewBuyPrice && <th className="p-3">Gross Margin</th>}
+                      <th className="p-3">Alasan / Referensi</th>
+                      <th className="p-3">Sumber & Pengubah</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {priceHistoryList.map((row) => (
+                      <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                        <td className="p-3 whitespace-nowrap text-[11px] text-slate-500">
+                          {new Date(row.created_at).toLocaleDateString('id-ID', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </td>
+
+                        <td className="p-3 font-semibold">{row.unit_name}</td>
+
+                        <td className="p-3 font-mono">
+                          <div className="flex items-center gap-1">
+                            {row.old_sell_price ? (
+                              <span className="line-through text-slate-400 text-[11px]">
+                                {formatIdNumber(row.old_sell_price, false)}
+                              </span>
+                            ) : null}
+                            <span className="font-bold text-slate-900 dark:text-white">
+                              {formatIdNumber(row.new_sell_price, false)}
+                            </span>
+                          </div>
+                          {row.sell_price_diff !== 0 && (
+                            <div className="text-[10px]">
+                              {row.sell_price_diff > 0 ? (
+                                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                  +{formatIdNumber(row.sell_price_diff, false)} (+
+                                  {row.sell_price_percent_change.toFixed(1).replace('.', ',')}%)
+                                </span>
+                              ) : (
+                                <span className="font-semibold text-rose-600 dark:text-rose-400">
+                                  -{formatIdNumber(Math.abs(row.sell_price_diff), false)} (
+                                  {row.sell_price_percent_change.toFixed(1).replace('.', ',')}%)
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        {canViewBuyPrice && (
+                          <td className="p-3 font-mono text-slate-600 dark:text-slate-400">
+                            {row.new_buy_price !== null ? (
+                              <div>
+                                <div className="flex items-center gap-1">
+                                  {row.old_buy_price !== null && (
+                                    <span className="line-through text-slate-400 text-[11px]">
+                                      {formatIdNumber(row.old_buy_price, false)}
+                                    </span>
+                                  )}
+                                  <span className="font-semibold">
+                                    {formatIdNumber(row.new_buy_price, false)}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                        )}
+
+                        {canViewBuyPrice && (
+                          <td className="p-3">
+                            {typeof row.gross_margin_after === 'number' ? (
+                              <div className="flex items-center gap-1">
+                                {typeof row.gross_margin_before === 'number' && (
+                                  <span className="text-slate-400 text-[10px]">
+                                    {row.gross_margin_before.toFixed(1).replace('.', ',')}% →
+                                  </span>
+                                )}
+                                <span
+                                  className={`font-black ${
+                                    row.gross_margin_after <= 0
+                                      ? 'text-rose-600 dark:text-rose-400'
+                                      : 'text-slate-900 dark:text-white'
+                                  }`}
+                                >
+                                  {row.gross_margin_after.toFixed(1).replace('.', ',')}%
+                                </span>
+                              </div>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                        )}
+
+                        <td className="p-3">
+                          <div className="text-slate-800 dark:text-slate-200">
+                            {row.reason || '-'}
+                          </div>
+                          {row.reference_no && (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono block">
+                              Ref: {row.reference_no}
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="p-3 text-[11px]">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 inline-block mb-0.5">
+                            {row.change_source}
+                          </span>
+                          <div className="text-[10px] text-slate-400">
+                            {row.created_by || 'Sistem'}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Sub-Tab 2: Riwayat Log Mutasi Stok Varian (DENGAN PAGINATION) */}
+      {activeSubTab === 'movements' && (
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -696,6 +1020,7 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
           </div>
         )}
       </div>
+      )}
 
       {/* Add Unit Modal */}
       {isAddUnitOpen && (

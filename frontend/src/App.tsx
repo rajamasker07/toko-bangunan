@@ -39,6 +39,7 @@ import { ProfileAccountModal } from './components/ProfileAccountModal';
 import { UserManagementView } from './components/UserManagementView';
 import { ImportDataView } from './components/ImportDataView';
 import { ExportDataView } from './components/ExportDataView';
+import { PriceAnalyticsView } from './components/PriceAnalyticsView';
 import { useToast } from './components/Toast';
 import { useAuth } from './context/AuthContext';
 
@@ -719,6 +720,7 @@ export const App: React.FC = () => {
           setActiveTab={handleTabChange}
           lowStockCount={summary?.low_stock_count}
           alertCount={(reservationAlerts?.overdue_count || 0) + (reservationAlerts?.due_soon_count || 0)}
+          criticalMarginCount={summary?.critical_margin_count || 0}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={toggleSidebar}
         />
@@ -734,6 +736,7 @@ export const App: React.FC = () => {
               onOpenCreateProduct={handleOpenCreateProduct}
               onOpenStockAdjust={handleOpenAdjust}
               onNavigateToProducts={handleNavigateToProducts}
+              onNavigateToPricing={() => setActiveTab('price-analytics')}
               onNavigateToMovements={() => {
                 setAdjustInitialTab('history');
                 setActiveTab('adjust');
@@ -817,6 +820,10 @@ export const App: React.FC = () => {
                 />
               ) : null}
             </>
+          )}
+
+          {activeTab === 'price-analytics' && (
+            <PriceAnalyticsView />
           )}
 
           {activeTab === 'adjust' && (

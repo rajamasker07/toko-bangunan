@@ -222,7 +222,15 @@ export class CatalogRestructureService {
           [input.target_product_id, v.id]
         );
 
-        // d. Buat jejak audit perpindahan di kartu stok (stock_movements)
+        // d. Pindahkan relasi price_history
+        await client.query(
+          `UPDATE price_history
+           SET product_id = $1
+           WHERE variant_id = $2`,
+          [input.target_product_id, v.id]
+        );
+
+        // e. Buat jejak audit perpindahan di kartu stok (stock_movements)
         const moveId = generateUUIDv7();
         const refNo = `MOV-${Date.now().toString().slice(-6)}`;
         const userNotes = input.notes ? ` Catatan: ${input.notes.trim()}` : '';
@@ -489,6 +497,10 @@ export class CatalogRestructureService {
       );
       await client.query(
         `UPDATE stock_reservation_items SET product_id = $1 WHERE variant_id = $2`,
+        [newProductId, variant.id]
+      );
+      await client.query(
+        `UPDATE price_history SET product_id = $1 WHERE variant_id = $2`,
         [newProductId, variant.id]
       );
 
@@ -773,6 +785,11 @@ export class CatalogRestructureService {
 
         await client.query(
           `UPDATE stock_reservation_items SET product_id = $1 WHERE variant_id = $2`,
+          [targetProductId, v.id]
+        );
+
+        await client.query(
+          `UPDATE price_history SET product_id = $1 WHERE variant_id = $2`,
           [targetProductId, v.id]
         );
 

@@ -1,10 +1,11 @@
 import { Request, Response } from 'express';
+import { hasPermission } from '../config/rbac.js';
 import { StockService } from '../services/stockService.js';
 
 export class StockController {
   static async adjust(req: Request, res: Response) {
     try {
-      const { variant_id, adjustment_mode, amount, movement_type, notes, reference_no } = req.body;
+      const { variant_id, adjustment_mode, amount, movement_type, notes, reference_no, price_update } = req.body;
 
       if (!variant_id || !adjustment_mode || amount === undefined || !movement_type || !notes) {
         return res.status(400).json({ 
@@ -12,6 +13,9 @@ export class StockController {
           message: 'Varian, mode penyesuaian, jumlah perubahan, tipe mutasi, dan catatan alasan wajib diisi' 
         });
       }
+
+      const allowBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const canWritePricing = hasPermission(req.user!.role, 'pricing:write');
 
       const result = await StockService.adjustStock({
         variant_id,
@@ -22,6 +26,8 @@ export class StockController {
         reference_no,
         user_id: req.user!.id,
         created_by: req.user!.full_name,
+        price_update: canWritePricing ? price_update : undefined,
+        allow_buy_price: allowBuyPrice,
       });
 
       res.json({ success: true, data: result, message: 'Penyesuaian stok berhasil disimpan!' });

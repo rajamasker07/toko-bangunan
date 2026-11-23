@@ -12,7 +12,10 @@ import {
   Clock, 
   SlidersHorizontal,
   PlusCircle,
-  CheckCircle
+  CheckCircle,
+  TrendingUp,
+  TrendingDown,
+  ArrowRight,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -29,6 +32,7 @@ interface DashboardViewProps {
   onNavigateToProducts: (filterStatus?: string) => void;
   onNavigateToMovements: () => void;
   onNavigateToReservations?: () => void;
+  onNavigateToPricing?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -40,11 +44,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateToProducts,
   onNavigateToMovements,
   onNavigateToReservations,
+  onNavigateToPricing,
 }) => {
   const { can } = useAuth();
   const canCreateProduct = can('products:create');
   const canAdjustStock = can('stock:adjust');
   const canReadMovements = can('stock:read');
+  const canViewPricingAnalytics = can('pricing:analytics');
   if (loading || !summary) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -167,6 +173,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             >
               <span>Kelola Reservasi</span>
               <ArrowUpRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Prominent Warning Widget for Margin Alerts */}
+      {canViewPricingAnalytics && Boolean(summary.critical_margin_count && summary.critical_margin_count > 0) && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-orange-500/15 border-2 border-amber-500/30 dark:border-amber-500/40 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in duration-300">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="p-2.5 rounded-xl bg-amber-500 text-white shadow-md shadow-amber-500/30 shrink-0">
+              <TrendingDown className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-sm sm:text-base">
+                  Peringatan Gross Margin Kritis
+                </h3>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-sm">
+                  {summary.critical_margin_count} Produk Margin Tipis / Rugi
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+                Terdapat produk dengan margin keuntungan di bawah ambang batas aman atau berpotensi jual rugi setelah kenaikan modal. Segera tinjau harga jual toko.
+              </p>
+            </div>
+          </div>
+          {onNavigateToPricing && (
+            <button
+              onClick={onNavigateToPricing}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 shadow-sm shrink-0 transition-all flex items-center gap-1.5"
+            >
+              <span>Tinjau Harga Produk</span>
+              <ArrowRight className="w-4 h-4" />
             </button>
           )}
         </div>

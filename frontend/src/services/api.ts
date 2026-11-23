@@ -36,6 +36,15 @@ import {
   BulkMergeResult,
   PromoteVariantPayload,
   RestructureResult,
+  PriceHistoryEntry,
+  PriceTrendPoint,
+  VariantPriceAnalytics,
+  ProductPriceAnalytics,
+  MarginAlertItem,
+  PriceOverviewAnalytics,
+  BulkPriceUpdatePayload,
+  BulkPricePreviewResponse,
+  PriceUpdateOnRestock,
 } from '../types';
 
 const BASE_URL = '/api';
@@ -826,6 +835,7 @@ export const api = {
     movement_type: string;
     reference_no?: string;
     notes: string;
+    price_update?: PriceUpdateOnRestock;
   }) =>
     fetchJson<any>('/stock/adjust', {
       method: 'POST',
@@ -1068,4 +1078,65 @@ export const api = {
     invalidateMasterDataCache();
     return result;
   },
+
+  // Price History & Analytics
+  getPriceHistory: (params?: {
+    product_id?: string;
+    variant_id?: string;
+    unit_name?: string;
+    supplier_id?: string;
+    source?: string;
+    direction?: string;
+    search?: string;
+    start_date?: string;
+    end_date?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const query = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') {
+          query.set(k, String(v));
+        }
+      });
+    }
+    const qStr = query.toString();
+    return fetchJson<{
+      entries: PriceHistoryEntry[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/price-history${qStr ? `?${qStr}` : ''}`);
+  },
+
+  getVariantPriceAnalytics: (variantId: string) =>
+    fetchJson<VariantPriceAnalytics>(`/variants/${variantId}/price-analytics`),
+
+  getProductPriceAnalytics: (productId: string) =>
+    fetchJson<ProductPriceAnalytics>(`/products/${productId}/price-analytics`),
+
+  getPriceOverviewAnalytics: () =>
+    fetchJson<PriceOverviewAnalytics>('/price-analytics/overview'),
+
+  getMarginThreshold: () =>
+    fetchJson<{ margin_threshold: number }>('/pricing/threshold'),
+
+  updateMarginThreshold: (threshold: number) =>
+    fetchJson<{ success: boolean; margin_threshold: number; message: string }>('/pricing/threshold', {
+      method: 'PUT',
+      body: JSON.stringify({ margin_threshold: threshold }),
+    }),
+
+  previewBulkPriceUpdate: (payload: BulkPriceUpdatePayload) =>
+    fetchJson<BulkPricePreviewResponse>('/pricing/bulk-update/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  commitBulkPriceUpdate: (payload: BulkPriceUpdatePayload) =>
+    fetchJson<{ success: boolean; updated_count: number; message: string; batch_id?: string }>('/pricing/bulk-update/commit', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 };
