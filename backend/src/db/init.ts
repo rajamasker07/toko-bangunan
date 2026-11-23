@@ -541,10 +541,13 @@ export async function initializeDatabase() {
       ALTER TABLE price_history ADD COLUMN IF NOT EXISTS tax_amount NUMERIC(14, 2) DEFAULT 0;
       ALTER TABLE price_history ADD COLUMN IF NOT EXISTS additional_costs JSONB DEFAULT '[]'::jsonb;
       ALTER TABLE price_history ADD COLUMN IF NOT EXISTS total_additional_cost NUMERIC(14, 2) DEFAULT 0;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS created_by VARCHAR(100) NOT NULL DEFAULT 'Admin';
       CREATE INDEX IF NOT EXISTS idx_price_history_product ON price_history(product_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_price_history_variant ON price_history(variant_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_price_history_unit ON price_history(variant_unit_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_price_history_supplier ON price_history(supplier_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_price_history_user ON price_history(user_id);
       CREATE INDEX IF NOT EXISTS idx_price_history_source ON price_history(change_source);
       CREATE INDEX IF NOT EXISTS idx_price_history_batch ON price_history(batch_id) WHERE batch_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_price_history_created ON price_history(created_at DESC);

@@ -888,9 +888,14 @@ export const PriceAnalyticsView: React.FC = () => {
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 inline-block mb-0.5">
                             {row.change_source}
                           </span>
-                          <div className="text-[10px] text-slate-400">
-                            Oleh: {row.created_by || 'Sistem'}
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            Oleh: <span className="font-semibold text-slate-700 dark:text-slate-200">{row.created_by || row.created_by_fullname || row.created_by_username || 'Sistem'}</span>
                           </div>
+                          {row.created_by_role && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-400 font-mono inline-block">
+                              {row.created_by_role}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))}

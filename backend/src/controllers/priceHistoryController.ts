@@ -158,9 +158,15 @@ export class PriceHistoryController {
       }
 
       const allowBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const userFullName = req.user?.full_name?.trim();
+      const username = req.user?.username?.trim();
+      const actorName = userFullName
+        ? (username && username !== userFullName ? `${userFullName} (@${username})` : userFullName)
+        : (username || 'Admin');
+
       const result = await PriceHistoryService.commitBulkPriceUpdate(req.body, {
         userId: req.user!.id,
-        createdBy: req.user!.full_name,
+        createdBy: actorName,
         allowBuyPrice,
       });
 

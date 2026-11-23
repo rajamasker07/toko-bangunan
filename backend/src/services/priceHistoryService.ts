@@ -367,6 +367,7 @@ export class PriceHistoryService {
         pv.sku as variant_sku,
         s.name as supplier_name,
         u.username as created_by_username,
+        u.full_name as created_by_fullname,
         u.role as created_by_role
       FROM price_history ph
       JOIN products p ON ph.product_id = p.id

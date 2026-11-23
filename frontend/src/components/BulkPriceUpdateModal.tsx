@@ -40,6 +40,9 @@ import {
   Calculator,
   Truck,
   HelpCircle,
+  User,
+  UserCheck,
+  Ban,
 } from 'lucide-react';
 import { NumericInput, formatIdNumber, parseIdNumber } from './common/NumericInput';
 import { SearchableSelect, SearchableOption } from './common/SearchableSelect';
@@ -87,7 +90,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
   showToast,
 }) => {
   const triggerToast = showToast || ((msg: string) => console.log(msg));
-  const { can } = useAuth();
+  const { can, user: currentUser } = useAuth();
   const canViewBuyPrice = can('products:view_buy_price');
 
   // Step state
@@ -100,14 +103,25 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
   const [brands, setBrands] = useState<Brand[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
-  // STEP 1: Product Selection & Filters
-  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  // STEP 1: Single Product Selection (Hanya 1 produk yang bisa dipilih)
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(
+    product && product.is_active !== false ? product.id : null
+  );
   const [productSearch, setProductSearch] = useState<string>('');
   const [productCategoryFilter, setProductCategoryFilter] = useState<string>('');
   const [productBrandFilter, setProductBrandFilter] = useState<string>('');
   const [productSupplierFilter, setProductSupplierFilter] = useState<string>('');
   const [productPage, setProductPage] = useState<number>(1);
   const [productPageSize, setProductPageSize] = useState<number>(12);
+
+  const selectedProduct = useMemo(() => {
+    if (!selectedProductId) return null;
+    return allProducts.find((p) => p.id === selectedProductId) || null;
+  }, [allProducts, selectedProductId]);
+
+  const selectedProductIds = useMemo(() => {
+    return selectedProductId ? new Set([selectedProductId]) : new Set<string>();
+  }, [selectedProductId]);
 
   // STEP 2: Variant Selection & Filters
   const [selectedVariantIds, setSelectedVariantIds] = useState<Set<string>>(new Set());
@@ -172,10 +186,13 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       setBrands(brs || []);
       setSuppliers(supps || []);
 
-      if (product) {
-        setSelectedProductIds(new Set([product.id]));
-        const pVariants = product.variants || [];
-        setSelectedVariantIds(new Set(pVariants.map((v) => v.id)));
+      if (product && product.is_active !== false) {
+        setSelectedProductId(product.id);
+        const activeVariants = (product.variants || []).filter((v) => v.is_active !== false);
+        setSelectedVariantIds(new Set(activeVariants.map((v) => v.id)));
+      } else {
+        setSelectedProductId(null);
+        setSelectedVariantIds(new Set());
       }
     } catch (err: any) {
       console.error('Failed to load bulk pricing initial data', err);
@@ -440,75 +457,38 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     return filteredVariants.slice(start, start + variantPageSize);
   }, [filteredVariants, variantPage, variantPageSize]);
 
-  // Handlers for Step 1
+  // Handlers for Step 1: Single Product Selection (Hanya 1 produk yang bisa dipilih)
   const toggleSelectProduct = (productId: string) => {
-    const next = new Set(selectedProductIds);
-    if (next.has(productId)) {
-      next.delete(productId);
-      const prod = allProducts.find((p) => p.id === productId);
-      if (prod && prod.variants) {
-        const nextVariants = new Set(selectedVariantIds);
-        prod.variants.forEach((v) => nextVariants.delete(v.id));
-        setSelectedVariantIds(nextVariants);
-      }
+    const prod = allProducts.find((p) => p.id === productId);
+    // Produk tidak dijual tidak bisa dipilih
+    if (!prod || prod.is_active === false) return;
+
+    if (selectedProductId === productId) {
+      setSelectedProductId(null);
+      setSelectedVariantIds(new Set());
     } else {
-      next.add(productId);
-      const prod = allProducts.find((p) => p.id === productId);
-      if (prod && prod.variants) {
-        const nextVariants = new Set(selectedVariantIds);
-        prod.variants.forEach((v) => nextVariants.add(v.id));
-        setSelectedVariantIds(nextVariants);
-      }
+      setSelectedProductId(productId);
+      // Otomatis pilih semua varian aktif dari produk ini
+      const activeVariants = (prod.variants || []).filter((v) => v.is_active !== false);
+      setSelectedVariantIds(new Set(activeVariants.map((v) => v.id)));
     }
-    setSelectedProductIds(next);
+    setVariantPage(1);
   };
 
-  const handleSelectPageProducts = () => {
-    const next = new Set(selectedProductIds);
-    const nextVariants = new Set(selectedVariantIds);
-    paginatedProducts.forEach((p) => {
-      next.add(p.id);
-      (p.variants || []).forEach((v) => nextVariants.add(v.id));
-    });
-    setSelectedProductIds(next);
-    setSelectedVariantIds(nextVariants);
+  const handleDeselectProduct = () => {
+    setSelectedProductId(null);
+    setSelectedVariantIds(new Set());
+    setVariantPage(1);
   };
 
-  const handleDeselectPageProducts = () => {
-    const next = new Set(selectedProductIds);
-    const nextVariants = new Set(selectedVariantIds);
-    paginatedProducts.forEach((p) => {
-      next.delete(p.id);
-      (p.variants || []).forEach((v) => nextVariants.delete(v.id));
-    });
-    setSelectedProductIds(next);
-    setSelectedVariantIds(nextVariants);
-  };
-
-  const handleSelectAllFilteredProducts = () => {
-    const next = new Set(selectedProductIds);
-    const nextVariants = new Set(selectedVariantIds);
-    filteredProducts.forEach((p) => {
-      next.add(p.id);
-      (p.variants || []).forEach((v) => nextVariants.add(v.id));
-    });
-    setSelectedProductIds(next);
-    setSelectedVariantIds(nextVariants);
-  };
-
-  const handleDeselectAllFilteredProducts = () => {
-    const next = new Set(selectedProductIds);
-    const nextVariants = new Set(selectedVariantIds);
-    filteredProducts.forEach((p) => {
-      next.delete(p.id);
-      (p.variants || []).forEach((v) => nextVariants.delete(v.id));
-    });
-    setSelectedProductIds(next);
-    setSelectedVariantIds(nextVariants);
-  };
-
-  // Handlers for Step 2
+  // Handlers for Step 2: Multi Variant Selection
   const toggleSelectVariant = (variantId: string) => {
+    const v = variantsOfSelectedProducts.find((item) => item.id === variantId);
+    // Varian tidak dijual tidak bisa dipilih
+    if (!v || v.is_active === false || v.parentProduct.is_active === false) {
+      return;
+    }
+
     const next = new Set(selectedVariantIds);
     if (next.has(variantId)) {
       next.delete(variantId);
@@ -520,7 +500,11 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
 
   const handleSelectPageVariants = () => {
     const next = new Set(selectedVariantIds);
-    paginatedVariants.forEach((v) => next.add(v.id));
+    paginatedVariants.forEach((v) => {
+      if (v.is_active !== false && v.parentProduct.is_active !== false) {
+        next.add(v.id);
+      }
+    });
     setSelectedVariantIds(next);
   };
 
@@ -532,7 +516,11 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
 
   const handleSelectAllFilteredVariants = () => {
     const next = new Set(selectedVariantIds);
-    filteredVariants.forEach((v) => next.add(v.id));
+    filteredVariants.forEach((v) => {
+      if (v.is_active !== false && v.parentProduct.is_active !== false) {
+        next.add(v.id);
+      }
+    });
     setSelectedVariantIds(next);
   };
 
@@ -885,7 +873,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
         {/* STEP CONTENT BODY (Scrollable) */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
           {/* ========================================================================= */}
-          {/* STEP 1: PILIH PRODUK SASARAN                                              */}
+          {/* STEP 1: PILIH PRODUK SASARAN (HANYA 1 PRODUK)                             */}
           {/* ========================================================================= */}
           {currentStep === 'SELECT_PRODUCTS' && (
             <div className="space-y-4 animate-in fade-in duration-200">
@@ -893,20 +881,27 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                     <Package className="w-4 h-4 text-amber-500" />
-                    <span>Langkah 1: Pilih Produk Sasaran</span>
+                    <span>Langkah 1: Pilih 1 Produk Sasaran</span>
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Centang produk yang ingin Anda perbarui harganya. Varian dari produk terpilih akan disaring di langkah berikutnya.
+                    Pilih satu produk yang akan disesuaikan harganya. Varian dari produk terpilih akan disaring dan dipilih pada langkah berikutnya.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-3 py-1 rounded-full border border-amber-200 dark:border-amber-900/60">
-                    {selectedProductIds.size} Produk Terpilih
-                  </span>
+                  {selectedProduct ? (
+                    <span className="text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-3 py-1 rounded-full border border-amber-300 dark:border-amber-800 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-amber-500" />
+                      <span className="truncate max-w-[220px]">1 Produk: {selectedProduct.name}</span>
+                    </span>
+                  ) : (
+                    <span className="text-xs font-semibold text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">
+                      Belum Ada Produk Dipilih
+                    </span>
+                  )}
                 </div>
               </div>
 
-              {/* REQUIREMENT 1.a & 1.b: Searchable Filters with ONLY active data */}
+              {/* Searchable Filters with ONLY active data */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
@@ -959,43 +954,25 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 </div>
               </div>
 
-              {/* Bulk Select Actions for Filtered Products */}
+              {/* Status info & Reset Selection */}
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                 <span>
                   Menampilkan <strong>{paginatedProducts.length}</strong> produk di halaman ini (dari total{' '}
                   <strong>{filteredProducts.length}</strong> produk terfilter)
                 </span>
-                <div className="flex flex-wrap items-center gap-2">
+                {selectedProductId && (
                   <button
                     type="button"
-                    onClick={handleSelectPageProducts}
-                    className="text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
+                    onClick={handleDeselectProduct}
+                    className="text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 font-semibold flex items-center gap-1 text-xs"
                   >
-                    <CheckSquare className="w-3.5 h-3.5" />
-                    <span>Pilih Halaman Ini ({paginatedProducts.length})</span>
+                    <X className="w-3.5 h-3.5" />
+                    <span>Batal Pilih Produk</span>
                   </button>
-                  <span>•</span>
-                  <button
-                    type="button"
-                    onClick={handleSelectAllFilteredProducts}
-                    className="text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
-                  >
-                    <CheckSquare className="w-3.5 h-3.5" />
-                    <span>Pilih Seluruh Hasil ({filteredProducts.length})</span>
-                  </button>
-                  <span>•</span>
-                  <button
-                    type="button"
-                    onClick={handleDeselectAllFilteredProducts}
-                    className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 font-semibold flex items-center gap-1"
-                  >
-                    <Square className="w-3.5 h-3.5" />
-                    <span>Batal Pilih Semua</span>
-                  </button>
-                </div>
+                )}
               </div>
 
-              {/* REQUIREMENT 1.c: Products Grid with Lazy Load / Pagination */}
+              {/* Products Grid with Lazy Load / Pagination */}
               {isLoadingProducts ? (
                 <div className="p-12 text-center text-xs text-slate-400">
                   <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-500" />
@@ -1009,35 +986,62 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[420px] overflow-y-auto pr-1">
                     {paginatedProducts.map((p) => {
-                      const isSelected = selectedProductIds.has(p.id);
-                      const vCount = (p.variants || []).length;
+                      const isSelected = selectedProductId === p.id;
+                      const isInactive = p.is_active === false;
+                      const allVars = p.variants || [];
+                      const activeVCount = allVars.filter((v) => v.is_active !== false).length;
+                      const inactiveVCount = allVars.length - activeVCount;
+
                       return (
                         <div
                           key={p.id}
-                          onClick={() => toggleSelectProduct(p.id)}
-                          className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
-                            isSelected
-                              ? 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700/60 shadow-xs'
-                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                          onClick={() => {
+                            if (!isInactive) toggleSelectProduct(p.id);
+                          }}
+                          className={`p-3 rounded-2xl border transition-all flex items-start gap-3 ${
+                            isInactive
+                              ? 'opacity-60 bg-slate-100/70 dark:bg-slate-900/40 border-dashed border-rose-200 dark:border-rose-900/30 cursor-not-allowed select-none'
+                              : isSelected
+                              ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-400 dark:border-amber-600 shadow-sm ring-1 ring-amber-400/40 cursor-pointer'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 cursor-pointer'
                           }`}
                         >
                           <div className="pt-0.5">
                             <input
-                              type="checkbox"
+                              type="radio"
+                              name="selected_single_product"
                               checked={isSelected}
-                              onChange={() => {}}
-                              className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
+                              disabled={isInactive}
+                              onChange={() => {
+                                if (!isInactive) toggleSelectProduct(p.id);
+                              }}
+                              className={`w-4 h-4 text-amber-600 focus:ring-amber-500 border-slate-300 ${
+                                isInactive ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
+                              }`}
                             />
                           </div>
 
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                            <div className="flex items-start justify-between gap-2">
+                              <span
+                                className={`font-bold text-xs truncate ${
+                                  isInactive ? 'text-slate-500 line-through' : 'text-slate-900 dark:text-white'
+                                }`}
+                              >
                                 {p.name}
                               </span>
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
-                                {vCount} Varian
-                              </span>
+
+                              {/* Status Tidak Dijual vs Masih Dijual */}
+                              {isInactive ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/40 px-2 py-0.5 rounded-full shrink-0">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                                  Tidak Dijual
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
+                                  {activeVCount} Varian Aktif
+                                </span>
+                              )}
                             </div>
 
                             <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
@@ -1046,17 +1050,27 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                               {p.brand && <span>• {p.brand}</span>}
                             </div>
 
-                            <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500">
-                              <span>
-                                Stok Total:{' '}
-                                <strong className="text-slate-800 dark:text-slate-200 font-bold">
-                                  {p.total_stock}
-                                </strong>
-                              </span>
-                              {p.supplier_name && (
-                                <span className="truncate max-w-[140px]">Supp: {p.supplier_name}</span>
-                              )}
-                            </div>
+                            {isInactive ? (
+                              <div className="mt-2 pt-2 border-t border-slate-200/60 dark:border-slate-800 text-[10px] text-rose-500 font-medium flex items-center gap-1">
+                                <Ban className="w-3 h-3 shrink-0" />
+                                <span>Produk sudah tidak dijual dan tidak dapat dipilih.</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500">
+                                <span>
+                                  Stok Total:{' '}
+                                  <strong className="text-slate-800 dark:text-slate-200 font-bold">
+                                    {p.total_stock}
+                                  </strong>
+                                  {inactiveVCount > 0 && (
+                                    <span className="text-rose-500 ml-1.5">({inactiveVCount} nonaktif)</span>
+                                  )}
+                                </span>
+                                {p.supplier_name && (
+                                  <span className="truncate max-w-[140px]">Supp: {p.supplier_name}</span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -1092,10 +1106,10 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                     <Layers className="w-4 h-4 text-amber-500" />
-                    <span>Langkah 2: Pilih Multi Varian dengan Filter</span>
+                    <span>Langkah 2: Pilih Multi Varian</span>
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Saring dan pilih varian spesifik berdasarkan nama, SKU, produk induk, satuan, atau atribut dinamis.
+                    Produk: <strong className="text-slate-800 dark:text-slate-200">{selectedProduct?.name || '-'}</strong> ({selectedProduct?.sku}). Saring dan centang varian aktif yang ingin disesuaikan harganya.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1125,22 +1139,10 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     />
                   </div>
 
-                  {/* Filter by Parent Product */}
-                  <div>
-                    <select
-                      value={variantProductFilter}
-                      onChange={(e) => setVariantProductFilter(e.target.value)}
-                      className="w-full py-1.5 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    >
-                      <option value="">Semua Produk Induk ({selectedProductIds.size})</option>
-                      {allProducts
-                        .filter((p) => selectedProductIds.has(p.id))
-                        .map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                    </select>
+                  {/* Produk Induk Read-only Info */}
+                  <div className="py-1.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-200 font-bold flex items-center gap-1.5 truncate">
+                    <Package className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span className="truncate">{selectedProduct?.name || 'Produk Induk'}</span>
                   </div>
 
                   {/* Filter by Satuan */}
@@ -1238,7 +1240,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     className="text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
                   >
                     <CheckSquare className="w-3.5 h-3.5" />
-                    <span>Pilih Halaman Ini ({paginatedVariants.length})</span>
+                    <span>Pilih Varian Aktif Halaman Ini</span>
                   </button>
                   <span>•</span>
                   <button
@@ -1247,7 +1249,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     className="text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
                   >
                     <CheckSquare className="w-3.5 h-3.5" />
-                    <span>Pilih Seluruh Hasil ({filteredVariants.length})</span>
+                    <span>Pilih Semua Varian Aktif</span>
                   </button>
                   <span>•</span>
                   <button
@@ -1261,7 +1263,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 </div>
               </div>
 
-              {/* REQUIREMENT 2.a: Paginated Variants List to prevent heavy memory overhead */}
+              {/* Paginated Variants List to prevent heavy memory overhead */}
               {filteredVariants.length === 0 ? (
                 <div className="p-12 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
                   Tidak ada varian yang cocok dengan filter di atas.
@@ -1271,24 +1273,34 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
                     {paginatedVariants.map((v) => {
                       const isSelected = selectedVariantIds.has(v.id);
+                      const isInactive = v.is_active === false || v.parentProduct.is_active === false;
                       const attrs = v.attributes && typeof v.attributes === 'object' ? Object.entries(v.attributes) : [];
 
                       return (
                         <div
                           key={v.id}
-                          onClick={() => toggleSelectVariant(v.id)}
-                          className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
-                            isSelected
-                              ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700/60 shadow-xs'
-                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                          onClick={() => {
+                            if (!isInactive) toggleSelectVariant(v.id);
+                          }}
+                          className={`p-3 rounded-2xl border transition-all flex items-start gap-3 ${
+                            isInactive
+                              ? 'opacity-60 bg-slate-100/70 dark:bg-slate-900/40 border-dashed border-rose-200 dark:border-rose-900/30 cursor-not-allowed select-none'
+                              : isSelected
+                              ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700/60 shadow-xs cursor-pointer'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 cursor-pointer'
                           }`}
                         >
                           <div className="pt-0.5">
                             <input
                               type="checkbox"
-                              checked={isSelected}
-                              onChange={() => {}}
-                              className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
+                              checked={isSelected && !isInactive}
+                              disabled={isInactive}
+                              onChange={() => {
+                                if (!isInactive) toggleSelectVariant(v.id);
+                              }}
+                              className={`w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 ${
+                                isInactive ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
+                              }`}
                             />
                           </div>
 
@@ -1299,7 +1311,11 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                                   {v.parentProduct.name}
                                 </span>
                                 <div className="flex items-center gap-2">
-                                  <span className="font-bold text-xs text-slate-900 dark:text-white">
+                                  <span
+                                    className={`font-bold text-xs ${
+                                      isInactive ? 'text-slate-500 line-through' : 'text-slate-900 dark:text-white'
+                                    }`}
+                                  >
                                     {v.variant_name}
                                   </span>
                                   <span className="text-[10px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded">
@@ -1308,12 +1324,31 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                                 </div>
                               </div>
 
-                              <div className="text-right shrink-0">
-                                <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+                              <div className="flex items-center gap-2 shrink-0">
+                                {isInactive ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/40 px-2 py-0.5 rounded-full">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                                    Tidak Dijual
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40 px-2 py-0.5 rounded-full">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                    Masih Dijual
+                                  </span>
+                                )}
+                                <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
                                   Stok: {v.current_stock}
                                 </span>
                               </div>
                             </div>
+
+                            {/* Status Tidak Dijual Alert Note */}
+                            {isInactive && (
+                              <div className="text-[10px] text-rose-500 font-medium flex items-center gap-1">
+                                <Ban className="w-3 h-3 shrink-0" />
+                                <span>Varian ini berstatus tidak dijual dan tidak dapat diperbarui harganya.</span>
+                              </div>
+                            )}
 
                             {/* Dynamic Attribute Pills */}
                             {attrs.length > 0 && (
@@ -2214,6 +2249,35 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   />
                 </div>
               </div>
+
+              {/* Petugas Penanggung Jawab Audit Card */}
+              <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                    <UserCheck className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">
+                      Petugas Penanggung Jawab Perubahan Harga
+                    </span>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                      <span>{currentUser?.full_name || currentUser?.username || 'Admin'}</span>
+                      {currentUser?.username && (
+                        <span className="text-slate-400 font-mono text-[11px]">(@{currentUser.username})</span>
+                      )}
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 uppercase">
+                        {currentUser?.role || 'Staff'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-800/60">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Tercatat Otomatis
+                  </span>
+                </div>
+              </div>
             </div>
           )}
 
@@ -2486,6 +2550,31 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     </table>
                   </div>
 
+                  {/* Responsible User Info in Step 4 */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-semibold block">Petugas Penanggung Jawab Audit:</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-slate-800 dark:text-slate-200">
+                            {currentUser?.full_name || currentUser?.username || 'Admin'}
+                          </span>
+                          {currentUser?.username && (
+                            <span className="text-slate-400 font-mono text-[11px]">(@{currentUser.username})</span>
+                          )}
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300">
+                            {currentUser?.role || 'Staff'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1 shrink-0">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Tercatat Resmi
+                    </span>
+                  </div>
+
                   {/* Confirmation Checkbox */}
                   <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-3">
                     <input
@@ -2582,6 +2671,12 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                   </div>
                 )}
                 <div className="flex justify-between">
+                  <span className="text-slate-400">Petugas Penanggung Jawab:</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {currentUser?.full_name || currentUser?.username || 'Admin'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-slate-400">Alasan:</span>
                   <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[200px]">
                     {reason}
@@ -2667,11 +2762,11 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
               {currentStep === 'SELECT_PRODUCTS' && (
                 <button
                   type="button"
-                  disabled={selectedProductIds.size === 0}
+                  disabled={!selectedProductId}
                   onClick={() => setCurrentStep('SELECT_VARIANTS')}
                   className="px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-md shadow-amber-600/20 flex items-center gap-1.5"
                 >
-                  <span>Lanjut: Pilih Multi Varian ({selectedProductIds.size})</span>
+                  <span>Lanjut: Pilih Multi Varian</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               )}

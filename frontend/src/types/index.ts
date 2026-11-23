@@ -668,6 +668,9 @@ export interface PriceHistoryEntry {
   reason: string | null;
   user_id: string | null;
   created_by: string | null;
+  created_by_username?: string | null;
+  created_by_fullname?: string | null;
+  created_by_role?: UserRole | null;
   created_at: string;
   product_name?: string;
   variant_name?: string;
