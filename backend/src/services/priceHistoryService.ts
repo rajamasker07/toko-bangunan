@@ -33,6 +33,7 @@ export interface RecordPriceChangeInput {
   reason?: string | null;
 
   discountPct?: number | null;
+  discountTiers?: number[] | null;
   discountAmount?: number | null;
   taxPct?: number | null;
   taxAmount?: number | null;
@@ -85,6 +86,7 @@ export interface BulkPriceUpdateInput {
 
   discount_type?: 'PERCENT' | 'AMOUNT';
   discount_pct?: number;
+  discount_tiers?: number[]; // Diskon bertingkat, misal [10, 2] atau [45, 10, 0.5]
   discount_amount?: number;
   tax_type?: 'PERCENT' | 'AMOUNT';
   tax_pct?: number;
@@ -123,6 +125,51 @@ export class PriceHistoryService {
   static applyRounding(value: number, step?: number): number {
     if (!step || step <= 1) return Math.round(value);
     return Math.ceil(value / step) * step;
+  }
+
+  /**
+   * Hitung diskon bertingkat (cascading/compound discount), misal [10, 2] atau [45, 10, 0.5]
+   * Rumus: Harga akhir = Harga awal * (1 - d1/100) * (1 - d2/100) * ...
+   */
+  static calculateTieredDiscount(
+    basePrice: number,
+    tiers: number[]
+  ): {
+    cleanTiers: number[];
+    effectivePct: number;
+    discountAmount: number;
+    netPrice: number;
+  } {
+    const cleanTiers = (tiers || [])
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v) && v > 0 && v <= 100);
+
+    if (cleanTiers.length === 0 || basePrice <= 0) {
+      return {
+        cleanTiers: [],
+        effectivePct: 0,
+        discountAmount: 0,
+        netPrice: Math.max(0, basePrice),
+      };
+    }
+
+    let runningPrice = basePrice;
+    let remainingFactor = 1;
+    for (const pct of cleanTiers) {
+      remainingFactor *= 1 - pct / 100;
+      runningPrice = runningPrice * (1 - pct / 100);
+    }
+
+    const netPrice = Math.max(0, runningPrice);
+    const discountAmount = Number((basePrice - netPrice).toFixed(2));
+    const effectivePct = Number(((1 - remainingFactor) * 100).toFixed(2));
+
+    return {
+      cleanTiers,
+      effectivePct,
+      discountAmount,
+      netPrice,
+    };
   }
 
   /**
@@ -208,7 +255,7 @@ export class PriceHistoryService {
         old_buy_price, new_buy_price, old_sell_price, new_sell_price, old_wholesale_price, new_wholesale_price,
         buy_price_diff, buy_price_change_pct, sell_price_diff, sell_price_change_pct,
         old_margin_pct, new_margin_pct, change_direction, changed_fields, change_source,
-        discount_pct, discount_amount, tax_pct, tax_amount,
+        discount_pct, discount_tiers, discount_amount, tax_pct, tax_amount,
         additional_costs, total_additional_cost,
         batch_id, reference_no, reason, user_id, created_by, created_at
       ) VALUES (
@@ -216,9 +263,9 @@ export class PriceHistoryService {
         $7, $8, $9, $10, $11, $12,
         $13, $14, $15, $16,
         $17, $18, $19, $20, $21,
-        $22, $23, $24, $25,
-        $26, $27,
-        $28, $29, $30, $31, $32, CURRENT_TIMESTAMP
+        $22, $23, $24, $25, $26,
+        $27, $28,
+        $29, $30, $31, $32, $33, CURRENT_TIMESTAMP
       )`,
       [
         historyId,
@@ -243,6 +290,7 @@ export class PriceHistoryService {
         JSON.stringify(changedFields),
         source,
         input.discountPct || 0,
+        JSON.stringify(input.discountTiers || []),
         input.discountAmount || 0,
         input.taxPct || 0,
         input.taxAmount || 0,
@@ -436,6 +484,8 @@ export class PriceHistoryService {
           row.new_wholesale_price !== null ? Number(row.new_wholesale_price) : null,
         discount_pct:
           options.includeBuyPrice && row.discount_pct !== null ? Number(row.discount_pct) : 0,
+        discount_tiers:
+          options.includeBuyPrice && Array.isArray(row.discount_tiers) ? row.discount_tiers : [],
         discount_amount:
           options.includeBuyPrice && row.discount_amount !== null ? Number(row.discount_amount) : 0,
         tax_pct:
@@ -1315,6 +1365,8 @@ export class PriceHistoryService {
       let nextSell = curSell;
       let nextWholesale = curWholesale;
       let discountVal = 0;
+      let effectiveDiscountPct = 0;
+      let activeDiscountTiers: number[] = [];
       let taxVal = 0;
 
       // 1. Hitung harga beli baru
@@ -1330,9 +1382,21 @@ export class PriceHistoryService {
           baseAdjustedBuy = Math.max(0, input.value * factor);
         }
 
-        // Terapkan Diskon Supplier (opsional)
-        if (input.discount_pct && input.discount_pct > 0) {
-          discountVal = Number((baseAdjustedBuy * (input.discount_pct / 100)).toFixed(2));
+        // Terapkan Diskon Supplier (opsional, mendukung diskon bertingkat misal 45% + 10% + 0.5%)
+        const rawDiscountTiers: number[] =
+          input.discount_type === 'AMOUNT'
+            ? []
+            : Array.isArray(input.discount_tiers) && input.discount_tiers.length > 0
+              ? input.discount_tiers
+              : input.discount_pct && input.discount_pct > 0
+                ? [input.discount_pct]
+                : [];
+
+        if (rawDiscountTiers.length > 0) {
+          const tiered = this.calculateTieredDiscount(baseAdjustedBuy, rawDiscountTiers);
+          discountVal = tiered.discountAmount;
+          effectiveDiscountPct = tiered.effectivePct;
+          activeDiscountTiers = tiered.cleanTiers;
         } else if (input.discount_amount && input.discount_amount > 0) {
           discountVal = Math.min(baseAdjustedBuy, input.discount_amount * factor);
         }
@@ -1462,7 +1526,8 @@ export class PriceHistoryService {
             ? Number((nextMargin - curMargin).toFixed(2))
             : null,
 
-        discount_pct: input.discount_pct || 0,
+        discount_pct: effectiveDiscountPct,
+        discount_tiers: activeDiscountTiers,
         discount_amount: discountVal,
         tax_pct: input.tax_pct || 0,
         tax_amount: taxVal,
@@ -1529,8 +1594,27 @@ export class PriceHistoryService {
       const referenceNo = input.reference_no || `BULK-${Date.now().toString().slice(-6)}`;
 
       const auditNotes: string[] = [];
-      if (input.discount_pct && input.discount_pct > 0) auditNotes.push(`Diskon: ${input.discount_pct}%`);
-      else if (input.discount_amount && input.discount_amount > 0) auditNotes.push(`Diskon: Rp ${input.discount_amount.toLocaleString('id-ID')}`);
+      const resolvedTiers =
+        input.discount_type === 'AMOUNT'
+          ? []
+          : (Array.isArray(input.discount_tiers) && input.discount_tiers.length > 0
+              ? input.discount_tiers
+              : input.discount_pct && input.discount_pct > 0
+                ? [input.discount_pct]
+                : []
+            )
+              .map((v) => Number(v))
+              .filter((v) => Number.isFinite(v) && v > 0 && v <= 100);
+
+      if (resolvedTiers.length > 1) {
+        const eff = this.calculateTieredDiscount(100, resolvedTiers).effectivePct;
+        const label = resolvedTiers.map((t) => `${t}%`).join(' + ');
+        auditNotes.push(`Diskon: ${label} (Efektif ${eff}%)`);
+      } else if (resolvedTiers.length === 1) {
+        auditNotes.push(`Diskon: ${resolvedTiers[0]}%`);
+      } else if (input.discount_amount && input.discount_amount > 0) {
+        auditNotes.push(`Diskon: Rp ${input.discount_amount.toLocaleString('id-ID')}`);
+      }
       if (input.tax_pct && input.tax_pct > 0) auditNotes.push(`PPN: ${input.tax_pct}%`);
       else if (input.tax_amount && input.tax_amount > 0) auditNotes.push(`PPN: Rp ${input.tax_amount.toLocaleString('id-ID')}`);
 
@@ -1580,6 +1664,7 @@ export class PriceHistoryService {
           oldWholesalePrice: item.old_wholesale_price,
           newWholesalePrice: item.new_wholesale_price,
           discountPct: actor.allowBuyPrice ? (item.discount_pct || null) : null,
+          discountTiers: actor.allowBuyPrice ? (item.discount_tiers || null) : null,
           discountAmount: actor.allowBuyPrice ? (item.discount_amount || null) : null,
           taxPct: actor.allowBuyPrice ? (item.tax_pct || null) : null,
           taxAmount: actor.allowBuyPrice ? (item.tax_amount || null) : null,

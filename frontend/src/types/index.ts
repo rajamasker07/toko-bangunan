@@ -655,6 +655,7 @@ export interface PriceHistoryEntry {
   markup_before: number | null;
   markup_after: number | null;
   discount_pct?: number | null;
+  discount_tiers?: number[];
   discount_amount?: number | null;
   tax_pct?: number | null;
   tax_amount?: number | null;
@@ -837,6 +838,7 @@ export interface BulkPriceUpdatePayload {
   manual_sell_value?: number;
   discount_type?: 'PERCENT' | 'AMOUNT';
   discount_pct?: number;
+  discount_tiers?: number[];
   discount_amount?: number;
   tax_type?: 'PERCENT' | 'AMOUNT';
   tax_pct?: number;
@@ -865,6 +867,7 @@ export interface BulkPricePreviewItem {
   current_margin: number | null;
   next_margin: number | null;
   discount_pct?: number;
+  discount_tiers?: number[];
   discount_amount?: number;
   tax_pct?: number;
   tax_amount?: number;

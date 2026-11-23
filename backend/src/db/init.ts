@@ -523,6 +523,7 @@ export async function initializeDatabase() {
         reason TEXT,
 
         discount_pct NUMERIC(6, 2) DEFAULT 0,
+        discount_tiers JSONB DEFAULT '[]'::jsonb,
         discount_amount NUMERIC(14, 2) DEFAULT 0,
         tax_pct NUMERIC(6, 2) DEFAULT 0,
         tax_amount NUMERIC(14, 2) DEFAULT 0,
@@ -536,6 +537,7 @@ export async function initializeDatabase() {
       );
 
       ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(6, 2) DEFAULT 0;
+      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_tiers JSONB DEFAULT '[]'::jsonb;
       ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(14, 2) DEFAULT 0;
       ALTER TABLE price_history ADD COLUMN IF NOT EXISTS tax_pct NUMERIC(6, 2) DEFAULT 0;
       ALTER TABLE price_history ADD COLUMN IF NOT EXISTS tax_amount NUMERIC(14, 2) DEFAULT 0;

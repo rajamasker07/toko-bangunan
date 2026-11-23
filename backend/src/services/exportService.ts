@@ -664,6 +664,7 @@ export class ExportService {
         ph.old_margin_pct,
         ph.new_margin_pct,
         ph.discount_pct,
+        ph.discount_tiers,
         ph.discount_amount,
         ph.tax_pct,
         ph.tax_amount,
@@ -694,7 +695,15 @@ export class ExportService {
       harga_modal_baru: canViewBuyPrice ? Number(r.new_buy_price) || 0 : 'SENSITIF',
       selisih_modal: canViewBuyPrice ? (r.buy_price_diff !== null ? Number(r.buy_price_diff) : 0) : 'SENSITIF',
       persen_modal: canViewBuyPrice ? (r.buy_price_change_pct !== null ? `${r.buy_price_change_pct}%` : '-') : 'SENSITIF',
-      diskon_supplier: canViewBuyPrice ? (Number(r.discount_pct) > 0 ? `${r.discount_pct}%` : Number(r.discount_amount) > 0 ? `Rp ${r.discount_amount}` : '-') : 'SENSITIF',
+      diskon_supplier: canViewBuyPrice
+        ? Array.isArray(r.discount_tiers) && r.discount_tiers.length > 1
+          ? `${r.discount_tiers.map((t: number) => `${t}%`).join('+')} (${Number(r.discount_pct)}%)`
+          : Number(r.discount_pct) > 0
+            ? `${Number(r.discount_pct)}%`
+            : Number(r.discount_amount) > 0
+              ? `Rp ${r.discount_amount}`
+              : '-'
+        : 'SENSITIF',
       ppn_supplier: canViewBuyPrice ? (Number(r.tax_pct) > 0 ? `${r.tax_pct}%` : Number(r.tax_amount) > 0 ? `Rp ${r.tax_amount}` : '-') : 'SENSITIF',
       biaya_tambahan: canViewBuyPrice ? (Number(r.total_additional_cost) > 0 ? `Rp ${r.total_additional_cost}` : '-') : 'SENSITIF',
       harga_jual_lama: r.old_sell_price !== null ? Number(r.old_sell_price) : '-',

@@ -358,7 +358,61 @@ async function runTests() {
       throw new Error(`Expected Pallet sell_diff to be 80000 (2000 x 40), got ${palletSell.sell_diff}`);
     }
 
-    console.log('\n✅ All 12 Price History & Analytics Verification Tests PASSED successfully!');
+    // 13. Tiered / Cascading Supplier Discounts (10% + 2% and 45% + 10% + 0.5%)
+    console.log('\n--- Test 13: Tiered / Cascading Supplier Discounts (10%+2% & 45%+10%+0.5%) ---');
+    const tiered10_2 = PriceHistoryService.calculateTieredDiscount(100000, [10, 2]);
+    console.log(`10% + 2% on Rp 100.000 => Discount: Rp ${tiered10_2.discountAmount}, Net: Rp ${tiered10_2.netPrice}, Effective: ${tiered10_2.effectivePct}%`);
+    if (tiered10_2.discountAmount !== 11800 || tiered10_2.netPrice !== 88200 || tiered10_2.effectivePct !== 11.8) {
+      throw new Error(`Unexpected 10%+2% result: ${JSON.stringify(tiered10_2)}`);
+    }
+
+    const tieredPreview = await PriceHistoryService.previewBulkPriceUpdate({
+      product_ids: [createdProduct.id],
+      target_field: 'buy_price',
+      adjustment_mode: 'SET_VALUE',
+      value: 100000, // Base Rp 100.000 / Sak
+      discount_type: 'PERCENT',
+      discount_tiers: [45, 10, 0.5], // 100.000 -> 55.000 -> 49.500 -> 49.252,5 (Disc: 50.747,5, Eff: 50.75%)
+      reason: 'Faktur Promo Bertingkat Pabrik',
+    });
+
+    const sakTiered = tieredPreview.items.find((i) => i.unit_name === 'Sak')!;
+    const palletTiered = tieredPreview.items.find((i) => i.unit_name.includes('Pallet'))!;
+    console.log(`Sak (100k, 45%+10%+0.5%): Disc Rp ${sakTiered.discount_amount}, Next Buy Rp ${sakTiered.new_buy_price}, Eff ${sakTiered.discount_pct}%, Tiers: ${JSON.stringify(sakTiered.discount_tiers)}`);
+    console.log(`Pallet (4M, 45%+10%+0.5%): Disc Rp ${palletTiered.discount_amount}, Next Buy Rp ${palletTiered.new_buy_price}`);
+
+    if (sakTiered.discount_amount !== 50747.5 || sakTiered.new_buy_price !== 49252.5 || sakTiered.discount_pct !== 50.75) {
+      throw new Error(`Unexpected Sak tiered discount result: ${JSON.stringify(sakTiered)}`);
+    }
+    if (palletTiered.discount_amount !== 2029900 || palletTiered.new_buy_price !== 1970100) {
+      throw new Error(`Unexpected Pallet tiered discount result: ${JSON.stringify(palletTiered)}`);
+    }
+
+    await PriceHistoryService.commitBulkPriceUpdate(
+      {
+        product_ids: [createdProduct.id],
+        target_field: 'buy_price',
+        adjustment_mode: 'SET_VALUE',
+        value: 100000,
+        discount_type: 'PERCENT',
+        discount_tiers: [45, 10, 0.5],
+        reason: 'Faktur Promo Bertingkat Pabrik',
+      },
+      { createdBy: 'Unit Tester', allowBuyPrice: true }
+    );
+
+    const tieredHist = await PriceHistoryService.getHistory({ productId: createdProduct.id }, { includeBuyPrice: true });
+    const latestTieredSak = tieredHist.items.find((i) => i.unit_name === 'Sak')!;
+    console.log(`Recorded Tiered History: Reason="${latestTieredSak.reason}", discount_pct=${latestTieredSak.discount_pct}%, discount_tiers=${JSON.stringify(latestTieredSak.discount_tiers)}`);
+    if (
+      Number(latestTieredSak.discount_pct) !== 50.75 ||
+      JSON.stringify(latestTieredSak.discount_tiers) !== JSON.stringify([45, 10, 0.5]) ||
+      !latestTieredSak.reason?.includes('45% + 10% + 0.5% (Efektif 50.75%)')
+    ) {
+      throw new Error(`Tiered discount not recorded accurately in history: ${JSON.stringify(latestTieredSak)}`);
+    }
+
+    console.log('\n✅ All 13 Price History & Analytics Verification Tests PASSED successfully!');
   } finally {
     await pool.end();
   }

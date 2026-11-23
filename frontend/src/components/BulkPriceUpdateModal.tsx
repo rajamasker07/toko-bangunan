@@ -148,10 +148,12 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
   const [reason, setReason] = useState<string>('');
   const [referenceNo, setReferenceNo] = useState<string>('');
 
-  // STEP 3: Supplier Tax & Discount (Optional for buy_price)
+  // STEP 3: Supplier Tax & Discount (Optional for buy_price, supports tiered discounts e.g. 45% + 10% + 0.5%)
   const [applySupplierTaxDiscount, setApplySupplierTaxDiscount] = useState<boolean>(false);
   const [discountType, setDiscountType] = useState<'PERCENT' | 'AMOUNT'>('PERCENT');
-  const [discountPct, setDiscountPct] = useState<number>(0);
+  const [discountTiers, setDiscountTiers] = useState<Array<{ id: string; pct: number }>>([
+    { id: 'disc-1', pct: 0 },
+  ]);
   const [discountAmount, setDiscountAmount] = useState<number>(0);
   const [taxType, setTaxType] = useState<'PERCENT' | 'AMOUNT'>('PERCENT');
   const [taxPct, setTaxPct] = useState<number>(11); // Default standard PPN Indonesia 11%
@@ -234,7 +236,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       setReferenceNo('');
       setApplySupplierTaxDiscount(false);
       setDiscountType('PERCENT');
-      setDiscountPct(0);
+      setDiscountTiers([{ id: 'disc-1', pct: 0 }]);
       setDiscountAmount(0);
       setTaxType('PERCENT');
       setTaxPct(11);
@@ -542,6 +544,34 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     return additionalCosts.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
   }, [applyAdditionalCosts, additionalCosts]);
 
+  // Active tiered percentage discounts (e.g. [10, 2] or [45, 10, 0.5])
+  const activeDiscountTiers = useMemo(() => {
+    if (!applySupplierTaxDiscount || discountType !== 'PERCENT') return [];
+    return discountTiers
+      .map((t) => Number(t.pct) || 0)
+      .filter((v) => Number.isFinite(v) && v > 0 && v <= 100);
+  }, [applySupplierTaxDiscount, discountType, discountTiers]);
+
+  // Effective compound discount %: 1 - Π(1 - di/100)
+  const effectiveDiscountPct = useMemo(() => {
+    if (activeDiscountTiers.length === 0) return 0;
+    let remaining = 1;
+    for (const pct of activeDiscountTiers) {
+      remaining *= 1 - pct / 100;
+    }
+    return Number(((1 - remaining) * 100).toFixed(2));
+  }, [activeDiscountTiers]);
+
+  const formattedDiscountLabel = useMemo(() => {
+    if (discountType === 'AMOUNT') {
+      return `Rp ${formatIdNumber(discountAmount, true, 2)}`;
+    }
+    if (activeDiscountTiers.length === 0) return '0%';
+    const chain = activeDiscountTiers.map((t) => `${formatIdNumber(t, true, 2)}%`).join(' + ');
+    if (activeDiscountTiers.length === 1) return chain;
+    return `${chain} (Efektif ${formatIdNumber(effectiveDiscountPct, true, 2)}%)`;
+  }, [discountType, discountAmount, activeDiscountTiers, effectiveDiscountPct]);
+
   // Effective signed value for calculation
   const effectiveValue = useMemo(() => {
     if (adjustmentMode === 'SET_VALUE') {
@@ -550,12 +580,36 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     return adjustmentDirection === '-' ? -Math.abs(adjustmentValue) : Math.abs(adjustmentValue);
   }, [adjustmentMode, adjustmentDirection, adjustmentValue]);
 
+  const hasBuyExtras = useMemo(() => {
+    if (targetField !== 'buy_price') return false;
+    const hasTaxOrDiscount =
+      applySupplierTaxDiscount &&
+      (activeDiscountTiers.length > 0 ||
+        (discountType === 'AMOUNT' && discountAmount > 0) ||
+        (taxType === 'PERCENT' && taxPct > 0) ||
+        (taxType === 'AMOUNT' && taxAmount > 0));
+    const hasExtraCost = applyAdditionalCosts && totalAdditionalCost > 0;
+    return hasTaxOrDiscount || hasExtraCost;
+  }, [
+    targetField,
+    applySupplierTaxDiscount,
+    activeDiscountTiers,
+    discountType,
+    discountAmount,
+    taxType,
+    taxPct,
+    taxAmount,
+    applyAdditionalCosts,
+    totalAdditionalCost,
+  ]);
+
   // Validation for Adjustment Value
   const isAdjustmentValid = useMemo(() => {
     if (isNaN(adjustmentValue)) return false;
     if (adjustmentMode === 'SET_VALUE') return adjustmentValue > 0;
+    if (hasBuyExtras) return adjustmentValue >= 0;
     return adjustmentValue > 0;
-  }, [adjustmentMode, adjustmentValue]);
+  }, [adjustmentMode, adjustmentValue, hasBuyExtras]);
 
   // Step 3 Validation & Transition to Step 4
   const handleProceedToSimulation = async () => {
@@ -605,7 +659,14 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
         discount_type: applySupplierTaxDiscount && targetField === 'buy_price' ? discountType : undefined,
         discount_pct:
           applySupplierTaxDiscount && targetField === 'buy_price' && discountType === 'PERCENT'
-            ? discountPct || 0
+            ? effectiveDiscountPct
+            : undefined,
+        discount_tiers:
+          applySupplierTaxDiscount &&
+          targetField === 'buy_price' &&
+          discountType === 'PERCENT' &&
+          activeDiscountTiers.length > 0
+            ? activeDiscountTiers
             : undefined,
         discount_amount:
           applySupplierTaxDiscount && targetField === 'buy_price' && discountType === 'AMOUNT'
@@ -679,7 +740,14 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
         discount_type: applySupplierTaxDiscount && targetField === 'buy_price' ? discountType : undefined,
         discount_pct:
           applySupplierTaxDiscount && targetField === 'buy_price' && discountType === 'PERCENT'
-            ? discountPct || 0
+            ? effectiveDiscountPct
+            : undefined,
+        discount_tiers:
+          applySupplierTaxDiscount &&
+          targetField === 'buy_price' &&
+          discountType === 'PERCENT' &&
+          activeDiscountTiers.length > 0
+            ? activeDiscountTiers
             : undefined,
         discount_amount:
           applySupplierTaxDiscount && targetField === 'buy_price' && discountType === 'AMOUNT'
@@ -748,8 +816,12 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
 
     let discountVal = 0;
     if (applySupplierTaxDiscount) {
-      if (discountType === 'PERCENT' && discountPct > 0) {
-        discountVal = baseAdjusted * (discountPct / 100);
+      if (discountType === 'PERCENT' && activeDiscountTiers.length > 0) {
+        let running = baseAdjusted;
+        for (const pct of activeDiscountTiers) {
+          running = running * (1 - pct / 100);
+        }
+        discountVal = Number((baseAdjusted - Math.max(0, running)).toFixed(2));
       } else if (discountType === 'AMOUNT' && discountAmount > 0) {
         discountVal = Math.min(baseAdjusted, discountAmount);
       }
@@ -814,7 +886,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     effectiveValue,
     applySupplierTaxDiscount,
     discountType,
-    discountPct,
+    activeDiscountTiers,
     discountAmount,
     taxType,
     taxPct,
@@ -1844,18 +1916,81 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                           </div>
 
                           {discountType === 'PERCENT' ? (
-                            <NumericInput
-                              value={discountPct}
-                              onChange={(v) => setDiscountPct(v)}
-                              allowDecimals={true}
-                              maxDecimals={2}
-                              min={0}
-                              max={100}
-                              suffixText="%"
-                              placeholder="0,00"
-                              size="sm"
-                              className="font-mono font-bold"
-                            />
+                            <div className="space-y-2">
+                              <div className="space-y-1.5">
+                                {discountTiers.map((tier, idx) => (
+                                  <div key={tier.id} className="flex items-center gap-1.5">
+                                    <span className="text-[10px] font-bold font-mono text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 px-1.5 py-1 rounded-lg shrink-0 min-w-[38px] text-center">
+                                      {idx === 0 ? 'D1' : `+ D${idx + 1}`}
+                                    </span>
+                                    <div className="flex-1 min-w-0">
+                                      <NumericInput
+                                        value={tier.pct}
+                                        onChange={(v) => {
+                                          setDiscountTiers((prev) =>
+                                            prev.map((item, i) =>
+                                              i === idx ? { ...item, pct: v } : item
+                                            )
+                                          );
+                                        }}
+                                        allowDecimals={true}
+                                        maxDecimals={2}
+                                        min={0}
+                                        max={100}
+                                        suffixText="%"
+                                        placeholder="0,00"
+                                        size="sm"
+                                        className="font-mono font-bold"
+                                      />
+                                    </div>
+                                    {discountTiers.length > 1 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDiscountTiers((prev) =>
+                                            prev.filter((_, i) => i !== idx)
+                                          );
+                                        }}
+                                        className="p-1 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+                                        title="Hapus tahap diskon ini"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDiscountTiers((prev) => [
+                                    ...prev,
+                                    { id: `disc-${Date.now()}-${Math.random()}`, pct: 0 },
+                                  ]);
+                                }}
+                                className="w-full py-1 px-2 rounded-lg border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50/40 dark:bg-emerald-950/20 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center justify-center gap-1 transition-colors"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>Tambah Diskon Bertingkat (cth: +2%, +0,5%)</span>
+                              </button>
+
+                              {activeDiscountTiers.length > 1 && (
+                                <div className="p-2 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/60 text-[10px] space-y-0.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-semibold text-emerald-800 dark:text-emerald-300">
+                                      Bertingkat ({activeDiscountTiers.map((t) => `${formatIdNumber(t, true, 2)}%`).join(' + ')}):
+                                    </span>
+                                    <span className="font-mono font-bold text-emerald-700 dark:text-emerald-200 shrink-0">
+                                      Efektif {formatIdNumber(effectiveDiscountPct, true, 2)}%
+                                    </span>
+                                  </div>
+                                  <p className="text-[9px] text-emerald-700/80 dark:text-emerald-400/80">
+                                    Dihitung berjenjang dari sisa harga tiap tahap diskon.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
                           ) : (
                             <NumericInput
                               value={discountAmount}
@@ -1870,26 +2005,45 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                             />
                           )}
 
-                          {/* Quick discount pills */}
-                          <div className="flex items-center gap-1 pt-0.5">
+                          {/* Quick discount pills (single & tiered presets) */}
+                          <div className="flex flex-wrap items-center gap-1 pt-0.5">
                             <span className="text-[9px] text-slate-400">Pilihan:</span>
-                            {[0, 2, 5, 10].map((d) => (
-                              <button
-                                key={d}
-                                type="button"
-                                onClick={() => {
-                                  setDiscountType('PERCENT');
-                                  setDiscountPct(d);
-                                }}
-                                className={`text-[9px] px-1.5 py-0.5 rounded border font-mono ${
-                                  discountType === 'PERCENT' && discountPct === d
-                                    ? 'bg-emerald-100 dark:bg-emerald-950/60 border-emerald-300 text-emerald-800 dark:text-emerald-300 font-bold'
-                                    : 'bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
-                                }`}
-                              >
-                                {d}%
-                              </button>
-                            ))}
+                            {[
+                              { label: '0%', tiers: [0] },
+                              { label: '5%', tiers: [5] },
+                              { label: '10%', tiers: [10] },
+                              { label: '10%+2%', tiers: [10, 2] },
+                              { label: '20%+5%', tiers: [20, 5] },
+                              { label: '45%+10%+0,5%', tiers: [45, 10, 0.5] },
+                            ].map((preset) => {
+                              const presetActiveTiers = preset.tiers.filter((v) => v > 0);
+                              const isActive =
+                                discountType === 'PERCENT' &&
+                                activeDiscountTiers.length === presetActiveTiers.length &&
+                                activeDiscountTiers.every((v, i) => v === presetActiveTiers[i]);
+                              return (
+                                <button
+                                  key={preset.label}
+                                  type="button"
+                                  onClick={() => {
+                                    setDiscountType('PERCENT');
+                                    setDiscountTiers(
+                                      preset.tiers.map((pct, i) => ({
+                                        id: `disc-preset-${Date.now()}-${i}`,
+                                        pct,
+                                      }))
+                                    );
+                                  }}
+                                  className={`text-[9px] px-1.5 py-0.5 rounded border font-mono ${
+                                    isActive
+                                      ? 'bg-emerald-100 dark:bg-emerald-950/60 border-emerald-300 text-emerald-800 dark:text-emerald-300 font-bold'
+                                      : 'bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700 hover:border-emerald-300'
+                                  }`}
+                                >
+                                  {preset.label}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -2141,7 +2295,11 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                       <>
                         <span className="text-slate-400 font-sans">➔</span>
                         <span className="bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-200/60 dark:border-emerald-800/40 text-emerald-700 dark:text-emerald-300">
-                          - Diskon: Rp {formatIdNumber(samplePipeline.discountVal, false)}
+                          - Diskon
+                          {discountType === 'PERCENT' && activeDiscountTiers.length > 0
+                            ? ` (${activeDiscountTiers.map((t) => `${formatIdNumber(t, true, 2)}%`).join('+')})`
+                            : ''}
+                          : Rp {formatIdNumber(samplePipeline.discountVal, true, 2)}
                         </span>
                       </>
                     )}
@@ -2163,7 +2321,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     )}
                     <span className="text-slate-400 font-sans">➔</span>
                     <span className="bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-2.5 py-1 rounded-lg border border-slate-800 font-bold">
-                      = Modal Akhir: Rp {formatIdNumber(samplePipeline.effectiveBuy, false)}
+                      = Modal Akhir: Rp {formatIdNumber(samplePipeline.effectiveBuy, true, 2)}
                     </span>
                     {(sellPriceAction === 'AUTO_MARGIN' || sellPriceAction === 'MANUAL') && (
                       <>
@@ -2561,7 +2719,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                         <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                         <span>
                           <strong>Perhitungan Supplier Diterapkan:</strong> Diskon:{' '}
-                          {discountType === 'PERCENT' ? `${discountPct}%` : `Rp ${formatIdNumber(discountAmount)}`} | PPN:{' '}
+                          {formattedDiscountLabel} | PPN:{' '}
                           {taxType === 'PERCENT' ? `${taxPct}%` : `Rp ${formatIdNumber(taxAmount)}`}
                         </span>
                       </div>
@@ -2716,7 +2874,13 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                                       <div className="text-[10px] flex flex-wrap gap-1 text-slate-500">
                                         {item.discount_amount ? (
                                           <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                                            Disc: -Rp {formatIdNumber(item.discount_amount, false)}
+                                            Disc
+                                            {item.discount_tiers && item.discount_tiers.length > 1
+                                              ? ` (${item.discount_tiers.map((t) => `${formatIdNumber(t, true, 2)}%`).join('+')})`
+                                              : item.discount_pct
+                                                ? ` (${formatIdNumber(item.discount_pct, true, 2)}%)`
+                                                : ''}
+                                            : -Rp {formatIdNumber(item.discount_amount, true, 2)}
                                           </span>
                                         ) : null}
                                         {item.tax_amount ? (
@@ -2875,7 +3039,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     <div className="flex justify-between">
                       <span className="text-slate-400">Diskon Supplier:</span>
                       <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                        {discountType === 'PERCENT' ? `${discountPct}%` : `Rp ${formatIdNumber(discountAmount, false)}`}
+                        {formattedDiscountLabel}
                       </span>
                     </div>
                     <div className="flex justify-between">
