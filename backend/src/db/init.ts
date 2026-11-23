@@ -536,15 +536,6 @@ export async function initializeDatabase() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
-      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(6, 2) DEFAULT 0;
-      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_tiers JSONB DEFAULT '[]'::jsonb;
-      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(14, 2) DEFAULT 0;
-      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS tax_pct NUMERIC(6, 2) DEFAULT 0;
-      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS tax_amount NUMERIC(14, 2) DEFAULT 0;
-      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS additional_costs JSONB DEFAULT '[]'::jsonb;
-      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS total_additional_cost NUMERIC(14, 2) DEFAULT 0;
-      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL;
-      ALTER TABLE price_history ADD COLUMN IF NOT EXISTS created_by VARCHAR(100) NOT NULL DEFAULT 'Admin';
       CREATE INDEX IF NOT EXISTS idx_price_history_product ON price_history(product_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_price_history_variant ON price_history(variant_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_price_history_unit ON price_history(variant_unit_id, created_at DESC);
@@ -554,6 +545,24 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_price_history_batch ON price_history(batch_id) WHERE batch_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_price_history_created ON price_history(created_at DESC);
     `);
+
+    // Pastikan kolom tambahan tersedia untuk tabel price_history versi lama (kompatibel PostgreSQL 9.5)
+    const priceHistoryExtraCols: Array<[string, string]> = [
+      ['discount_pct', 'NUMERIC(6, 2) DEFAULT 0'],
+      ['discount_tiers', "JSONB DEFAULT '[]'::jsonb"],
+      ['discount_amount', 'NUMERIC(14, 2) DEFAULT 0'],
+      ['tax_pct', 'NUMERIC(6, 2) DEFAULT 0'],
+      ['tax_amount', 'NUMERIC(14, 2) DEFAULT 0'],
+      ['additional_costs', "JSONB DEFAULT '[]'::jsonb"],
+      ['total_additional_cost', 'NUMERIC(14, 2) DEFAULT 0'],
+      ['user_id', 'UUID REFERENCES users(id) ON DELETE SET NULL'],
+      ['created_by', "VARCHAR(100) NOT NULL DEFAULT 'Admin'"],
+    ];
+    for (const [col, def] of priceHistoryExtraCols) {
+      if (!(await columnExists(client, 'price_history', col))) {
+        await client.query(`ALTER TABLE price_history ADD COLUMN ${col} ${def};`);
+      }
+    }
 
     // 4c. Store Settings (Pengaturan Global Toko Bangunan Termasuk Ambang Batas Margin)
     await client.query(`

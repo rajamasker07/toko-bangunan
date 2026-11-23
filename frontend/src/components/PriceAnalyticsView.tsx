@@ -26,6 +26,7 @@ import {
   CheckCircle2,
   Settings,
   Sparkles,
+  Activity,
 } from 'lucide-react';
 import { formatIdNumber } from './common/NumericInput';
 import { Pagination } from './common/Pagination';
@@ -44,6 +45,8 @@ export const PriceAnalyticsView: React.FC = () => {
   // Overview data state
   const [overview, setOverview] = useState<PriceOverviewAnalytics | null>(null);
   const [loadingOverview, setLoadingOverview] = useState<boolean>(true);
+  const [marginAlertSearch, setMarginAlertSearch] = useState<string>('');
+  const [marginAlertFilter, setMarginAlertFilter] = useState<'all' | 'loss' | 'critical'>('all');
 
   // Threshold edit state
   const [isEditingThreshold, setIsEditingThreshold] = useState<boolean>(false);
@@ -189,14 +192,18 @@ export const PriceAnalyticsView: React.FC = () => {
 
       {/* Header View */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
-        <div>
-          <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
-            <TrendingUp className="w-6 h-6 text-emerald-500" />
-            <span>Analitik & Histori Perubahan Harga</span>
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Pantau fluktuasi harga modal, harga jual, margin keuntungan toko, dan audit perubahan harga lengkap.
-          </p>
+        <div className="flex items-start gap-3">
+          <div className="p-2.5 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+            <TrendingUp className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+              Analitik & Histori Perubahan Harga
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Pantau fluktuasi harga modal, harga jual, margin keuntungan toko, dan audit perubahan harga lengkap.
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2.5">
@@ -206,17 +213,18 @@ export const PriceAnalyticsView: React.FC = () => {
               if (activeTab === 'overview') loadOverview();
               else if (activeTab === 'history') loadHistory();
             }}
-            className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors"
+            disabled={loadingOverview || loadingHistory}
+            className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors disabled:opacity-50"
             title="Muat Ulang Data"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className={`w-4 h-4 ${loadingOverview || loadingHistory ? 'animate-spin text-emerald-500' : ''}`} />
           </button>
 
           {canWritePricing && (
             <button
               type="button"
               onClick={() => setIsBulkModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 active:scale-95 transition-all shadow-md shadow-amber-600/20"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 active:scale-95 transition-all shadow-md shadow-amber-600/20"
             >
               <Sparkles className="w-4 h-4" />
               <span>Update Harga Massal</span>
@@ -226,14 +234,14 @@ export const PriceAnalyticsView: React.FC = () => {
       </div>
 
       {/* Navigation Sub-Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800">
+      <div className="inline-flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
         <button
           type="button"
           onClick={() => setActiveTab('overview')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
             activeTab === 'overview'
-              ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-300'
+              ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm'
+              : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
           <AlertTriangle className="w-4 h-4" />
@@ -248,10 +256,10 @@ export const PriceAnalyticsView: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveTab('history')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
             activeTab === 'history'
-              ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-300'
+              ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm'
+              : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
           <History className="w-4 h-4" />
@@ -261,10 +269,10 @@ export const PriceAnalyticsView: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveTab('bulk')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
             activeTab === 'bulk'
-              ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
-              : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-300'
+              ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm'
+              : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
           <SlidersHorizontal className="w-4 h-4" />
@@ -350,59 +358,78 @@ export const PriceAnalyticsView: React.FC = () => {
               </div>
 
               {/* KPI Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                    Perubahan Harga (30 Hari)
-                  </span>
-                  <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                    {overview.summary.total_price_changes_30d} Kali
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm hover:shadow-md transition-all">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                      Perubahan Harga (30 Hari)
+                    </span>
+                    <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                      <Activity className="w-4 h-4" />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 text-[11px] mt-1 text-slate-500">
-                    <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center">
+                  <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+                    {overview.summary.total_price_changes_30d} <span className="text-xs font-semibold text-slate-400">Kali</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] mt-2 text-slate-500">
+                    <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded-md">
                       <TrendingUp className="w-3 h-3 mr-0.5" />
                       {overview.summary.price_increases_30d} Naik
                     </span>
-                    <span>•</span>
-                    <span className="text-rose-600 dark:text-rose-400 font-bold flex items-center">
+                    <span className="text-rose-600 dark:text-rose-400 font-bold flex items-center bg-rose-50 dark:bg-rose-950/50 px-1.5 py-0.5 rounded-md">
                       <TrendingDown className="w-3 h-3 mr-0.5" />
                       {overview.summary.price_decreases_30d} Turun
                     </span>
                   </div>
                 </div>
 
-                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                    Margin Kritis (&lt; {overview.margin_threshold}%)
-                  </span>
-                  <div className="text-xl font-black text-amber-600 dark:text-amber-400 mt-1">
-                    {overview.summary.critical_margin_count} Varian
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm hover:shadow-md transition-all">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                      Margin Kritis (&lt; {overview.margin_threshold}%)
+                    </span>
+                    <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                      <AlertTriangle className="w-4 h-4" />
+                    </div>
                   </div>
-                  <span className="text-[11px] text-slate-500 mt-1 block">
+                  <div className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-2">
+                    {overview.summary.critical_margin_count} <span className="text-xs font-semibold text-slate-400">Varian</span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 mt-2 block">
                     Memerlukan evaluasi harga jual
                   </span>
                 </div>
 
-                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                    Jual Rugi (Margin ≤ 0%)
-                  </span>
-                  <div className="text-xl font-black text-rose-600 dark:text-rose-400 mt-1">
-                    {overview.summary.loss_making_count} Varian
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm hover:shadow-md transition-all">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                      Jual Rugi (Margin ≤ 0%)
+                    </span>
+                    <div className="p-2 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                      <ShieldAlert className="w-4 h-4" />
+                    </div>
                   </div>
-                  <span className="text-[11px] text-rose-500 mt-1 block font-semibold">
+                  <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-2">
+                    {overview.summary.loss_making_count} <span className="text-xs font-semibold text-slate-400">Varian</span>
+                  </div>
+                  <span className="text-[11px] text-rose-500 mt-2 block font-semibold">
                     Harga jual di bawah modal!
                   </span>
                 </div>
 
-                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                    Total Alert Margin
-                  </span>
-                  <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                    {overview.margin_alerts.length} Kasus
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm hover:shadow-md transition-all">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                      Total Alert Margin
+                    </span>
+                    <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                      <Layers className="w-4 h-4" />
+                    </div>
                   </div>
-                  <span className="text-[11px] text-slate-500 mt-1 block">
+                  <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+                    {overview.margin_alerts.length} <span className="text-xs font-semibold text-slate-400">Kasus</span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 mt-2 block">
                     Perlu perhatian segera
                   </span>
                 </div>
@@ -410,16 +437,58 @@ export const PriceAnalyticsView: React.FC = () => {
 
               {/* Section: Margin Alerts Table */}
               <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-rose-500" />
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Daftar Peringatan Margin Rendah / Rugi
-                    </h3>
+                <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-rose-500/10 text-rose-500">
+                      <AlertTriangle className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                        Daftar Peringatan Margin Rendah / Rugi
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        {overview.margin_alerts.length} produk terdeteksi di bawah ambang batas {overview.margin_threshold}%
+                      </p>
+                    </div>
                   </div>
-                  <span className="text-xs text-slate-400">
-                    {overview.margin_alerts.length} produk terdeteksi
-                  </span>
+
+                  {overview.margin_alerts.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Search Alert */}
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={marginAlertSearch}
+                          onChange={(e) => setMarginAlertSearch(e.target.value)}
+                          placeholder="Cari produk, SKU, supplier..."
+                          className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40 w-52"
+                        />
+                      </div>
+
+                      {/* Filter Pills */}
+                      <div className="inline-flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                        {[
+                          { key: 'all', label: 'Semua' },
+                          { key: 'loss', label: 'Jual Rugi' },
+                          { key: 'critical', label: 'Kritis' },
+                        ].map((tab) => (
+                          <button
+                            key={tab.key}
+                            type="button"
+                            onClick={() => setMarginAlertFilter(tab.key as any)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                              marginAlertFilter === tab.key
+                                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {overview.margin_alerts.length === 0 ? (
@@ -429,88 +498,118 @@ export const PriceAnalyticsView: React.FC = () => {
                       Seluruh produk memiliki Gross Margin di atas ambang batas aman ({overview.margin_threshold}%).
                     </p>
                   </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead className="bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-600 dark:text-slate-300 font-bold">
-                        <tr>
-                          <th className="p-3">Produk & Varian</th>
-                          <th className="p-3">SKU</th>
-                          <th className="p-3">Satuan</th>
-                          {canViewBuyPrice && <th className="p-3">Modal</th>}
-                          <th className="p-3">Jual</th>
-                          <th className="p-3">Gross Margin</th>
-                          <th className="p-3">Status</th>
-                          <th className="p-3">Kategori / Supplier</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {overview.margin_alerts.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                            <td className="p-3">
-                              <span className="font-bold text-slate-900 dark:text-white block">
-                                {item.product_name}
-                              </span>
-                              <span className="text-[10px] text-slate-400">{item.variant_name}</span>
-                            </td>
-                            <td className="p-3 font-mono text-slate-500">{item.sku}</td>
-                            <td className="p-3 font-semibold">{item.unit_name}</td>
-                            {canViewBuyPrice && (
-                              <td className="p-3 font-mono text-slate-600 dark:text-slate-400">
-                                Rp {formatIdNumber(item.buy_price, false)}
-                              </td>
-                            )}
-                            <td className="p-3 font-bold font-mono text-slate-900 dark:text-white">
-                              Rp {formatIdNumber(item.sell_price, false)}
-                            </td>
-                            <td className="p-3">
-                              {(() => {
-                                const m = item.gross_margin ?? item.gross_margin_pct;
-                                const isLoss =
-                                  item.status === 'LOSS' ||
-                                  item.alert_level === 'CRITICAL' ||
-                                  (typeof m === 'number' && m <= 0);
-                                return (
-                                  <span
-                                    className={`font-black text-xs ${
-                                      isLoss
-                                        ? 'text-rose-600 dark:text-rose-400'
-                                        : 'text-amber-600 dark:text-amber-400'
-                                    }`}
-                                  >
-                                    {typeof m === 'number' ? `${m.toFixed(1).replace('.', ',')}%` : '-'}
-                                  </span>
-                                );
-                              })()}
-                            </td>
-                            <td className="p-3">
-                              {(() => {
-                                const m = item.gross_margin ?? item.gross_margin_pct;
-                                const isLoss =
-                                  item.status === 'LOSS' ||
-                                  item.alert_level === 'CRITICAL' ||
-                                  (typeof m === 'number' && m <= 0);
-                                return isLoss ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300">
-                                    Jual Rugi
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">
-                                    Kritis (&lt;{overview.margin_threshold}%)
-                                  </span>
-                                );
-                              })()}
-                            </td>
-                            <td className="p-3 text-[11px] text-slate-500">
-                              <div>{item.category_name || '-'}</div>
-                              <div className="text-[10px] text-slate-400">{item.supplier_name || '-'}</div>
-                            </td>
+                ) : (() => {
+                  const q = marginAlertSearch.trim().toLowerCase();
+                  const filteredAlerts = overview.margin_alerts.filter((item) => {
+                    const m = item.gross_margin ?? item.gross_margin_pct;
+                    const isLoss =
+                      item.status === 'LOSS' ||
+                      item.alert_level === 'CRITICAL' ||
+                      (typeof m === 'number' && m <= 0);
+                    if (marginAlertFilter === 'loss' && !isLoss) return false;
+                    if (marginAlertFilter === 'critical' && isLoss) return false;
+                    if (!q) return true;
+                    return (
+                      item.product_name.toLowerCase().includes(q) ||
+                      item.variant_name.toLowerCase().includes(q) ||
+                      item.sku.toLowerCase().includes(q) ||
+                      (item.category_name || '').toLowerCase().includes(q) ||
+                      (item.supplier_name || '').toLowerCase().includes(q)
+                    );
+                  });
+
+                  if (filteredAlerts.length === 0) {
+                    return (
+                      <div className="p-8 text-center text-slate-400 text-xs">
+                        Tidak ada data peringatan margin yang cocok dengan filter pencarian.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="overflow-x-auto max-h-[420px]">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-slate-50 dark:bg-slate-800/90 text-[11px] text-slate-600 dark:text-slate-300 font-bold sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700">
+                          <tr>
+                            <th className="p-3">Produk & Varian</th>
+                            <th className="p-3">SKU</th>
+                            <th className="p-3">Satuan</th>
+                            {canViewBuyPrice && <th className="p-3">Modal</th>}
+                            <th className="p-3">Jual</th>
+                            <th className="p-3">Gross Margin</th>
+                            <th className="p-3">Status</th>
+                            <th className="p-3">Kategori / Supplier</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {filteredAlerts.map((item, idx) => {
+                            const m = item.gross_margin ?? item.gross_margin_pct;
+                            const isLoss =
+                              item.status === 'LOSS' ||
+                              item.alert_level === 'CRITICAL' ||
+                              (typeof m === 'number' && m <= 0);
+                            const barPct = typeof m === 'number' ? Math.max(0, Math.min(100, m)) : 0;
+
+                            return (
+                              <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                                <td className="p-3">
+                                  <span className="font-bold text-slate-900 dark:text-white block">
+                                    {item.product_name}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400">{item.variant_name}</span>
+                                </td>
+                                <td className="p-3 font-mono text-[11px] text-slate-500">{item.sku}</td>
+                                <td className="p-3 font-semibold">{item.unit_name}</td>
+                                {canViewBuyPrice && (
+                                  <td className="p-3 font-mono text-slate-600 dark:text-slate-400">
+                                    Rp {formatIdNumber(item.buy_price, false)}
+                                  </td>
+                                )}
+                                <td className="p-3 font-bold font-mono text-slate-900 dark:text-white">
+                                  Rp {formatIdNumber(item.sell_price, false)}
+                                </td>
+                                <td className="p-3">
+                                  <div className="flex flex-col gap-1 min-w-[84px]">
+                                    <span
+                                      className={`font-black text-xs ${
+                                        isLoss
+                                          ? 'text-rose-600 dark:text-rose-400'
+                                          : 'text-amber-600 dark:text-amber-400'
+                                      }`}
+                                    >
+                                      {typeof m === 'number' ? `${m.toFixed(1).replace('.', ',')}%` : '-'}
+                                    </span>
+                                    <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full ${isLoss ? 'bg-rose-500' : 'bg-amber-500'}`}
+                                        style={{ width: `${isLoss ? 100 : barPct}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="p-3">
+                                  {isLoss ? (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60">
+                                      Jual Rugi
+                                    </span>
+                                  ) : (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60">
+                                      Kritis (&lt;{overview.margin_threshold}%)
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-[11px] text-slate-500">
+                                  <div className="font-medium text-slate-700 dark:text-slate-300">{item.category_name || '-'}</div>
+                                  <div className="text-[10px] text-slate-400">{item.supplier_name || '-'}</div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Section: Top Price Increases & Inflation Trends */}
