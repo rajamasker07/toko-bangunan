@@ -1270,6 +1270,7 @@ export class PriceHistoryService {
       SELECT
         vu.id as unit_id,
         vu.unit_name,
+        vu.conversion_factor,
         vu.is_base_unit,
         vu.buy_price,
         vu.sell_price,
@@ -1287,7 +1288,7 @@ export class PriceHistoryService {
       LEFT JOIN suppliers s ON p.supplier_id = s.id
       LEFT JOIN categories c ON p.category_id = c.id
       ${whereClause}
-      ORDER BY p.name ASC, pv.variant_name ASC, vu.conversion_factor ASC
+      ORDER BY p.name ASC, pv.variant_name ASC, vu.is_base_unit DESC, vu.conversion_factor ASC
     `;
 
     const unitsRes = await query(sql, params);
@@ -1306,6 +1307,7 @@ export class PriceHistoryService {
       const curSell = Number(u.sell_price) || 0;
       const curWholesale = u.wholesale_price ? Number(u.wholesale_price) : null;
       const curMargin = this.calculateGrossMargin(curSell, curBuy);
+      const factor = Number(u.conversion_factor) > 0 ? Number(u.conversion_factor) : 1;
 
       let nextBuy = curBuy;
       let nextSell = curSell;
@@ -1319,16 +1321,18 @@ export class PriceHistoryService {
         if (input.adjustment_mode === 'PERCENT') {
           baseAdjustedBuy = curBuy * (1 + input.value / 100);
         } else if (input.adjustment_mode === 'FIXED_AMOUNT') {
-          baseAdjustedBuy = Math.max(0, curBuy + input.value);
+          // Nominal penyesuaian modal diskalakan dengan faktor konversi satuan (misal 1 bag = 40 sak -> kenaikan = 1.000 * 40 = 40.000)
+          baseAdjustedBuy = Math.max(0, curBuy + (input.value * factor));
         } else if (input.adjustment_mode === 'SET_VALUE') {
-          baseAdjustedBuy = Math.max(0, input.value);
+          // Menetapkan nilai modal baru diskalakan dengan faktor konversi satuan
+          baseAdjustedBuy = Math.max(0, input.value * factor);
         }
 
         // Terapkan Diskon Supplier (opsional)
         if (input.discount_pct && input.discount_pct > 0) {
           discountVal = Number((baseAdjustedBuy * (input.discount_pct / 100)).toFixed(2));
         } else if (input.discount_amount && input.discount_amount > 0) {
-          discountVal = Math.min(baseAdjustedBuy, input.discount_amount);
+          discountVal = Math.min(baseAdjustedBuy, input.discount_amount * factor);
         }
 
         const netBeforeTax = Math.max(0, baseAdjustedBuy - discountVal);
@@ -1337,14 +1341,15 @@ export class PriceHistoryService {
         if (input.tax_pct && input.tax_pct > 0) {
           taxVal = Number((netBeforeTax * (input.tax_pct / 100)).toFixed(2));
         } else if (input.tax_amount && input.tax_amount > 0) {
-          taxVal = input.tax_amount;
+          taxVal = input.tax_amount * factor;
         }
 
         // Terapkan Biaya Tambahan (Pengiriman, Kontainer, Buruh, dll)
-        const totalAdditionalCost = (input.additional_costs || []).reduce(
+        const baseAdditionalCost = (input.additional_costs || []).reduce(
           (sum: number, c: any) => sum + (Number(c.amount) || 0),
           0
         );
+        const totalAdditionalCost = baseAdditionalCost * factor;
 
         // Biaya tambahan langsung di-include ke harga modal
         const effectiveBuy = netBeforeTax + taxVal + totalAdditionalCost;
@@ -1357,9 +1362,10 @@ export class PriceHistoryService {
         if (input.adjustment_mode === 'PERCENT') {
           nextSell = curSell * (1 + input.value / 100);
         } else if (input.adjustment_mode === 'FIXED_AMOUNT') {
-          nextSell = Math.max(0, curSell + input.value);
+          // Kenaikan/penurunan harga jual nominal diskalakan dengan faktor konversi satuan
+          nextSell = Math.max(0, curSell + (input.value * factor));
         } else if (input.adjustment_mode === 'SET_VALUE') {
-          nextSell = Math.max(0, input.value);
+          nextSell = Math.max(0, input.value * factor);
         }
         nextSell = this.applyRounding(nextSell, step);
       } else if (
@@ -1384,9 +1390,9 @@ export class PriceHistoryService {
           if (input.adjustment_mode === 'PERCENT') {
             calcWholesale = curWholesale * (1 + input.value / 100);
           } else if (input.adjustment_mode === 'FIXED_AMOUNT') {
-            calcWholesale = Math.max(0, curWholesale + input.value);
+            calcWholesale = Math.max(0, curWholesale + (input.value * factor));
           } else if (input.adjustment_mode === 'SET_VALUE') {
-            calcWholesale = Math.max(0, input.value);
+            calcWholesale = Math.max(0, input.value * factor);
           }
           nextWholesale = this.applyRounding(calcWholesale, step);
         }
@@ -1404,6 +1410,7 @@ export class PriceHistoryService {
       previewItems.push({
         unit_id: u.unit_id,
         unit_name: u.unit_name,
+        conversion_factor: factor,
         is_base_unit: u.is_base_unit,
         variant_id: u.variant_id,
         variant_name: u.variant_name,
@@ -1443,11 +1450,15 @@ export class PriceHistoryService {
         discount_amount: discountVal,
         tax_pct: input.tax_pct || 0,
         tax_amount: taxVal,
-        additional_costs: input.additional_costs || [],
-        total_additional_cost: (input.additional_costs || []).reduce(
-          (sum: number, c: any) => sum + (Number(c.amount) || 0),
-          0
-        ),
+        additional_costs: (input.additional_costs || []).map((c: any) => ({
+          name: c.name,
+          amount: (Number(c.amount) || 0) * factor,
+        })),
+        total_additional_cost:
+          (input.additional_costs || []).reduce(
+            (sum: number, c: any) => sum + (Number(c.amount) || 0),
+            0
+          ) * factor,
 
         warning,
       });

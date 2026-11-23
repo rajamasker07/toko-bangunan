@@ -1517,6 +1517,20 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {/* Info Multi-Satuan Proportional Scaling */}
+                <div className="sm:col-span-2 p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 text-xs flex items-start gap-2.5">
+                  <Calculator className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-slate-700 dark:text-slate-300">
+                    <span className="font-bold text-slate-900 dark:text-white block">
+                      Perhitungan Multi-Satuan Proporsional (Faktor Konversi Otomatis):
+                    </span>
+                    <span className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5 block leading-relaxed">
+                      Nilai penyesuaian nominal, biaya tambahan, dan diskon tetap diinput berbasis <strong>satuan dasar</strong> (misal per sak).
+                      Untuk satuan bertingkat (misal Bag di mana 1 Bag = 40 Sak), sistem otomatis mengalikan nilai penyesuaian secara proporsional sesuai rasio konversi (contoh: kenaikan modal Rp 1.000/Sak otomatis menjadi Rp 40.000/Bag).
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {/* REQUIREMENT 3.a, 3.b, 3.c: Ergonomic Formatted Numeric Input with Direction Toggle & Presets */}
@@ -2461,27 +2475,64 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                                 </span>
                                 <span className="text-[10px] text-slate-400">{item.variant_name}</span>
                               </td>
-                              <td className="p-3 font-semibold">{item.unit_name}</td>
+                              <td className="p-3">
+                                <span className="font-semibold text-slate-800 dark:text-slate-200 block">
+                                  {item.unit_name}
+                                </span>
+                                {item.conversion_factor && item.conversion_factor > 1 ? (
+                                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono block">
+                                    1 {item.unit_name} = {item.conversion_factor} satuan dasar
+                                  </span>
+                                ) : item.is_base_unit ? (
+                                  <span className="text-[10px] text-slate-400 font-mono block">
+                                    (Satuan Dasar)
+                                  </span>
+                                ) : null}
+                              </td>
                               <td className="p-3 font-mono">
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="line-through text-slate-400 text-[11px]">
                                     {formatIdNumber(item.current_sell_price, false)}
                                   </span>
                                   <span className="font-bold text-emerald-600 dark:text-emerald-400">
                                     → {formatIdNumber(item.next_sell_price, false)}
                                   </span>
+                                  {item.next_sell_price !== item.current_sell_price && (
+                                    <span
+                                      className={`text-[10px] font-bold ${
+                                        item.next_sell_price > item.current_sell_price
+                                          ? 'text-emerald-600 dark:text-emerald-400'
+                                          : 'text-rose-600 dark:text-rose-400'
+                                      }`}
+                                    >
+                                      ({item.next_sell_price > item.current_sell_price ? '+' : ''}
+                                      {formatIdNumber(item.next_sell_price - item.current_sell_price, false)})
+                                    </span>
+                                  )}
                                 </div>
                               </td>
                               {canViewBuyPrice && (
                                 <td className="p-3 font-mono text-slate-600 dark:text-slate-400">
                                   <div className="flex flex-col gap-0.5">
-                                    <div className="flex items-center gap-1.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="line-through text-slate-400 text-[11px]">
                                         {formatIdNumber(item.current_buy_price, false)}
                                       </span>
                                       <span className="font-bold text-slate-900 dark:text-white">
                                         → {formatIdNumber(item.next_buy_price, false)}
                                       </span>
+                                      {item.next_buy_price !== item.current_buy_price && (
+                                        <span
+                                          className={`text-[10px] font-bold ${
+                                            item.next_buy_price > item.current_buy_price
+                                              ? 'text-rose-600 dark:text-rose-400'
+                                              : 'text-emerald-600 dark:text-emerald-400'
+                                          }`}
+                                        >
+                                          ({item.next_buy_price > item.current_buy_price ? '+' : ''}
+                                          {formatIdNumber(item.next_buy_price - item.current_buy_price, false)})
+                                        </span>
+                                      )}
                                     </div>
                                     {(item.discount_amount || item.tax_amount || item.total_additional_cost) ? (
                                       <div className="text-[10px] flex flex-wrap gap-1 text-slate-500">

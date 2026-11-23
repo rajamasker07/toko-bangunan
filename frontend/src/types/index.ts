@@ -852,6 +852,8 @@ export interface BulkPricePreviewItem {
   variant_name: string;
   unit_id: string;
   unit_name: string;
+  conversion_factor?: number;
+  is_base_unit?: boolean;
   current_buy_price: number;
   next_buy_price: number;
   current_sell_price: number;

@@ -297,19 +297,68 @@ async function runTests() {
 
     // Verify history recorded discount_pct, tax_pct, and additional_costs
     const history6 = await PriceHistoryService.getHistory({ variant_id: variantId });
-    const taxEntry = history6.entries[0];
-    console.log(`Tax Entry Source: ${taxEntry.change_source}, Reason: ${taxEntry.reason}, Diskon: ${taxEntry.discount_pct}%, PPN: ${taxEntry.tax_pct}%, Extra Cost: ${taxEntry.total_additional_cost}`);
-    if (Number(taxEntry.discount_pct) !== 5 || Number(taxEntry.tax_pct) !== 11) {
-      throw new Error(`Expected discount_pct 5 and tax_pct 11, got discount_pct ${taxEntry.discount_pct} and tax_pct ${taxEntry.tax_pct}`);
+    const sakTaxEntry = history6.entries.find((e) => e.unit_name === 'Sak') || history6.entries[0];
+    const palletTaxEntry = history6.entries.find((e) => e.unit_name.includes('Pallet'));
+    console.log(`Tax Entry Source: ${sakTaxEntry.change_source}, Reason: ${sakTaxEntry.reason}, Diskon: ${sakTaxEntry.discount_pct}%, PPN: ${sakTaxEntry.tax_pct}%, Extra Cost (Sak): ${sakTaxEntry.total_additional_cost}, Extra Cost (Pallet): ${palletTaxEntry?.total_additional_cost}`);
+    if (Number(sakTaxEntry.discount_pct) !== 5 || Number(sakTaxEntry.tax_pct) !== 11) {
+      throw new Error(`Expected discount_pct 5 and tax_pct 11, got discount_pct ${sakTaxEntry.discount_pct} and tax_pct ${sakTaxEntry.tax_pct}`);
     }
-    if (Number(taxEntry.total_additional_cost) !== 2500) {
-      throw new Error(`Expected total_additional_cost 2500, got ${taxEntry.total_additional_cost}`);
+    if (Number(sakTaxEntry.total_additional_cost) !== 2500) {
+      throw new Error(`Expected total_additional_cost 2500 for Sak, got ${sakTaxEntry.total_additional_cost}`);
     }
-    if (!taxEntry.reason?.includes('Biaya Tambahan: Rp 2.500')) {
-      throw new Error(`Expected audit notes with Biaya Tambahan in reason, got: ${taxEntry.reason}`);
+    if (palletTaxEntry && Number(palletTaxEntry.total_additional_cost) !== 100000) {
+      throw new Error(`Expected total_additional_cost 100000 (2500 x 40) for Pallet, got ${palletTaxEntry.total_additional_cost}`);
+    }
+    if (!sakTaxEntry.reason?.includes('Biaya Tambahan: Rp 2.500')) {
+      throw new Error(`Expected audit notes with Biaya Tambahan in reason, got: ${sakTaxEntry.reason}`);
     }
 
-    console.log('\n✅ All 11 Price History & Analytics Verification Tests PASSED successfully!');
+    // 12. Multi-Unit Nominal Price Adjustment Scaling (Sak vs Bag / Pallet)
+    console.log('\n--- Test 12: Multi-Unit Nominal Scaling (Fixed Amount +1000 / Sak -> +40.000 / Pallet 40 Sak) ---');
+    const multiUnitPreview = await PriceHistoryService.previewBulkPriceUpdate({
+      product_ids: [createdProduct.id],
+      target_field: 'buy_price',
+      adjustment_mode: 'FIXED_AMOUNT',
+      value: 1000, // +1.000 per sak
+      auto_maintain_margin: true,
+      rounding_step: 1000,
+      reason: 'Kenaikan nominal modal Rp 1.000 per sak',
+    });
+
+    const sakUnit = multiUnitPreview.items.find((i) => i.unit_name === 'Sak')!;
+    const palletUnit = multiUnitPreview.items.find((i) => i.unit_name.includes('Pallet'))!;
+
+    console.log(`Sak (factor 1): Old Buy ${sakUnit.current_buy_price} -> New Buy ${sakUnit.next_buy_price} (diff: +${sakUnit.buy_diff})`);
+    console.log(`Pallet (factor 40): Old Buy ${palletUnit.current_buy_price} -> New Buy ${palletUnit.next_buy_price} (diff: +${palletUnit.buy_diff})`);
+
+    if (sakUnit.buy_diff !== 1000) {
+      throw new Error(`Expected Sak buy_diff to be 1000, got ${sakUnit.buy_diff}`);
+    }
+    if (palletUnit.buy_diff !== 40000) {
+      throw new Error(`Expected Pallet buy_diff to be 40000 (1000 x 40), got ${palletUnit.buy_diff}`);
+    }
+
+    // Test selling price fixed increase: +2000 per sak -> +80.000 per pallet
+    const sellPreview = await PriceHistoryService.previewBulkPriceUpdate({
+      product_ids: [createdProduct.id],
+      target_field: 'sell_price',
+      adjustment_mode: 'FIXED_AMOUNT',
+      value: 2000, // +2.000 per sak
+      rounding_step: 1000,
+      reason: 'Kenaikan nominal jual Rp 2.000 per sak',
+    });
+    const sakSell = sellPreview.items.find((i) => i.unit_name === 'Sak')!;
+    const palletSell = sellPreview.items.find((i) => i.unit_name.includes('Pallet'))!;
+    console.log(`Sak Sell (factor 1): diff: +${sakSell.sell_diff}`);
+    console.log(`Pallet Sell (factor 40): diff: +${palletSell.sell_diff}`);
+    if (sakSell.sell_diff !== 2000) {
+      throw new Error(`Expected Sak sell_diff to be 2000, got ${sakSell.sell_diff}`);
+    }
+    if (palletSell.sell_diff !== 80000) {
+      throw new Error(`Expected Pallet sell_diff to be 80000 (2000 x 40), got ${palletSell.sell_diff}`);
+    }
+
+    console.log('\n✅ All 12 Price History & Analytics Verification Tests PASSED successfully!');
   } finally {
     await pool.end();
   }
