@@ -140,8 +140,11 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
   const [adjustmentMode, setAdjustmentMode] = useState<'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE'>('PERCENT');
   const [adjustmentDirection, setAdjustmentDirection] = useState<'+' | '-'>('+');
   const [adjustmentValue, setAdjustmentValue] = useState<number>(5);
-  const [rounding, setRounding] = useState<'NONE' | 'HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND'>('THOUSAND');
-  const [autoMaintainMargin, setAutoMaintainMargin] = useState<boolean>(false);
+  const [rounding, setRounding] = useState<'NONE' | 'FIVE_HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND'>('THOUSAND');
+  const [sellPriceAction, setSellPriceAction] = useState<'NONE' | 'AUTO_MARGIN' | 'MANUAL'>('NONE');
+  const [manualSellMode, setManualSellMode] = useState<'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE'>('FIXED_AMOUNT');
+  const [manualSellDirection, setManualSellDirection] = useState<'+' | '-'>('+');
+  const [manualSellValue, setManualSellValue] = useState<number>(0);
   const [reason, setReason] = useState<string>('');
   const [referenceNo, setReferenceNo] = useState<string>('');
 
@@ -223,7 +226,10 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
       setAdjustmentDirection('+');
       setAdjustmentValue(5);
       setRounding('THOUSAND');
-      setAutoMaintainMargin(false);
+      setSellPriceAction('NONE');
+      setManualSellMode('FIXED_AMOUNT');
+      setManualSellDirection('+');
+      setManualSellValue(0);
       setReason('');
       setReferenceNo('');
       setApplySupplierTaxDiscount(false);
@@ -585,7 +591,17 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
         adjustment_mode: adjustmentMode,
         value: effectiveValue,
         rounding,
-        auto_maintain_margin: targetField === 'buy_price' ? autoMaintainMargin : false,
+        auto_maintain_margin: targetField === 'buy_price' && sellPriceAction === 'AUTO_MARGIN',
+        manual_sell_adjustment_mode:
+          targetField === 'buy_price' && sellPriceAction === 'MANUAL' ? manualSellMode : undefined,
+        manual_sell_value:
+          targetField === 'buy_price' && sellPriceAction === 'MANUAL'
+            ? manualSellMode === 'SET_VALUE'
+              ? manualSellValue
+              : manualSellDirection === '-'
+                ? -Math.abs(manualSellValue)
+                : Math.abs(manualSellValue)
+            : undefined,
         discount_type: applySupplierTaxDiscount && targetField === 'buy_price' ? discountType : undefined,
         discount_pct:
           applySupplierTaxDiscount && targetField === 'buy_price' && discountType === 'PERCENT'
@@ -649,7 +665,17 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
         adjustment_mode: adjustmentMode,
         value: effectiveValue,
         rounding,
-        auto_maintain_margin: targetField === 'buy_price' ? autoMaintainMargin : false,
+        auto_maintain_margin: targetField === 'buy_price' && sellPriceAction === 'AUTO_MARGIN',
+        manual_sell_adjustment_mode:
+          targetField === 'buy_price' && sellPriceAction === 'MANUAL' ? manualSellMode : undefined,
+        manual_sell_value:
+          targetField === 'buy_price' && sellPriceAction === 'MANUAL'
+            ? manualSellMode === 'SET_VALUE'
+              ? manualSellValue
+              : manualSellDirection === '-'
+                ? -Math.abs(manualSellValue)
+                : Math.abs(manualSellValue)
+            : undefined,
         discount_type: applySupplierTaxDiscount && targetField === 'buy_price' ? discountType : undefined,
         discount_pct:
           applySupplierTaxDiscount && targetField === 'buy_price' && discountType === 'PERCENT'
@@ -744,10 +770,28 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     const effectiveBuy = netBeforeTax + taxVal + extraCost;
 
     // Pembulatan HANYA berlaku untuk harga jual
-    let sampleSell = effectiveBuy / (1 - 0.2); // estimasi margin 20%
-    if (autoMaintainMargin) {
+    let sampleSell = 125000; // asumsi harga jual awal Rp 125.000 (margin 20% dari 100.000)
+    if (sellPriceAction === 'AUTO_MARGIN') {
+      sampleSell = effectiveBuy / (1 - 0.2); // estimasi margin 20%
+    } else if (sellPriceAction === 'MANUAL') {
+      const effectiveManualSell =
+        manualSellMode === 'SET_VALUE'
+          ? manualSellValue
+          : manualSellDirection === '-'
+            ? -Math.abs(manualSellValue)
+            : Math.abs(manualSellValue);
+      if (manualSellMode === 'PERCENT') {
+        sampleSell = sampleSell * (1 + effectiveManualSell / 100);
+      } else if (manualSellMode === 'FIXED_AMOUNT') {
+        sampleSell = Math.max(0, sampleSell + effectiveManualSell);
+      } else if (manualSellMode === 'SET_VALUE') {
+        sampleSell = Math.max(0, effectiveManualSell);
+      }
+    }
+
+    if (sellPriceAction === 'AUTO_MARGIN' || sellPriceAction === 'MANUAL') {
       let step = 0;
-      if (rounding === 'HUNDRED') step = 100;
+      if (rounding === 'FIVE_HUNDRED') step = 500;
       else if (rounding === 'THOUSAND') step = 1000;
       else if (rounding === 'FIVE_THOUSAND') step = 5000;
       if (step > 1) {
@@ -777,7 +821,10 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
     taxAmount,
     applyAdditionalCosts,
     totalAdditionalCost,
-    autoMaintainMargin,
+    sellPriceAction,
+    manualSellMode,
+    manualSellDirection,
+    manualSellValue,
     rounding,
   ]);
 
@@ -2118,7 +2165,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                     <span className="bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-2.5 py-1 rounded-lg border border-slate-800 font-bold">
                       = Modal Akhir: Rp {formatIdNumber(samplePipeline.effectiveBuy, false)}
                     </span>
-                    {autoMaintainMargin && (
+                    {(sellPriceAction === 'AUTO_MARGIN' || sellPriceAction === 'MANUAL') && (
                       <>
                         <span className="text-slate-400 font-sans">➔</span>
                         <span className="bg-emerald-600 text-white px-2.5 py-1 rounded-lg font-bold shadow-xs">
@@ -2148,7 +2195,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-1 focus:ring-amber-500"
                     >
                       <option value="NONE">Tanpa Pembulatan (Sesuai Hasil)</option>
-                      <option value="HUNDRED">Bulatkan ke Ratusan Terdekat (100)</option>
+                      <option value="FIVE_HUNDRED">Bulatkan ke 500-an Terdekat (500)</option>
                       <option value="THOUSAND">Bulatkan ke Ribuan Terdekat (1.000)</option>
                       <option value="FIVE_THOUSAND">Bulatkan ke 5 Ribuan Terdekat (5.000)</option>
                     </select>
@@ -2156,11 +2203,11 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                       Membulatkan harga jual ke kelipatan tertentu agar kembalian kasir rapi.
                     </p>
                   </div>
-                ) : targetField === 'buy_price' && autoMaintainMargin ? (
+                ) : targetField === 'buy_price' && (sellPriceAction === 'AUTO_MARGIN' || sellPriceAction === 'MANUAL') ? (
                   <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
                     <div className="flex items-center justify-between">
                       <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
-                        Pembulatan Harga Jual (Penyesuaian Margin):
+                        Pembulatan Harga Jual ({sellPriceAction === 'AUTO_MARGIN' ? 'Penyesuaian Margin' : 'Manual'}):
                       </label>
                       <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800/60">
                         Khusus Harga Jual
@@ -2172,7 +2219,7 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-1 focus:ring-amber-500"
                     >
                       <option value="NONE">Tanpa Pembulatan</option>
-                      <option value="HUNDRED">Bulatkan ke Ratusan Terdekat (100)</option>
+                      <option value="FIVE_HUNDRED">Bulatkan ke 500-an Terdekat (500)</option>
                       <option value="THOUSAND">Bulatkan ke Ribuan Terdekat (1.000)</option>
                       <option value="FIVE_THOUSAND">Bulatkan ke 5 Ribuan Terdekat (5.000)</option>
                     </select>
@@ -2197,23 +2244,154 @@ export const BulkPriceUpdateModal: React.FC<BulkPriceUpdateModalProps> = ({
                 )}
 
                 {targetField === 'buy_price' && (
-                  <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-start gap-2.5">
-                    <input
-                      type="checkbox"
-                      id="autoMaintainMarginStep3"
-                      checked={autoMaintainMargin}
-                      onChange={(e) => setAutoMaintainMargin(e.target.checked)}
-                      className="mt-1 rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
-                    />
-                    <label
-                      htmlFor="autoMaintainMarginStep3"
-                      className="text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer"
-                    >
-                      Pertahankan Gross Margin Otomatis
-                      <span className="block text-[11px] text-slate-400 font-normal mt-0.5">
-                        Otomatis naikkan harga jual proporsional agar % margin kotor toko tidak tergerus kenaikan modal dan biaya tambahan.
-                      </span>
+                  <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
+                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Penyesuaian Harga Jual:
                     </label>
+                    <div className="space-y-2">
+                      <label className="flex items-start gap-2.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="sellPriceAction"
+                          checked={sellPriceAction === 'NONE'}
+                          onChange={() => setSellPriceAction('NONE')}
+                          className="mt-0.5 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                        />
+                        <div className="text-xs">
+                          <span className="font-bold text-slate-700 dark:text-slate-300">
+                            Jangan Ubah Harga Jual
+                          </span>
+                          <span className="block text-[11px] text-slate-400">
+                            Hanya memperbarui harga modal saja.
+                          </span>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start gap-2.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="sellPriceAction"
+                          checked={sellPriceAction === 'AUTO_MARGIN'}
+                          onChange={() => setSellPriceAction('AUTO_MARGIN')}
+                          className="mt-0.5 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                        />
+                        <div className="text-xs">
+                          <span className="font-bold text-slate-700 dark:text-slate-300">
+                            Otomatis Jaga Gross Margin (%)
+                          </span>
+                          <span className="block text-[11px] text-slate-400">
+                            Otomatis naikkan harga jual proporsional agar % margin kotor tidak tergerus.
+                          </span>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start gap-2.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="sellPriceAction"
+                          checked={sellPriceAction === 'MANUAL'}
+                          onChange={() => setSellPriceAction('MANUAL')}
+                          className="mt-0.5 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                        />
+                        <div className="text-xs">
+                          <span className="font-bold text-slate-700 dark:text-slate-300">
+                            Atur Harga Jual Manual
+                          </span>
+                          <span className="block text-[11px] text-slate-400">
+                            Tentukan kenaikan/penurunan atau nilai harga jual sendiri.
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+
+                    {sellPriceAction === 'MANUAL' && (
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-700 space-y-2.5">
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setManualSellMode('FIXED_AMOUNT')}
+                            className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
+                              manualSellMode === 'FIXED_AMOUNT'
+                                ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-400 text-amber-800 dark:text-amber-200'
+                                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                            }`}
+                          >
+                            Nominal (+/- Rp)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setManualSellMode('PERCENT')}
+                            className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
+                              manualSellMode === 'PERCENT'
+                                ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-400 text-amber-800 dark:text-amber-200'
+                                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                            }`}
+                          >
+                            Persentase (%)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setManualSellMode('SET_VALUE')}
+                            className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
+                              manualSellMode === 'SET_VALUE'
+                                ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-400 text-amber-800 dark:text-amber-200'
+                                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                            }`}
+                          >
+                            Tetapkan (Rp)
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {manualSellMode !== 'SET_VALUE' && (
+                            <div className="flex rounded-xl border border-slate-300 dark:border-slate-700 overflow-hidden shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setManualSellDirection('+')}
+                                className={`px-2.5 py-1.5 text-xs font-bold ${
+                                  manualSellDirection === '+'
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                                }`}
+                              >
+                                +
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setManualSellDirection('-')}
+                                className={`px-2.5 py-1.5 text-xs font-bold ${
+                                  manualSellDirection === '-'
+                                    ? 'bg-rose-600 text-white'
+                                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                                }`}
+                              >
+                                -
+                              </button>
+                            </div>
+                          )}
+                          <div className="relative flex-1">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={manualSellValue === 0 ? '' : formatIdNumber(manualSellValue, false)}
+                              onChange={(e) => {
+                                const parsed = parseIdNumber(e.target.value);
+                                setManualSellValue(Number.isNaN(parsed) ? 0 : Math.max(0, parsed));
+                              }}
+                              placeholder={
+                                manualSellMode === 'PERCENT'
+                                  ? 'Contoh: 5'
+                                  : 'Contoh: 2.000'
+                              }
+                              className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold focus:outline-none focus:ring-1 focus:ring-amber-500"
+                            />
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400">
+                              {manualSellMode === 'PERCENT' ? '%' : 'Rp'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

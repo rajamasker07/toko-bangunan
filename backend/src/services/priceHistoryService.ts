@@ -78,7 +78,9 @@ export interface BulkPriceUpdateInput {
   adjustment_mode: 'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE';
   value: number; // e.g. 5 for +5%, or 2000 for +Rp 2.000, or exact value
   auto_maintain_margin?: boolean; // if updating buy_price, auto-adjust sell_price to keep gross margin %
-  rounding?: 'NONE' | 'HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND';
+  manual_sell_adjustment_mode?: 'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE';
+  manual_sell_value?: number;
+  rounding?: 'NONE' | 'FIVE_HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND';
   rounding_step?: number;
 
   discount_type?: 'PERCENT' | 'AMOUNT';
@@ -1297,7 +1299,7 @@ export class PriceHistoryService {
     const previewItems: any[] = [];
     let step = input.rounding_step || 0;
     if (!step && input.rounding) {
-      if (input.rounding === 'HUNDRED') step = 100;
+      if (input.rounding === 'FIVE_HUNDRED') step = 500;
       else if (input.rounding === 'THOUSAND') step = 1000;
       else if (input.rounding === 'FIVE_THOUSAND') step = 5000;
     }
@@ -1381,6 +1383,20 @@ export class PriceHistoryService {
           nextSell = nextBuy / (1 - targetMarginFraction);
           nextSell = this.applyRounding(nextSell, step);
         }
+      } else if (
+        input.target_field === 'buy_price' &&
+        !input.auto_maintain_margin &&
+        input.manual_sell_adjustment_mode &&
+        input.manual_sell_value !== undefined
+      ) {
+        if (input.manual_sell_adjustment_mode === 'PERCENT') {
+          nextSell = curSell * (1 + input.manual_sell_value / 100);
+        } else if (input.manual_sell_adjustment_mode === 'FIXED_AMOUNT') {
+          nextSell = Math.max(0, curSell + (input.manual_sell_value * factor));
+        } else if (input.manual_sell_adjustment_mode === 'SET_VALUE') {
+          nextSell = Math.max(0, input.manual_sell_value * factor);
+        }
+        nextSell = this.applyRounding(nextSell, step);
       }
 
       // 3. Hitung harga grosir baru jika target adalah wholesale

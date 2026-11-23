@@ -831,8 +831,10 @@ export interface BulkPriceUpdatePayload {
   target_units?: 'BASE_ONLY' | 'ALL_UNITS';
   adjustment_mode: 'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE';
   value: number;
-  rounding?: 'NONE' | 'HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND';
+  rounding?: 'NONE' | 'FIVE_HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND';
   auto_maintain_margin?: boolean;
+  manual_sell_adjustment_mode?: 'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE';
+  manual_sell_value?: number;
   discount_type?: 'PERCENT' | 'AMOUNT';
   discount_pct?: number;
   discount_amount?: number;
