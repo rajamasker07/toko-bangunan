@@ -817,6 +817,7 @@ export interface BulkPriceUpdatePayload {
   brand_id?: string;
   supplier_id?: string;
   product_ids?: string[];
+  variant_ids?: string[];
   target_field: 'sell_price' | 'buy_price' | 'wholesale_price';
   target_units?: 'BASE_ONLY' | 'ALL_UNITS';
   adjustment_mode: 'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE';

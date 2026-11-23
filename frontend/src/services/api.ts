@@ -1135,7 +1135,7 @@ export const api = {
     }),
 
   commitBulkPriceUpdate: (payload: BulkPriceUpdatePayload) =>
-    fetchJson<{ success: boolean; updated_count: number; message: string }>('/pricing/bulk-update/commit', {
+    fetchJson<{ success: boolean; updated_count: number; message: string; batch_id?: string }>('/pricing/bulk-update/commit', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

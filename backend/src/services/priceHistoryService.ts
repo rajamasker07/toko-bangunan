@@ -52,18 +52,21 @@ export interface PriceHistoryFilters {
 }
 
 export interface BulkPriceUpdateInput {
+  scope?: string;
   product_ids?: string[];
   variant_ids?: string[];
   category_id?: string;
   brand_id?: string;
   supplier_id?: string;
   base_unit_only?: boolean;
+  target_units?: 'BASE_ONLY' | 'ALL_UNITS';
 
   target_field: 'buy_price' | 'sell_price' | 'wholesale_price' | 'both_buy_and_sell';
   adjustment_mode: 'PERCENT' | 'FIXED_AMOUNT' | 'SET_VALUE';
   value: number; // e.g. 5 for +5%, or 2000 for +Rp 2.000, or exact value
   auto_maintain_margin?: boolean; // if updating buy_price, auto-adjust sell_price to keep gross margin %
-  rounding_step?: 0 | 100 | 500 | 1000;
+  rounding?: 'NONE' | 'HUNDRED' | 'THOUSAND' | 'FIVE_THOUSAND';
+  rounding_step?: number;
 
   reason?: string;
   reference_no?: string;
@@ -1209,7 +1212,7 @@ export class PriceHistoryService {
       conditions.push(`p.supplier_id = $${params.length}`);
     }
 
-    if (input.base_unit_only) {
+    if (input.base_unit_only || input.target_units === 'BASE_ONLY') {
       conditions.push(`vu.is_base_unit = TRUE`);
     }
 
@@ -1243,7 +1246,12 @@ export class PriceHistoryService {
     const units = unitsRes.rows;
 
     const previewItems: any[] = [];
-    const step = input.rounding_step || 0;
+    let step = input.rounding_step || 0;
+    if (!step && input.rounding) {
+      if (input.rounding === 'HUNDRED') step = 100;
+      else if (input.rounding === 'THOUSAND') step = 1000;
+      else if (input.rounding === 'FIVE_THOUSAND') step = 5000;
+    }
 
     for (const u of units) {
       const curBuy = Number(u.buy_price) || 0;
