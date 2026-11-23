@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { PriceTrendPoint } from '../../types';
 import { TrendingUp, TrendingDown, Minus, Calendar, Filter, AlertTriangle } from 'lucide-react';
 import { formatIdNumber } from './NumericInput';
+
+export type PriceTrendTimeRange = '30d' | '90d' | '180d' | '365d' | 'all';
 
 export interface PriceTrendChartProps {
   data: PriceTrendPoint[];
@@ -9,10 +11,13 @@ export interface PriceTrendChartProps {
   marginThreshold?: number;
   height?: number;
   title?: string;
+  defaultUnit?: string;
+  baseUnitName?: string;
+  defaultRange?: PriceTrendTimeRange;
   className?: string;
 }
 
-type TimeRange = '30d' | '90d' | '180d' | '365d' | 'all';
+type TimeRange = PriceTrendTimeRange;
 
 export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
   data,
@@ -20,18 +25,46 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
   marginThreshold = 10,
   height = 300,
   title = 'Tren Riwayat Harga',
+  defaultUnit,
+  baseUnitName,
+  defaultRange = '90d',
   className = '',
 }) => {
-  const [selectedRange, setSelectedRange] = useState<TimeRange>('all');
+  const [selectedRange, setSelectedRange] = useState<TimeRange>(defaultRange);
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
 
-  // Extract available units
+  const preferredUnit = defaultUnit || baseUnitName;
+
+  // Extract available units, placing base unit first
   const availableUnits = useMemo(() => {
     const units = Array.from(new Set(data.map((p) => p.unit_name).filter(Boolean)));
-    return units.length > 0 ? units : ['Utama'];
-  }, [data]);
+    if (preferredUnit && units.includes(preferredUnit)) {
+      return [preferredUnit, ...units.filter((u) => u !== preferredUnit)];
+    }
+    return units.length > 0 ? units : [preferredUnit || 'Utama'];
+  }, [data, preferredUnit]);
 
-  const [activeUnit, setActiveUnit] = useState<string>(availableUnits[0] || 'Utama');
+  const [activeUnit, setActiveUnit] = useState<string>(
+    () => (preferredUnit && availableUnits.includes(preferredUnit) ? preferredUnit : availableUnits[0]) || 'Utama'
+  );
+
+  // Sync active unit to base unit when preferredUnit changes (e.g. navigating variants)
+  useEffect(() => {
+    if (preferredUnit) {
+      setActiveUnit(preferredUnit);
+      setHoveredPointIndex(null);
+    }
+  }, [preferredUnit]);
+
+  // Ensure activeUnit stays valid once data finishes loading
+  useEffect(() => {
+    if (availableUnits.length > 0 && !availableUnits.includes(activeUnit)) {
+      setActiveUnit(
+        preferredUnit && availableUnits.includes(preferredUnit) ? preferredUnit : availableUnits[0]
+      );
+      setHoveredPointIndex(null);
+    }
+  }, [availableUnits, activeUnit, preferredUnit]);
 
   // Filter data by active unit and time range
   const filteredData = useMemo(() => {
@@ -270,22 +303,32 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
           {/* Unit selector pills */}
           {availableUnits.length > 1 && (
             <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-0.5 text-xs font-medium">
-              {availableUnits.map((u) => (
-                <button
-                  key={u}
-                  onClick={() => {
-                    setActiveUnit(u);
-                    setHoveredPointIndex(null);
-                  }}
-                  className={`px-2.5 py-1 rounded-lg transition-all ${
-                    activeUnit === u
-                      ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs font-semibold'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                  }`}
-                >
-                  {u}
-                </button>
-              ))}
+              {availableUnits.map((u) => {
+                const isBase = Boolean(baseUnitName && u === baseUnitName);
+                return (
+                  <button
+                    key={u}
+                    type="button"
+                    title={isBase ? `${u} (Satuan Dasar)` : u}
+                    onClick={() => {
+                      setActiveUnit(u);
+                      setHoveredPointIndex(null);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                      activeUnit === u
+                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs font-semibold'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    <span>{u}</span>
+                    {isBase && (
+                      <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">
+                        Dasar
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
 

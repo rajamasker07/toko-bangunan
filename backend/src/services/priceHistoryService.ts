@@ -904,6 +904,155 @@ export class PriceHistoryService {
 
     const avgMargin = marginCount > 0 ? Number((totalMargin / marginCount).toFixed(2)) : null;
 
+    // Bangun time-series rata-rata harga modal, harga jual & gross margin seluruh varian aktif per hari
+    const marginTimeSeries: Array<{
+      date: string;
+      avg_sell_price: number;
+      avg_buy_price: number | null;
+      avg_margin: number | null;
+      min_margin: number | null;
+      max_margin: number | null;
+      variants_count: number;
+      changed_count: number;
+      changed_variants: string[];
+    }> = [];
+
+    {
+      const baseUnitByVariant = new Map<string, { unitId: string; unitName: string }>();
+      for (const v of variantsList) {
+        const units = v.units || [];
+        const base = units.find((u: any) => u.is_base_unit) || units[0];
+        if (base) {
+          baseUnitByVariant.set(v.id, { unitId: base.id, unitName: base.unit_name });
+        }
+      }
+
+      const activeVariantIds = new Set(variantsList.map((v: any) => v.id));
+      const variantHasBaseHistory = new Set<string>();
+      for (const r of productHistoryRows) {
+        if (!activeVariantIds.has(r.variant_id)) continue;
+        const baseInfo = baseUnitByVariant.get(r.variant_id);
+        if (
+          baseInfo &&
+          (r.variant_unit_id === baseInfo.unitId || r.unit_name === baseInfo.unitName)
+        ) {
+          variantHasBaseHistory.add(r.variant_id);
+        }
+      }
+
+      const dayGroups = new Map<string, any[]>();
+      for (const r of productHistoryRows) {
+        if (!activeVariantIds.has(r.variant_id)) continue;
+        if (variantHasBaseHistory.has(r.variant_id)) {
+          const baseInfo = baseUnitByVariant.get(r.variant_id);
+          if (
+            baseInfo &&
+            r.variant_unit_id !== baseInfo.unitId &&
+            r.unit_name !== baseInfo.unitName
+          ) {
+            continue;
+          }
+        }
+        const dt = r.created_at ? new Date(r.created_at) : new Date();
+        const dayKey = dt.toISOString().slice(0, 10);
+        if (!dayGroups.has(dayKey)) {
+          dayGroups.set(dayKey, []);
+        }
+        dayGroups.get(dayKey)!.push(r);
+      }
+
+      const runningState = new Map<
+        string,
+        { sell: number; buy: number; margin: number | null }
+      >();
+
+      for (const [_dayKey, rows] of Array.from(dayGroups.entries()).sort((a, b) =>
+        a[0].localeCompare(b[0])
+      )) {
+        const changedNames = new Set<string>();
+        let latestTs = rows[0].created_at;
+
+        for (const r of rows) {
+          const sell = Number(r.new_sell_price) || 0;
+          const buy = Number(r.new_buy_price) || 0;
+          const margin = this.calculateGrossMargin(sell, buy);
+          runningState.set(r.variant_id, { sell, buy, margin });
+
+          if (r.variant_name) changedNames.add(r.variant_name);
+          if (r.created_at && new Date(r.created_at) > new Date(latestTs)) {
+            latestTs = r.created_at;
+          }
+        }
+
+        const states = Array.from(runningState.values());
+        if (states.length > 0) {
+          const avgSell = states.reduce((acc, s) => acc + s.sell, 0) / states.length;
+          const avgBuy = states.reduce((acc, s) => acc + s.buy, 0) / states.length;
+          const marginVals = states
+            .map((s) => s.margin)
+            .filter((m): m is number => m !== null);
+          const avgMarginVal =
+            marginVals.length > 0
+              ? Number((marginVals.reduce((a, b) => a + b, 0) / marginVals.length).toFixed(2))
+              : null;
+
+          marginTimeSeries.push({
+            date: latestTs ? new Date(latestTs).toISOString() : new Date().toISOString(),
+            avg_sell_price: Math.round(avgSell),
+            avg_buy_price: options.includeBuyPrice ? Math.round(avgBuy) : null,
+            avg_margin: options.includeBuyPrice ? avgMarginVal : null,
+            min_margin:
+              options.includeBuyPrice && marginVals.length > 0
+                ? Number(Math.min(...marginVals).toFixed(2))
+                : null,
+            max_margin:
+              options.includeBuyPrice && marginVals.length > 0
+                ? Number(Math.max(...marginVals).toFixed(2))
+                : null,
+            variants_count: states.length,
+            changed_count: rows.length,
+            changed_variants: Array.from(changedNames).slice(0, 5),
+          });
+        }
+      }
+
+      if (marginTimeSeries.length === 0 && variantStatusList.length > 0) {
+        const avgSell =
+          variantStatusList.reduce((acc, vs) => acc + (Number(vs.sell_price) || 0), 0) /
+          variantStatusList.length;
+        const avgBuy =
+          variantStatusList.reduce((acc, vs) => acc + (Number(vs.buy_price) || 0), 0) /
+          variantStatusList.length;
+        const currentMargins = variantStatusList
+          .map((vs) => vs.gross_margin)
+          .filter((m): m is number => typeof m === 'number');
+        const avgMarginVal =
+          currentMargins.length > 0
+            ? Number(
+                (currentMargins.reduce((a, b) => a + b, 0) / currentMargins.length).toFixed(2)
+              )
+            : null;
+
+        marginTimeSeries.push({
+          date: new Date().toISOString(),
+          avg_sell_price: Math.round(avgSell),
+          avg_buy_price: options.includeBuyPrice ? Math.round(avgBuy) : null,
+          avg_margin: options.includeBuyPrice ? avgMarginVal : null,
+          min_margin:
+            options.includeBuyPrice && currentMargins.length > 0
+              ? Number(Math.min(...currentMargins).toFixed(2))
+              : null,
+          max_margin:
+            options.includeBuyPrice && currentMargins.length > 0
+              ? Number(Math.max(...currentMargins).toFixed(2))
+              : null,
+          variants_count: variantStatusList.length,
+          changed_count: 0,
+          changed_variants: [],
+        });
+      }
+    }
+
     // Time-series across all variants of this product
     const timeSeries = productHistoryRows.map((r: any) => {
       const sell = Number(r.new_sell_price);
@@ -957,6 +1106,7 @@ export class PriceHistoryService {
       variants_summary: variantsSummary,
       variants_status: variantStatusList,
       time_series: timeSeries,
+      margin_time_series: marginTimeSeries,
       total_changes: productHistoryRows.length,
       recent_history: recentHistory.items,
     };

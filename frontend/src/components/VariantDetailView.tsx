@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Product,
   ProductVariant,
@@ -103,6 +103,17 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
   // Edit Unit modal state
   const [editingUnit, setEditingUnit] = useState<VariantUnit | null>(null);
   const [isEditUnitOpen, setIsEditUnitOpen] = useState<boolean>(false);
+
+  // Determine base unit name for default chart filtering
+  const baseUnitName = useMemo(() => {
+    const analyticsUnits = priceAnalytics?.units_summary || [];
+    const baseFromAnalytics = analyticsUnits.find((u) => u.is_base_unit) || analyticsUnits[0];
+    if (baseFromAnalytics?.unit_name) return baseFromAnalytics.unit_name;
+
+    const variantUnits = variant.units || [];
+    const baseFromVariant = variantUnits.find((u) => u.is_base_unit) || variantUnits[0];
+    return baseFromVariant?.unit_name;
+  }, [priceAnalytics?.units_summary, variant.units]);
 
   // Fetch variant-specific movements with pagination
   const fetchVariantMovements = useCallback(async () => {
@@ -646,10 +657,13 @@ export const VariantDetailView: React.FC<VariantDetailViewProps> = ({
       {/* Sub-Tab 1: Analitik & Riwayat Harga Varian */}
       {activeSubTab === 'pricing' && canViewPricingAnalytics && (
         <div className="space-y-6">
-          {/* SVG Price Trend Chart */}
+          {/* SVG Price Trend Chart (Default: Satuan Dasar & 90 Hari) */}
           <PriceTrendChart
             data={priceAnalytics?.time_series || []}
             canViewBuyPrice={canViewBuyPrice}
+            defaultUnit={baseUnitName}
+            baseUnitName={baseUnitName}
+            defaultRange="90d"
             height={280}
             title={`Tren Riwayat Harga Varian: ${variant.variant_name}`}
           />

@@ -161,8 +161,16 @@ async function runTests() {
     if (variantAnalytics.time_series.length < 3) throw new Error('Expected at least 3 time series points');
 
     const productAnalytics = await PriceHistoryService.getProductAnalytics(createdProduct.id, { includeBuyPrice: true });
-    console.log(`Product Analytics variants: ${productAnalytics.variants_status.length}, total changes: ${productAnalytics.recent_history.length}`);
+    console.log(`Product Analytics variants: ${productAnalytics.variants_status.length}, total changes: ${productAnalytics.recent_history.length}, margin series points: ${productAnalytics.margin_time_series.length}`);
     if (productAnalytics.recent_history.length < 3) throw new Error('Expected at least 3 changes in product analytics');
+    if (!Array.isArray(productAnalytics.margin_time_series) || productAnalytics.margin_time_series.length === 0) {
+      throw new Error('Expected margin_time_series in product analytics');
+    }
+    const latestAvgPoint = productAnalytics.margin_time_series[productAnalytics.margin_time_series.length - 1];
+    console.log(`Latest Product Avg Point -> Avg Sell: ${latestAvgPoint.avg_sell_price}, Avg Buy: ${latestAvgPoint.avg_buy_price}, Avg Margin: ${latestAvgPoint.avg_margin}%`);
+    if (typeof latestAvgPoint.avg_sell_price !== 'number' || typeof latestAvgPoint.avg_buy_price !== 'number') {
+      throw new Error('Expected numeric avg_sell_price and avg_buy_price in margin_time_series');
+    }
 
     // 7. Overview Analytics & Margin Alerts
     console.log('\n--- Test 7: Overview Analytics & Margin Alerts ---');

@@ -4,7 +4,7 @@ import { api } from '../services/api';
 import { formatRupiah, formatStock } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { Pagination } from './common/Pagination';
-import { PriceTrendChart } from './common/PriceTrendChart';
+import { MarginTrendChart } from './common/MarginTrendChart';
 import { BulkPriceUpdateModal } from './BulkPriceUpdateModal';
 import { formatIdNumber } from './common/NumericInput';
 import { 
@@ -1363,12 +1363,14 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
         {/* ========================================================= */}
         {viewMode === 'analytics' && canViewPricingAnalytics && (
           <div className="space-y-6 animate-in fade-in">
-            {/* SVG Price Trend Chart across variants */}
-            <PriceTrendChart
-              data={priceAnalytics?.time_series || []}
+            {/* SVG Average Cost/Sell Price & Margin Trend Chart across all active variants */}
+            <MarginTrendChart
+              data={priceAnalytics?.margin_time_series || []}
               canViewBuyPrice={canViewBuyPrice}
+              marginThreshold={priceAnalytics?.summary?.margin_threshold_pct ?? 10}
+              totalVariants={priceAnalytics?.summary?.total_variants ?? rawVariants.length}
               height={300}
-              title={`Tren Riwayat Harga Produk: ${product.name}`}
+              title={`Tren Rata-Rata Harga Modal & Jual: ${product.name}`}
             />
 
             {/* Variants Pricing Table */}

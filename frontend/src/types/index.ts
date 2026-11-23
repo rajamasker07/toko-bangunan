@@ -730,6 +730,18 @@ export interface VariantPriceAnalytics {
   total_changes: number;
 }
 
+export interface ProductMarginTrendPoint {
+  date: string;
+  avg_sell_price: number;
+  avg_buy_price: number | null;
+  avg_margin: number | null;
+  min_margin: number | null;
+  max_margin: number | null;
+  variants_count: number;
+  changed_count: number;
+  changed_variants: string[];
+}
+
 export interface ProductPriceAnalytics {
   product: {
     id: string;
@@ -738,6 +750,13 @@ export interface ProductPriceAnalytics {
     category_name: string | null;
     supplier_name: string | null;
   };
+  summary?: {
+    total_variants: number;
+    avg_gross_margin_pct: number | null;
+    critical_alerts_count: number;
+    warning_alerts_count: number;
+    margin_threshold_pct: number;
+  };
   variants_summary: Array<{
     variant_id: string;
     variant_name: string;
@@ -745,6 +764,7 @@ export interface ProductPriceAnalytics {
     units: VariantUnitPriceSummary[];
   }>;
   time_series: PriceTrendPoint[];
+  margin_time_series?: ProductMarginTrendPoint[];
   total_changes: number;
 }
 
