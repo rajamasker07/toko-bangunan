@@ -1,35 +1,40 @@
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
+import { AppHttpError } from '../utils/errors.js';
 import { PriceHistoryService } from './priceHistoryService.js';
+import {
+  ALLOWED_MOVEMENTS_BY_MODE,
+  MANUAL_STOCK_ACTION_TYPES,
+  STOCK_ACTION_TYPES,
+  STOCK_ADJUSTMENT_MODES,
+  SYSTEM_ONLY_STOCK_ACTION_TYPES,
+  roundStockQty,
+  validateAdjustStockInput,
+  type ManualStockActionType,
+  type PriceUpdateOnRestock,
+  type StockActionType,
+  type StockAdjustmentMode,
+  type SystemOnlyStockActionType,
+} from '../validators/stockValidator.js';
 
-export type StockActionType = 
-  | 'STOCK_OPNAME'       // Penyesuaian fisik opname
-  | 'PURCHASE_RESTOCK'   // Barang masuk / restock dari supplier
-  | 'SALE_DEDUCT'        // Barang keluar / penjualan
-  | 'DAMAGED_EXPIRED'    // Barang rusak / pecah / cacat
-  | 'RETURN_IN'          // Retur dari pelanggan
-  | 'RETURN_OUT'         // Retur ke supplier
-  | 'MANUAL_ADJUSTMENT'  // Penyesuaian manual lainnya
-  | 'RESERVATION_HOLD'   // Penahanan stok untuk reservasi titip barang
-  | 'RESERVATION_PICKUP' // Pengambilan stok barang titipan oleh pelanggan
-  | 'RESERVATION_RELEASE' // Pelepasan penahanan stok karena reservasi batal
-  | 'VARIANT_MOVED';     // Jejak audit pemindahan varian antar produk
-
-export interface PriceUpdateOnRestock {
-  unit_id: string;
-  buy_price?: number;
-  new_buy_price?: number;
-  sell_price?: number;
-  new_sell_price?: number;
-  wholesale_price?: number | null;
-  new_wholesale_price?: number | null;
-  reason?: string;
-  reference_no?: string;
-}
+export {
+  ALLOWED_MOVEMENTS_BY_MODE,
+  MANUAL_STOCK_ACTION_TYPES,
+  STOCK_ACTION_TYPES,
+  STOCK_ADJUSTMENT_MODES,
+  SYSTEM_ONLY_STOCK_ACTION_TYPES,
+};
+export type {
+  ManualStockActionType,
+  PriceUpdateOnRestock,
+  StockActionType,
+  StockAdjustmentMode,
+  SystemOnlyStockActionType,
+};
 
 export interface AdjustStockInput {
   variant_id: string;
-  adjustment_mode: 'SET' | 'ADD' | 'SUBTRACT'; 
+  adjustment_mode: StockAdjustmentMode;
   amount: number; // Value: If SET, this is the new total stock. If ADD/SUBTRACT, this is quantity change.
   movement_type: StockActionType;
   reference_no?: string;
@@ -45,6 +50,9 @@ export class StockService {
    * Adjust stock atomically with transactional history log
    */
   static async adjustStock(input: AdjustStockInput) {
+    // 0. Validasi ketat input & enum sebelum meminjam koneksi DB (defense-in-depth)
+    const validated = validateAdjustStockInput(input);
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -56,31 +64,51 @@ export class StockService {
          JOIN products p ON pv.product_id = p.id 
          WHERE pv.id = $1 
          FOR UPDATE`,
-        [input.variant_id]
+        [validated.variant_id]
       );
 
       if (variantRes.rows.length === 0) {
-        throw new Error('Varian produk tidak ditemukan.');
+        throw new AppHttpError(404, 'Varian produk tidak ditemukan.', 'VARIANT_NOT_FOUND');
       }
 
       const variant = variantRes.rows[0];
-      const previousStock = Number(variant.current_stock);
+      const previousStock = roundStockQty(Number(variant.current_stock));
+      const reservedStock = roundStockQty(Number(variant.reserved_stock || 0));
       let newStock = previousStock;
       let quantityChange = 0;
 
-      if (input.adjustment_mode === 'SET') {
-        newStock = Number(input.amount);
-        quantityChange = newStock - previousStock;
-      } else if (input.adjustment_mode === 'ADD') {
-        quantityChange = Number(input.amount);
-        newStock = previousStock + quantityChange;
-      } else if (input.adjustment_mode === 'SUBTRACT') {
-        quantityChange = -Math.abs(Number(input.amount));
-        newStock = previousStock + quantityChange;
+      if (validated.adjustment_mode === 'SET') {
+        newStock = validated.amount;
+        quantityChange = roundStockQty(newStock - previousStock);
+      } else if (validated.adjustment_mode === 'ADD') {
+        quantityChange = validated.amount;
+        newStock = roundStockQty(previousStock + quantityChange);
+      } else {
+        quantityChange = -validated.amount;
+        newStock = roundStockQty(previousStock + quantityChange);
       }
 
       if (newStock < 0) {
-        throw new Error(`Stok tidak boleh bernilai negatif! (Stok saat ini: ${previousStock}, Pengurangan: ${Math.abs(quantityChange)})`);
+        throw new AppHttpError(
+          400,
+          `Stok tidak boleh bernilai negatif! (Stok saat ini: ${previousStock}, Pengurangan: ${Math.abs(quantityChange)})`,
+          'NEGATIVE_STOCK_NOT_ALLOWED'
+        );
+      }
+
+      // Guardrail: SET / SUBTRACT tidak boleh membuat stok fisik < stok yang sedang ditahan/dititipkan
+      // Mode ADD tetap diizinkan agar data defisit lama (current_stock < reserved_stock) bisa dipulihkan via restock.
+      if (
+        (validated.adjustment_mode === 'SET' || validated.adjustment_mode === 'SUBTRACT') &&
+        reservedStock > 0 &&
+        newStock < reservedStock
+      ) {
+        const availableBefore = Math.max(0, roundStockQty(previousStock - reservedStock));
+        throw new AppHttpError(
+          400,
+          `Stok akhir (${newStock}) tidak boleh kurang dari stok yang sedang ditahan/dititipkan pelanggan (${reservedStock}). Stok fisik saat ini: ${previousStock}, stok bebas tersedia: ${availableBefore}. Selesaikan pengambilan atau batalkan reservasi terkait terlebih dahulu.`,
+          'STOCK_BELOW_RESERVED'
+        );
       }
 
       // 2. Update variant stock
@@ -88,12 +116,12 @@ export class StockService {
         `UPDATE product_variants 
          SET current_stock = $1, updated_at = CURRENT_TIMESTAMP 
          WHERE id = $2`,
-        [newStock, input.variant_id]
+        [newStock, validated.variant_id]
       );
 
       // 3. Create UUIDv7 for transaction log
       const movementId = generateUUIDv7();
-      const refNo = input.reference_no || `ADJ-${Date.now().toString().slice(-6)}`;
+      const refNo = validated.reference_no || `ADJ-${Date.now().toString().slice(-6)}`;
       const creator = (input.created_by || 'Admin').slice(0, 100);
       const userId = input.user_id || null;
 
@@ -104,13 +132,13 @@ export class StockService {
         [
           movementId,
           variant.product_id,
-          input.variant_id,
-          input.movement_type,
+          validated.variant_id,
+          validated.movement_type,
           previousStock,
           quantityChange,
           newStock,
           refNo,
-          input.notes,
+          validated.notes,
           creator,
           userId
         ]
@@ -118,8 +146,8 @@ export class StockService {
 
       // 4. Update harga jika disediakan saat RESTOCK
       let priceUpdated = false;
-      if (input.price_update && input.movement_type === 'PURCHASE_RESTOCK') {
-        const pu = input.price_update;
+      if (validated.price_update && validated.movement_type === 'PURCHASE_RESTOCK') {
+        const pu = validated.price_update;
         const unitRes = await client.query(
           `SELECT vu.*, p.supplier_id
            FROM variant_units vu
@@ -127,7 +155,7 @@ export class StockService {
            JOIN products p ON pv.product_id = p.id
            WHERE vu.id = $1 AND vu.variant_id = $2
            FOR UPDATE`,
-          [pu.unit_id, input.variant_id]
+          [pu.unit_id, validated.variant_id]
         );
 
         if (unitRes.rows.length > 0) {
@@ -159,7 +187,7 @@ export class StockService {
 
             await PriceHistoryService.recordChange(client, {
               productId: variant.product_id,
-              variantId: input.variant_id,
+              variantId: validated.variant_id,
               variantUnitId: pu.unit_id,
               unitName: uRow.unit_name,
               supplierId: uRow.supplier_id,
@@ -171,7 +199,7 @@ export class StockService {
               newWholesalePrice: targetWholesale,
               changeSource: 'PURCHASE_RESTOCK',
               referenceNo: pu.reference_no || refNo,
-              reason: pu.reason || input.notes || 'Pembaruan harga saat restock barang',
+              reason: pu.reason || validated.notes || 'Pembaruan harga saat restock barang',
               userId,
               createdBy: creator,
             });
@@ -186,17 +214,20 @@ export class StockService {
       return {
         movement_id: movementId,
         product_id: variant.product_id,
-        variant_id: input.variant_id,
+        variant_id: validated.variant_id,
         product_name: variant.product_name,
         variant_name: variant.variant_name,
         previous_stock: previousStock,
         quantity_change: quantityChange,
         current_stock: newStock,
-        movement_type: input.movement_type,
+        reserved_stock: reservedStock,
+        available_stock: roundStockQty(newStock - reservedStock),
+        movement_type: validated.movement_type,
         reference_no: refNo,
-        notes: input.notes,
+        notes: validated.notes,
         created_by: creator,
-        user_id: userId
+        user_id: userId,
+        price_updated: priceUpdated,
       };
     } catch (error) {
       await client.query('ROLLBACK');

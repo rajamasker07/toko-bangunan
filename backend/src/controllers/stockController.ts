@@ -1,38 +1,33 @@
 import { Request, Response } from 'express';
 import { hasPermission } from '../config/rbac.js';
 import { StockService } from '../services/stockService.js';
+import { sendErrorResponse } from '../utils/errors.js';
+import { validateAdjustStockInput } from '../validators/stockValidator.js';
 
 export class StockController {
   static async adjust(req: Request, res: Response) {
     try {
-      const { variant_id, adjustment_mode, amount, movement_type, notes, reference_no, price_update } = req.body;
-
-      if (!variant_id || !adjustment_mode || amount === undefined || !movement_type || !notes) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Varian, mode penyesuaian, jumlah perubahan, tipe mutasi, dan catatan alasan wajib diisi' 
-        });
-      }
+      const validated = validateAdjustStockInput(req.body);
 
       const allowBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
       const canWritePricing = hasPermission(req.user!.role, 'pricing:write');
 
       const result = await StockService.adjustStock({
-        variant_id,
-        adjustment_mode,
-        amount: Number(amount),
-        movement_type,
-        notes,
-        reference_no,
+        variant_id: validated.variant_id,
+        adjustment_mode: validated.adjustment_mode,
+        amount: validated.amount,
+        movement_type: validated.movement_type,
+        notes: validated.notes,
+        reference_no: validated.reference_no,
         user_id: req.user!.id,
         created_by: req.user!.full_name,
-        price_update: canWritePricing ? price_update : undefined,
+        price_update: canWritePricing ? validated.price_update : undefined,
         allow_buy_price: allowBuyPrice,
       });
 
       res.json({ success: true, data: result, message: 'Penyesuaian stok berhasil disimpan!' });
-    } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
+    } catch (error: unknown) {
+      sendErrorResponse(res, error);
     }
   }
 
@@ -55,8 +50,8 @@ export class StockController {
       });
 
       res.json({ success: true, data: result });
-    } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+    } catch (error: unknown) {
+      sendErrorResponse(res, error);
     }
   }
 }

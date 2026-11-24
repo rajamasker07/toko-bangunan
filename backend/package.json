@@ -11,6 +11,7 @@
     "db:init": "tsx src/db/init.ts",
     "db:seed": "tsx src/db/seed.ts",
     "test:pricing": "tsx src/scripts/testPriceHistory.ts",
+    "test:stock": "tsx src/scripts/testStockGuardrails.ts",
     "embeddings:backfill": "tsx src/scripts/backfillEmbeddings.ts",
     "search:eval": "tsx src/scripts/evaluateSearch.ts",
     "logs": "tsx src/scripts/viewLogs.ts"
