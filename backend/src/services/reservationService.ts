@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
+import { roundStockQty } from '../validators/stockValidator.js';
 
 export interface CreateReservationItemDto {
   product_id?: string;
@@ -18,21 +19,26 @@ export interface CreateReservationDto {
   invoice_no?: string;
   pickup_deadline: string | Date;
   notes?: string;
+  user_id?: string | null;
   created_by?: string;
   items: CreateReservationItemDto[];
 }
 
 export interface PickupItemDto {
   item_id: string;
-  qty_pickup?: number;
-  qty_picked_up?: number;
+  /** Kuantitas pengambilan dalam satuan dasar (kontrak kanonik) */
   qty_picked_up_base?: number;
+  /** @deprecated Alias legacy — gunakan qty_picked_up_base */
+  qty_picked_up?: number;
+  /** @deprecated Alias legacy — gunakan qty_picked_up_base */
+  qty_pickup?: number;
 }
 
 export interface PickupReservationDto {
   receiver_name: string;
   vehicle_plate?: string;
   notes?: string;
+  user_id?: string | null;
   handed_by?: string;
   items: PickupItemDto[];
 }
@@ -40,6 +46,7 @@ export interface PickupReservationDto {
 export interface ClosePartialReservationDto {
   settlement_type: 'REFUND' | 'EXCHANGE' | 'DEPOSIT' | 'OTHER';
   reason: string;
+  user_id?: string | null;
   closed_by?: string;
 }
 
@@ -93,7 +100,8 @@ export class ReservationService {
         codeExists = await client.query('SELECT 1 FROM stock_reservations WHERE reservation_code = $1', [reservationCode]);
       }
 
-      const creator = input.created_by || 'Admin';
+      const creator = (input.created_by || 'Admin').trim().slice(0, 100) || 'Admin';
+      const actorUserId = input.user_id || null;
 
       // 1. Insert reservation header
       await client.query(
@@ -188,8 +196,8 @@ export class ReservationService {
         await client.query(
           `INSERT INTO stock_movements (
             id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock,
-            reference_no, notes, created_by
-          ) VALUES ($1, $2, $3, 'RESERVATION_HOLD', $4, 0, $4, $5, $6, $7)`,
+            reference_no, notes, created_by, user_id
+          ) VALUES ($1, $2, $3, 'RESERVATION_HOLD', $4, 0, $4, $5, $6, $7, $8)`,
           [
             movementId,
             productId,
@@ -197,7 +205,8 @@ export class ReservationService {
             currentStock,
             reservationCode,
             `Penahanan stok reservasi ${reservationCode} untuk ${input.customer_name} (${qtyOrdered} ${item.unit_name} = ${qtyReservedBase} unit dasar)`,
-            creator
+            creator,
+            actorUserId
           ]
         );
       }
@@ -318,11 +327,14 @@ export class ReservationService {
               'vehicle_plate', srp.vehicle_plate,
               'notes', srp.notes,
               'handed_by', srp.handed_by,
+              'user_id', srp.user_id,
+              'handed_by_username', u.username,
               'items', srp.items,
               'picked_up_at', srp.picked_up_at
             ) ORDER BY srp.picked_up_at DESC
           )
           FROM stock_reservation_pickups srp
+          LEFT JOIN users u ON srp.user_id = u.id
           WHERE srp.reservation_id = r.id
         ) as pickups
       FROM stock_reservations r
@@ -420,11 +432,14 @@ export class ReservationService {
               'vehicle_plate', srp.vehicle_plate,
               'notes', srp.notes,
               'handed_by', srp.handed_by,
+              'user_id', srp.user_id,
+              'handed_by_username', u.username,
               'items', srp.items,
               'picked_up_at', srp.picked_up_at
             ) ORDER BY srp.picked_up_at DESC
           )
           FROM stock_reservation_pickups srp
+          LEFT JOIN users u ON srp.user_id = u.id
           WHERE srp.reservation_id = r.id
         ) as pickups
       FROM stock_reservations r
@@ -472,7 +487,8 @@ export class ReservationService {
 
       // 2. Fetch reservation items
       const itemsRes = await client.query(
-        `SELECT sri.*, p.name as product_name, pv.variant_name, pv.sku
+        `SELECT sri.*, p.name as product_name, pv.variant_name, pv.sku,
+                (SELECT vu.unit_name FROM variant_units vu WHERE vu.variant_id = pv.id AND vu.is_base_unit = true LIMIT 1) as base_unit_name
          FROM stock_reservation_items sri
          JOIN products p ON sri.product_id = p.id
          JOIN product_variants pv ON sri.variant_id = pv.id
@@ -485,22 +501,30 @@ export class ReservationService {
         itemsMap.set(row.id, row);
       }
 
-      const handedBy = input.handed_by || 'Admin';
+      const handedBy = (input.handed_by || 'Admin').trim().slice(0, 100) || 'Admin';
+      const actorUserId = input.user_id || null;
       const pickupDetails: any[] = [];
+      const seenItemIds = new Set<string>();
 
       // 3. Process each item pickup
       for (const pItem of input.items) {
+        if (seenItemIds.has(pItem.item_id)) {
+          throw new Error(`Item reservasi ${pItem.item_id} terduplikasi dalam satu permintaan pengambilan`);
+        }
+        seenItemIds.add(pItem.item_id);
+
         const itemRow = itemsMap.get(pItem.item_id);
         if (!itemRow) {
           throw new Error(`Item reservasi dengan ID ${pItem.item_id} tidak valid untuk reservasi ini`);
         }
 
-        const pickupQtyBase = Number(pItem.qty_picked_up_base ?? pItem.qty_picked_up ?? pItem.qty_pickup ?? 0);
-        if (isNaN(pickupQtyBase) || pickupQtyBase <= 0) {
+        const rawPickupQty = Number(pItem.qty_picked_up_base ?? pItem.qty_picked_up ?? pItem.qty_pickup ?? 0);
+        if (!Number.isFinite(rawPickupQty) || rawPickupQty <= 0) {
           throw new Error(`Jumlah pengambilan untuk "${itemRow.product_name} - ${itemRow.variant_name}" harus lebih besar dari 0`);
         }
+        const pickupQtyBase = roundStockQty(rawPickupQty);
 
-        const remainingBase = Number(itemRow.qty_reserved_base) - Number(itemRow.qty_picked_up_base);
+        const remainingBase = roundStockQty(Number(itemRow.qty_reserved_base) - Number(itemRow.qty_picked_up_base));
         if (pickupQtyBase > remainingBase) {
           throw new Error(
             `Jumlah pengambilan (${pickupQtyBase}) melebihi sisa barang yang ditahan (${remainingBase}) untuk "${itemRow.product_name} - ${itemRow.variant_name}"`
@@ -512,8 +536,8 @@ export class ReservationService {
           `SELECT current_stock, reserved_stock FROM product_variants WHERE id = $1 FOR UPDATE`,
           [itemRow.variant_id]
         );
-        const currentStock = Number(varRes.rows[0].current_stock);
-        const currentReserved = Number(varRes.rows[0].reserved_stock);
+        const currentStock = roundStockQty(Number(varRes.rows[0].current_stock));
+        const currentReserved = roundStockQty(Number(varRes.rows[0].reserved_stock));
 
         if (currentStock < pickupQtyBase) {
           throw new Error(
@@ -521,8 +545,8 @@ export class ReservationService {
           );
         }
 
-        const newStock = currentStock - pickupQtyBase;
-        const newReserved = Math.max(0, currentReserved - pickupQtyBase);
+        const newStock = roundStockQty(currentStock - pickupQtyBase);
+        const newReserved = Math.max(0, roundStockQty(currentReserved - pickupQtyBase));
 
         // Update variant current_stock AND reserved_stock
         await client.query(
@@ -545,8 +569,8 @@ export class ReservationService {
         await client.query(
           `INSERT INTO stock_movements (
             id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock,
-            reference_no, notes, created_by
-          ) VALUES ($1, $2, $3, 'RESERVATION_PICKUP', $4, $5, $6, $7, $8, $9)`,
+            reference_no, notes, created_by, user_id
+          ) VALUES ($1, $2, $3, 'RESERVATION_PICKUP', $4, $5, $6, $7, $8, $9, $10)`,
           [
             movementId,
             itemRow.product_id,
@@ -556,7 +580,8 @@ export class ReservationService {
             newStock,
             reservation.reservation_code,
             `Pengambilan barang reservasi ${reservation.reservation_code} oleh ${input.receiver_name} (${pickupQtyBase} unit dasar). Kendaraan: ${input.vehicle_plate || '-'}`,
-            handedBy
+            handedBy,
+            actorUserId
           ]
         );
 
@@ -567,8 +592,9 @@ export class ReservationService {
           variant_id: itemRow.variant_id,
           variant_name: itemRow.variant_name,
           unit_name: itemRow.unit_name,
+          base_unit_name: itemRow.base_unit_name || itemRow.unit_name,
           qty_picked_up_base: pickupQtyBase,
-          remaining_base_after: remainingBase - pickupQtyBase
+          remaining_base_after: roundStockQty(remainingBase - pickupQtyBase)
         });
       }
 
@@ -576,8 +602,8 @@ export class ReservationService {
       const pickupLogId = generateUUIDv7();
       await client.query(
         `INSERT INTO stock_reservation_pickups (
-          id, reservation_id, receiver_name, vehicle_plate, notes, handed_by, items, picked_up_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+          id, reservation_id, receiver_name, vehicle_plate, notes, handed_by, user_id, items, picked_up_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
         [
           pickupLogId,
           id,
@@ -585,6 +611,7 @@ export class ReservationService {
           input.vehicle_plate?.trim() || null,
           input.notes?.trim() || null,
           handedBy,
+          actorUserId,
           JSON.stringify(pickupDetails)
         ]
       );
@@ -678,7 +705,7 @@ export class ReservationService {
   /**
    * Cancel reservation: release uncollected reserved_stock back to available pool
    */
-  static async cancelReservation(id: string, cancelReason: string, cancelledBy?: string) {
+  static async cancelReservation(id: string, cancelReason: string, cancelledBy?: string, userId?: string | null) {
     if (!cancelReason || !cancelReason.trim()) {
       throw new Error('Alasan pembatalan reservasi wajib diisi');
     }
@@ -706,7 +733,8 @@ export class ReservationService {
         );
       }
 
-      const creator = cancelledBy || 'Admin';
+      const creator = (cancelledBy || 'Admin').trim().slice(0, 100) || 'Admin';
+      const actorUserId = userId || null;
 
       // 1. Fetch items to release uncollected reserved stock
       const itemsRes = await client.query(
@@ -719,7 +747,7 @@ export class ReservationService {
       );
 
       for (const item of itemsRes.rows) {
-        const uncollectedBase = Number(item.qty_reserved_base) - Number(item.qty_picked_up_base);
+        const uncollectedBase = roundStockQty(Number(item.qty_reserved_base) - Number(item.qty_picked_up_base));
         if (uncollectedBase > 0) {
           // Decrement variant reserved_stock without touching current_stock
           await client.query(
@@ -731,12 +759,12 @@ export class ReservationService {
 
           // Record stock movement for release
           const movementId = generateUUIDv7();
-          const currentStock = Number(item.current_stock);
+          const currentStock = roundStockQty(Number(item.current_stock));
           await client.query(
             `INSERT INTO stock_movements (
               id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock,
-              reference_no, notes, created_by
-            ) VALUES ($1, $2, $3, 'RESERVATION_RELEASE', $4, 0, $4, $5, $6, $7)`,
+              reference_no, notes, created_by, user_id
+            ) VALUES ($1, $2, $3, 'RESERVATION_RELEASE', $4, 0, $4, $5, $6, $7, $8)`,
             [
               movementId,
               item.product_id,
@@ -744,7 +772,8 @@ export class ReservationService {
               currentStock,
               reservation.reservation_code,
               `Pelepasan stok reservasi ${reservation.reservation_code} (${uncollectedBase} unit dasar) karena pembatalan: ${cancelReason.trim()}`,
-              creator
+              creator,
+              actorUserId
             ]
           );
         }
@@ -777,7 +806,7 @@ export class ReservationService {
    */
   static async closePartialReservation(
     id: string,
-    input: { settlement_type: 'REFUND' | 'EXCHANGE' | 'DEPOSIT' | 'OTHER'; reason: string; closed_by?: string }
+    input: ClosePartialReservationDto
   ) {
     const allowedSettlements = ['REFUND', 'EXCHANGE', 'DEPOSIT', 'OTHER'];
     if (!input.settlement_type || !allowedSettlements.includes(input.settlement_type)) {
@@ -810,7 +839,8 @@ export class ReservationService {
         );
       }
 
-      const closer = input.closed_by || 'Admin';
+      const closer = (input.closed_by || 'Admin').trim().slice(0, 100) || 'Admin';
+      const actorUserId = input.user_id || null;
 
       // 3. For each item where uncollectedBase = (qty_reserved_base - qty_picked_up_base) > 0
       const itemsRes = await client.query(
@@ -823,7 +853,7 @@ export class ReservationService {
       );
 
       for (const item of itemsRes.rows) {
-        const uncollectedBase = Number(item.qty_reserved_base) - Number(item.qty_picked_up_base);
+        const uncollectedBase = roundStockQty(Number(item.qty_reserved_base) - Number(item.qty_picked_up_base));
         if (uncollectedBase > 0) {
           // Atomically decrement variant reserved_stock by uncollectedBase (GREATEST(0, reserved_stock - $1)), leaving current_stock unchanged
           await client.query(
@@ -835,12 +865,12 @@ export class ReservationService {
 
           // Record stock_movements with movement_type = 'RESERVATION_RELEASE'
           const movementId = generateUUIDv7();
-          const currentStock = Number(item.current_stock);
+          const currentStock = roundStockQty(Number(item.current_stock));
           await client.query(
             `INSERT INTO stock_movements (
               id, product_id, variant_id, movement_type, previous_stock, quantity_change, current_stock,
-              reference_no, notes, created_by
-            ) VALUES ($1, $2, $3, 'RESERVATION_RELEASE', $4, 0, $4, $5, $6, $7)`,
+              reference_no, notes, created_by, user_id
+            ) VALUES ($1, $2, $3, 'RESERVATION_RELEASE', $4, 0, $4, $5, $6, $7, $8)`,
             [
               movementId,
               item.product_id,
@@ -848,7 +878,8 @@ export class ReservationService {
               currentStock,
               reservation.reservation_code,
               `Pelepasan sisa stok reservasi ${reservation.reservation_code} (${uncollectedBase} unit dasar) [Selesai Sebagian - ${input.settlement_type}]: ${input.reason.trim()}`,
-              closer
+              closer,
+              actorUserId
             ]
           );
         }

@@ -914,14 +914,13 @@ export const api = {
       receiver_name: string;
       vehicle_plate?: string;
       notes?: string;
-      handed_by?: string;
       items: Array<{
         item_id: string;
-        qty_picked_up: number;
+        qty_picked_up_base: number;
       }>;
     }
   ) =>
-    fetchJson<any>(`/reservations/${id}/pickup`, {
+    fetchJson<StockReservation>(`/reservations/${id}/pickup`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),

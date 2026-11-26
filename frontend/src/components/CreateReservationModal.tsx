@@ -399,7 +399,6 @@ export const CreateReservationModal: React.FC<CreateReservationModalProps> = ({
         invoice_no: invoiceNo.trim() || undefined,
         pickup_deadline: deadlineIso,
         notes: notes.trim() || undefined,
-        created_by: 'Kasir / Admin',
         items: configuredItems.map((item) => ({
           variant_id: item.variant_id,
           unit_name: item.unit_name,

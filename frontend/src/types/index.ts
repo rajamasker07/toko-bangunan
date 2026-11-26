@@ -368,10 +368,16 @@ export interface ReservationItem {
 
 export interface ReservationPickupItem {
   item_id: string;
-  qty_picked_up: number;
+  product_id?: string;
   product_name?: string;
+  variant_id?: string;
   variant_name?: string;
   unit_name?: string;
+  base_unit_name?: string;
+  qty_picked_up_base: number;
+  remaining_base_after?: number;
+  /** @deprecated Legacy fallback untuk data historis lama */
+  qty_picked_up?: number;
   [key: string]: any;
 }
 
@@ -382,7 +388,9 @@ export interface ReservationPickup {
   vehicle_plate?: string | null;
   notes?: string | null;
   handed_by: string;
-  items: ReservationPickupItem[] | any[];
+  user_id?: string | null;
+  handed_by_username?: string | null;
+  items: ReservationPickupItem[];
   picked_up_at: string;
 }
 

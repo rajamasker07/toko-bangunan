@@ -960,6 +960,16 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_stock_reservation_pickups_date ON stock_reservation_pickups(picked_up_at DESC);
     `);
 
+    // 8d. Tambah kolom stock_reservation_pickups.user_id jika belum ada (kompatibel PostgreSQL 9.5)
+    if (!(await columnExists(client, 'stock_reservation_pickups', 'user_id'))) {
+      await client.query(
+        'ALTER TABLE stock_reservation_pickups ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE SET NULL;'
+      );
+      await client.query(
+        'CREATE INDEX IF NOT EXISTS idx_stock_reservation_pickups_user ON stock_reservation_pickups(user_id);'
+      );
+    }
+
     // 9. Bootstrap akun Owner awal jika tabel users masih kosong
     await ensureBootstrapOwner(client);
 
