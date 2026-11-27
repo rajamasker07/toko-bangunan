@@ -399,6 +399,9 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
       CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
       CREATE INDEX IF NOT EXISTS idx_products_active ON products(is_active);
+      CREATE INDEX IF NOT EXISTS idx_products_barcode_lower
+        ON products (LOWER(BTRIM(barcode)))
+        WHERE barcode IS NOT NULL AND BTRIM(barcode) <> '';
     `);
 
     // 3b. Migrasi skema lama: kolom teks `products.brand` -> relasi `products.brand_id`
@@ -466,6 +469,9 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_product_variants_product ON product_variants(product_id);
       CREATE INDEX IF NOT EXISTS idx_product_variants_sku ON product_variants(sku);
       CREATE INDEX IF NOT EXISTS idx_product_variants_active ON product_variants(is_active);
+      CREATE INDEX IF NOT EXISTS idx_product_variants_barcode_lower
+        ON product_variants (LOWER(BTRIM(barcode)))
+        WHERE barcode IS NOT NULL AND BTRIM(barcode) <> '';
     `);
 
     // 3e. Kolom reserved_stock jika belum ada
@@ -917,6 +923,8 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_stock_reservations_status ON stock_reservations(status);
       CREATE INDEX IF NOT EXISTS idx_stock_reservations_deadline ON stock_reservations(pickup_deadline);
       CREATE INDEX IF NOT EXISTS idx_stock_reservations_code ON stock_reservations(reservation_code);
+      CREATE INDEX IF NOT EXISTS idx_stock_reservations_code_upper
+        ON stock_reservations (UPPER(BTRIM(reservation_code)));
       CREATE INDEX IF NOT EXISTS idx_stock_reservations_created ON stock_reservations(created_at DESC);
     `);
 
@@ -974,6 +982,26 @@ export async function initializeDatabase() {
         'CREATE INDEX IF NOT EXISTS idx_stock_reservation_pickups_user ON stock_reservation_pickups(user_id);'
       );
     }
+
+    // 8e. Idempotency Keys Table (Anti-duplikasi mutasi stok & pickup saat retry jaringan mobile)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS idempotency_keys (
+        id UUID PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        scope VARCHAR(64) NOT NULL,
+        idempotency_key VARCHAR(128) NOT NULL,
+        request_hash VARCHAR(64) NOT NULL,
+        status_code INT NOT NULL DEFAULT 200,
+        response_body JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMPTZ NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days')
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_idempotency_user_scope_key
+        ON idempotency_keys (user_id, scope, idempotency_key);
+      CREATE INDEX IF NOT EXISTS idx_idempotency_expires
+        ON idempotency_keys (expires_at);
+    `);
+    await client.query('DELETE FROM idempotency_keys WHERE expires_at < CURRENT_TIMESTAMP;');
 
     // 9. Bootstrap akun Owner awal jika tabel users masih kosong
     await ensureBootstrapOwner(client);

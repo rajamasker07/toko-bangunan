@@ -1,6 +1,14 @@
 import type { Pool, PoolClient } from 'pg';
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
+import { AppHttpError } from '../utils/errors.js';
+import {
+  acquireAndCheckIdempotency,
+  computeRequestHash,
+  isValidUuid,
+  saveIdempotencyResult,
+  validateOptionalIdempotencyKey,
+} from '../utils/idempotency.js';
 import { roundStockQty } from '../validators/stockValidator.js';
 
 export interface CreateReservationItemDto {
@@ -41,6 +49,7 @@ export interface PickupReservationDto {
   user_id?: string | null;
   handed_by?: string;
   items: PickupItemDto[];
+  idempotency_key?: string;
 }
 
 export interface ClosePartialReservationDto {
@@ -369,10 +378,11 @@ export class ReservationService {
     };
   }
 
-  /**
-   * Get single reservation by ID with items, products, variants, and pickup history
-   */
-  static async getReservationById(id: string) {
+  private static async queryReservationSingle(
+    whereSql: string,
+    paramValue: string,
+    db: Pool | PoolClient = pool
+  ) {
     const sql = `
       SELECT 
         r.*,
@@ -443,17 +453,42 @@ export class ReservationService {
           WHERE srp.reservation_id = r.id
         ) as pickups
       FROM stock_reservations r
-      WHERE r.id = $1
+      WHERE ${whereSql}
     `;
 
-    const res = await query(sql, [id]);
+    const res = await db.query(sql, [paramValue]);
     return res.rows[0] || null;
   }
 
   /**
-   * Pickup partial or full items from reservation
+   * Get single reservation by ID with items, products, variants, and pickup history
+   */
+  static async getReservationById(id: string, db: Pool | PoolClient = pool) {
+    return this.queryReservationSingle('r.id = $1', id, db);
+  }
+
+  /**
+   * Lookup instan tiket reservasi berdasarkan kode TTP-YYYYMMDD-XXXX (bangunjaya://r/:code)
+   */
+  static async getReservationByCode(rawCode: string) {
+    const code = typeof rawCode === 'string' ? rawCode.trim() : '';
+    if (!code) {
+      throw new AppHttpError(400, 'Kode reservasi wajib diisi.', 'INVALID_RESERVATION_CODE');
+    }
+    return this.queryReservationSingle(
+      'UPPER(BTRIM(r.reservation_code)) = UPPER(BTRIM($1))',
+      code
+    );
+  }
+
+  /**
+   * Pickup partial or full items from reservation (mendukung idempotency_key transaksional)
    */
   static async pickupReservation(id: string, input: PickupReservationDto) {
+    const trimmedId = typeof id === 'string' ? id.trim() : '';
+    if (!isValidUuid(trimmedId)) {
+      throw new AppHttpError(400, 'Format ID reservasi tidak valid.', 'INVALID_RESERVATION_ID');
+    }
     if (!input.receiver_name || !input.receiver_name.trim()) {
       throw new Error('Nama penerima / pengambil barang wajib diisi');
     }
@@ -461,14 +496,56 @@ export class ReservationService {
       throw new Error('Daftar barang yang diambil tidak boleh kosong');
     }
 
+    const idempotencyKey = validateOptionalIdempotencyKey(input.idempotency_key);
+    const idempotencyUserId = input.user_id || null;
+    const idempotencyScope = 'POST:/reservations/pickup';
+    const normalizedHashItems = [...input.items]
+      .map((it) => ({
+        item_id: String(it?.item_id ?? ''),
+        qty: roundStockQty(
+          Number(it?.qty_picked_up_base ?? it?.qty_picked_up ?? it?.qty_pickup ?? 0)
+        ),
+      }))
+      .sort((a, b) => a.item_id.localeCompare(b.item_id));
+
+    const requestHash =
+      idempotencyKey && idempotencyUserId
+        ? computeRequestHash({
+            reservation_id: trimmedId,
+            receiver_name: input.receiver_name.trim(),
+            vehicle_plate: input.vehicle_plate?.trim() || null,
+            notes: input.notes?.trim() || null,
+            items: normalizedHashItems,
+          })
+        : null;
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
+      // 0. Idempotency check transaksional dengan pg_advisory_xact_lock
+      if (idempotencyKey && idempotencyUserId && requestHash) {
+        const idemCheck = await acquireAndCheckIdempotency<any>(client, {
+          userId: idempotencyUserId,
+          scope: idempotencyScope,
+          key: idempotencyKey,
+          requestHash,
+        });
+        if (idemCheck.hit && idemCheck.responseBody) {
+          await client.query('COMMIT');
+          const replayedBody = { ...idemCheck.responseBody };
+          Object.defineProperty(replayedBody, '_idempotent_replayed', {
+            value: true,
+            enumerable: false,
+          });
+          return replayedBody;
+        }
+      }
+
       // 1. Lock and check reservation
       const resQuery = await client.query(
         'SELECT * FROM stock_reservations WHERE id = $1 FOR UPDATE',
-        [id]
+        [trimmedId]
       );
 
       if (resQuery.rows.length === 0) {
@@ -631,19 +708,32 @@ export class ReservationService {
           `UPDATE stock_reservations
            SET status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
            WHERE id = $1`,
-          [id]
+          [trimmedId]
         );
       } else {
         await client.query(
           `UPDATE stock_reservations
            SET status = 'PARTIAL', updated_at = CURRENT_TIMESTAMP
            WHERE id = $1`,
-          [id]
+          [trimmedId]
         );
       }
 
+      const updatedReservation = await this.getReservationById(trimmedId, client);
+
+      if (idempotencyKey && idempotencyUserId && requestHash && updatedReservation) {
+        await saveIdempotencyResult(client, {
+          userId: idempotencyUserId,
+          scope: idempotencyScope,
+          key: idempotencyKey,
+          requestHash,
+          statusCode: 200,
+          responseBody: updatedReservation,
+        });
+      }
+
       await client.query('COMMIT');
-      return await this.getReservationById(id);
+      return updatedReservation;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

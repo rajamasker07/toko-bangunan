@@ -12,6 +12,7 @@
     "db:seed": "tsx src/db/seed.ts",
     "test:pricing": "tsx src/scripts/testPriceHistory.ts",
     "test:version": "tsx src/scripts/testVersioning.ts",
+    "test:issue11": "tsx src/scripts/testIssue11ScanAndIdempotency.ts",
     "test:stock": "tsx src/scripts/testStockGuardrails.ts",
     "test:reservation": "tsx src/scripts/testReservationAudit.ts",
     "test:rbac-supplier": "tsx src/scripts/testRbacAndSupplierRedaction.ts",

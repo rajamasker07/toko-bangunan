@@ -12,6 +12,8 @@ import {
   isProductHeadCompatible,
 } from '../utils/searchQueryAnalyzer.js';
 import { logger } from '../utils/logger.js';
+import { AppHttpError } from '../utils/errors.js';
+import { isValidUuid } from '../utils/idempotency.js';
 
 type Queryable = Pool | PoolClient;
 
@@ -680,6 +682,115 @@ export class ProductService {
     const row = res.rows[0] || null;
     if (!row) return null;
     return sanitizeAndRedactProduct(row, options?.includeBuyPrice ?? true);
+  }
+
+  /**
+   * Instant barcode lookup menggunakan functional B-Tree index (LOWER(BTRIM(barcode))).
+   * Prioritas: product_variants.barcode -> products.barcode.
+   */
+  static async getProductByBarcode(
+    rawCode: string,
+    options?: { includeBuyPrice?: boolean }
+  ) {
+    const code = typeof rawCode === 'string' ? rawCode.trim() : '';
+    if (!code) {
+      throw new AppHttpError(400, 'Kode barcode wajib diisi.', 'INVALID_BARCODE');
+    }
+
+    const [variantHitsRes, productHitsRes] = await Promise.all([
+      query(
+        `SELECT pv.id AS variant_id, pv.product_id, pv.variant_name, pv.sku AS variant_sku,
+                pv.barcode AS variant_barcode, pv.is_active AS variant_active,
+                p.name AS product_name, p.is_active AS product_active
+         FROM product_variants pv
+         JOIN products p ON p.id = pv.product_id
+         WHERE pv.barcode IS NOT NULL
+           AND BTRIM(pv.barcode) <> ''
+           AND LOWER(BTRIM(pv.barcode)) = LOWER(BTRIM($1))
+         ORDER BY pv.is_active DESC, p.is_active DESC, pv.created_at ASC`,
+        [code]
+      ),
+      query(
+        `SELECT p.id AS product_id, p.name AS product_name, p.sku AS product_sku,
+                p.barcode AS product_barcode, p.is_active AS product_active
+         FROM products p
+         WHERE p.barcode IS NOT NULL
+           AND BTRIM(p.barcode) <> ''
+           AND LOWER(BTRIM(p.barcode)) = LOWER(BTRIM($1))
+         ORDER BY p.is_active DESC, p.created_at ASC`,
+        [code]
+      ),
+    ]);
+
+    const matches: Array<{
+      product_id: string;
+      product_name: string;
+      variant_id: string | null;
+      variant_name: string | null;
+      matched_by: 'variant_barcode' | 'product_barcode';
+    }> = [];
+    const seenProductIdsFromVariants = new Set<string>();
+
+    for (const row of variantHitsRes.rows) {
+      seenProductIdsFromVariants.add(row.product_id);
+      matches.push({
+        product_id: row.product_id,
+        product_name: row.product_name,
+        variant_id: row.variant_id,
+        variant_name: row.variant_name,
+        matched_by: 'variant_barcode',
+      });
+    }
+
+    for (const row of productHitsRes.rows) {
+      // Hindari duplikasi jika produk sederhana memiliki barcode sama di products & product_variants
+      if (seenProductIdsFromVariants.has(row.product_id)) {
+        continue;
+      }
+      matches.push({
+        product_id: row.product_id,
+        product_name: row.product_name,
+        variant_id: null,
+        variant_name: null,
+        matched_by: 'product_barcode',
+      });
+    }
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    const primary = matches[0];
+    const product = await this.getProductById(primary.product_id, options);
+    if (!product) {
+      return null;
+    }
+
+    const variantsList: any[] = Array.isArray((product as any).variants)
+      ? (product as any).variants
+      : [];
+
+    let matchedVariant: any = null;
+    if (primary.variant_id) {
+      matchedVariant = variantsList.find((v) => v.id === primary.variant_id) || null;
+    } else {
+      const activeVariants = variantsList.filter((v) => v.is_active !== false);
+      if (activeVariants.length === 1) {
+        matchedVariant = activeVariants[0];
+      } else if (variantsList.length === 1) {
+        matchedVariant = variantsList[0];
+      }
+    }
+
+    return {
+      barcode: code,
+      matched_by: primary.matched_by,
+      is_ambiguous: matches.length > 1,
+      matched_variant_id: matchedVariant ? matchedVariant.id : null,
+      matched_variant: matchedVariant,
+      product,
+      matches,
+    };
   }
 
   /**

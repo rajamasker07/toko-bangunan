@@ -2,8 +2,27 @@ import { Request, Response } from 'express';
 import { hasPermission } from '../config/rbac.js';
 import { VariantService } from '../services/variantService.js';
 import { CatalogRestructureService } from '../services/catalogRestructureService.js';
+import { sendErrorResponse } from '../utils/errors.js';
 
 export class VariantController {
+  static async getById(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id ?? '').trim();
+      const includeBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const variant = await VariantService.getVariantById(id, { includeBuyPrice });
+      if (!variant) {
+        return res.status(404).json({
+          success: false,
+          code: 'VARIANT_NOT_FOUND',
+          message: 'Varian produk tidak ditemukan.',
+        });
+      }
+      res.json({ success: true, data: variant });
+    } catch (error: unknown) {
+      sendErrorResponse(res, error);
+    }
+  }
+
   static async addVariant(req: Request, res: Response) {
     try {
       const productId = String(req.params.productId);

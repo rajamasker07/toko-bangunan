@@ -3,6 +3,8 @@ import { hasPermission } from '../config/rbac.js';
 import { ProductService } from '../services/productService.js';
 import { EmbeddingService } from '../services/embeddingService.js';
 import { CatalogRestructureService } from '../services/catalogRestructureService.js';
+import { AppHttpError, sendErrorResponse } from '../utils/errors.js';
+import { isValidUuid } from '../utils/idempotency.js';
 
 export class ProductController {
   static async list(req: Request, res: Response) {
@@ -51,13 +53,41 @@ export class ProductController {
     }
   }
 
+  static async getByBarcode(req: Request, res: Response) {
+    try {
+      const code = String(req.params.code ?? '').trim();
+      if (!code) {
+        throw new AppHttpError(400, 'Kode barcode wajib diisi.', 'INVALID_BARCODE');
+      }
+      const includeBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
+      const result = await ProductService.getProductByBarcode(code, { includeBuyPrice });
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          code: 'BARCODE_NOT_FOUND',
+          message: `Produk atau varian dengan barcode "${code}" tidak ditemukan.`,
+        });
+      }
+      res.json({ success: true, data: result });
+    } catch (error: unknown) {
+      sendErrorResponse(res, error);
+    }
+  }
+
   static async getById(req: Request, res: Response) {
     try {
-      const id = String(req.params.id);
+      const id = String(req.params.id ?? '').trim();
+      if (!isValidUuid(id)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PRODUCT_ID',
+          message: 'Format ID produk tidak valid.',
+        });
+      }
       const includeBuyPrice = hasPermission(req.user!.role, 'products:view_buy_price');
       const product = await ProductService.getProductById(id, { includeBuyPrice });
       if (!product) {
-        return res.status(404).json({ success: false, message: 'Produk tidak ditemukan' });
+        return res.status(404).json({ success: false, code: 'PRODUCT_NOT_FOUND', message: 'Produk tidak ditemukan' });
       }
       res.json({ success: true, data: product });
     } catch (error: any) {

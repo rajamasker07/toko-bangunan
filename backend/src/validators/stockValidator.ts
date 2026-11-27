@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AppHttpError } from '../utils/errors.js';
+import { validateOptionalIdempotencyKey } from '../utils/idempotency.js';
 
 export const STOCK_ADJUSTMENT_MODES = ['SET', 'ADD', 'SUBTRACT'] as const;
 export type StockAdjustmentMode = (typeof STOCK_ADJUSTMENT_MODES)[number];
@@ -87,6 +88,7 @@ export interface ValidatedAdjustStockInput {
   reference_no?: string;
   notes: string;
   price_update?: PriceUpdateOnRestock;
+  idempotency_key?: string;
 }
 
 /**
@@ -282,6 +284,9 @@ export function validateAdjustStockInput(raw: unknown): ValidatedAdjustStockInpu
     priceUpdate = parsedPriceUpdate.data;
   }
 
+  // 8. Validasi idempotency_key (opsional)
+  const idempotencyKey = validateOptionalIdempotencyKey(body.idempotency_key);
+
   return {
     variant_id: variantId,
     adjustment_mode: adjustmentMode,
@@ -290,5 +295,6 @@ export function validateAdjustStockInput(raw: unknown): ValidatedAdjustStockInpu
     reference_no: referenceNo,
     notes,
     price_update: priceUpdate,
+    idempotency_key: idempotencyKey,
   };
 }

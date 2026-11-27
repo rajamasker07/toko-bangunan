@@ -2,8 +2,138 @@ import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 import { EmbeddingService } from './embeddingService.js';
 import { PriceHistoryService } from './priceHistoryService.js';
+import { AppHttpError } from '../utils/errors.js';
+import { isValidUuid } from '../utils/idempotency.js';
+import { roundStockQty } from '../validators/stockValidator.js';
 
 export class VariantService {
+  /**
+   * Ambil detail satu varian beserta daftar konversi satuan, kalkulasi stok tersedia,
+   * serta informasi logistik produk induk untuk scan QR instan (bangunjaya://v/:id).
+   */
+  static async getVariantById(
+    id: string,
+    options?: { includeBuyPrice?: boolean }
+  ) {
+    const trimmedId = typeof id === 'string' ? id.trim() : '';
+    if (!isValidUuid(trimmedId)) {
+      throw new AppHttpError(
+        400,
+        'Format ID varian produk (variant_id) tidak valid.',
+        'INVALID_VARIANT_ID'
+      );
+    }
+
+    const includeBuyPrice = options?.includeBuyPrice ?? true;
+
+    const sql = `
+      SELECT
+        pv.id,
+        pv.product_id,
+        pv.variant_name,
+        pv.sku,
+        pv.barcode,
+        pv.current_stock,
+        COALESCE(pv.reserved_stock, 0) AS reserved_stock,
+        pv.min_stock,
+        pv.is_active,
+        COALESCE(pv.attributes, '{}'::jsonb) AS attributes,
+        pv.created_at,
+        pv.updated_at,
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', vu.id,
+                'variant_id', vu.variant_id,
+                'unit_name', vu.unit_name,
+                'conversion_factor', vu.conversion_factor,
+                'is_base_unit', vu.is_base_unit,
+                'buy_price', vu.buy_price,
+                'sell_price', vu.sell_price,
+                'wholesale_price', vu.wholesale_price
+              ) ORDER BY vu.is_base_unit DESC, vu.conversion_factor ASC
+            )
+            FROM variant_units vu
+            WHERE vu.variant_id = pv.id
+          ),
+          '[]'::json
+        ) AS units,
+        json_build_object(
+          'id', p.id,
+          'name', p.name,
+          'sku', p.sku,
+          'barcode', p.barcode,
+          'category_id', p.category_id,
+          'category_name', c.name,
+          'brand_id', p.brand_id,
+          'brand', b.name,
+          'supplier_id', p.supplier_id,
+          'supplier_name', s.name,
+          'supplier_code', s.code,
+          'description', p.description,
+          'has_variants', p.has_variants,
+          'is_active', p.is_active,
+          'min_stock_alert', p.min_stock_alert,
+          'weight', p.weight,
+          'length', p.length,
+          'width', p.width,
+          'height', p.height,
+          'material', p.material,
+          'specifications', p.specifications
+        ) AS product
+      FROM product_variants pv
+      JOIN products p ON p.id = pv.product_id
+      LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN brands b ON b.id = p.brand_id
+      LEFT JOIN suppliers s ON s.id = p.supplier_id
+      WHERE pv.id = $1
+    `;
+
+    const res = await query(sql, [trimmedId]);
+    if (res.rows.length === 0) {
+      return null;
+    }
+
+    const row = res.rows[0];
+    const currentStock = roundStockQty(Number(row.current_stock));
+    const reservedStock = roundStockQty(Number(row.reserved_stock || 0));
+    const availableStock = roundStockQty(currentStock - reservedStock);
+    const minStock = roundStockQty(Number(row.min_stock || 0));
+
+    const rawUnits: any[] = Array.isArray(row.units) ? row.units : [];
+    const sanitizedUnits = rawUnits.map((u) => ({
+      ...u,
+      conversion_factor: Number(u.conversion_factor),
+      buy_price: includeBuyPrice ? Number(u.buy_price || 0) : null,
+      sell_price: Number(u.sell_price || 0),
+      wholesale_price:
+        u.wholesale_price !== null && u.wholesale_price !== undefined
+          ? Number(u.wholesale_price)
+          : null,
+    }));
+
+    return {
+      id: row.id,
+      product_id: row.product_id,
+      variant_name: row.variant_name,
+      sku: row.sku,
+      barcode: row.barcode,
+      current_stock: currentStock,
+      reserved_stock: reservedStock,
+      available_stock: availableStock,
+      min_stock: minStock,
+      is_low_stock: availableStock <= minStock,
+      is_out_of_stock: availableStock <= 0,
+      is_active: row.is_active,
+      attributes: row.attributes || {},
+      units: sanitizedUnits,
+      product: row.product,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  }
+
   private static async syncProductByVariantId(variantId: string) {
     try {
       const res = await query('SELECT product_id FROM product_variants WHERE id = $1', [variantId]);

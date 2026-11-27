@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { ReservationService } from '../services/reservationService.js';
+import { AppHttpError, sendErrorResponse } from '../utils/errors.js';
+import { resolveIdempotencyKey } from '../utils/idempotency.js';
 
 function resolveAuthenticatedActor(req: Request): { userId: string | null; fullName: string } {
   const userId = req.user?.id ?? null;
@@ -36,6 +38,26 @@ export class ReservationController {
       res.json({ success: true, data: stats });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  static async getByCode(req: Request, res: Response) {
+    try {
+      const code = String(req.params.code ?? '').trim();
+      if (!code) {
+        throw new AppHttpError(400, 'Kode reservasi wajib diisi.', 'INVALID_RESERVATION_CODE');
+      }
+      const reservation = await ReservationService.getReservationByCode(code);
+      if (!reservation) {
+        return res.status(404).json({
+          success: false,
+          code: 'RESERVATION_NOT_FOUND',
+          message: `Tiket reservasi "${code}" tidak ditemukan.`,
+        });
+      }
+      res.json({ success: true, data: reservation });
+    } catch (error: unknown) {
+      sendErrorResponse(res, error);
     }
   }
 
@@ -97,8 +119,9 @@ export class ReservationController {
 
   static async pickup(req: Request, res: Response) {
     try {
-      const id = String(req.params.id);
-      const { receiver_name, vehicle_plate, notes, items } = req.body;
+      const id = String(req.params.id ?? '').trim();
+      const idempotencyKey = resolveIdempotencyKey(req);
+      const { receiver_name, vehicle_plate, notes, items } = req.body || {};
 
       if (!receiver_name || !items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({
@@ -115,8 +138,14 @@ export class ReservationController {
         notes,
         user_id: actor.userId,
         handed_by: actor.fullName,
-        items
+        items,
+        idempotency_key: idempotencyKey,
       });
+
+      const isReplayed = Boolean((result as any)?._idempotent_replayed);
+      if (typeof res.setHeader === 'function') {
+        res.setHeader('X-Idempotent-Replayed', isReplayed ? 'true' : 'false');
+      }
 
       res.json({
         success: true,
@@ -124,6 +153,10 @@ export class ReservationController {
         message: 'Pengambilan barang reservasi berhasil diproses'
       });
     } catch (error: any) {
+      if (error instanceof AppHttpError) {
+        sendErrorResponse(res, error);
+        return;
+      }
       res.status(400).json({ success: false, message: error.message });
     }
   }

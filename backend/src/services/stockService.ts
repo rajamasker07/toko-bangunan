@@ -1,6 +1,11 @@
 import { pool, query } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 import { AppHttpError } from '../utils/errors.js';
+import {
+  acquireAndCheckIdempotency,
+  computeRequestHash,
+  saveIdempotencyResult,
+} from '../utils/idempotency.js';
 import { PriceHistoryService } from './priceHistoryService.js';
 import {
   ALLOWED_MOVEMENTS_BY_MODE,
@@ -43,6 +48,7 @@ export interface AdjustStockInput {
   created_by?: string;
   price_update?: PriceUpdateOnRestock;
   allow_buy_price?: boolean;
+  idempotency_key?: string;
 }
 
 export class StockService {
@@ -53,9 +59,44 @@ export class StockService {
     // 0. Validasi ketat input & enum sebelum meminjam koneksi DB (defense-in-depth)
     const validated = validateAdjustStockInput(input);
 
+    const idempotencyKey = validated.idempotency_key;
+    const idempotencyUserId = input.user_id || null;
+    const idempotencyScope = 'POST:/stock/adjust';
+    const requestHash =
+      idempotencyKey && idempotencyUserId
+        ? computeRequestHash({
+            variant_id: validated.variant_id,
+            adjustment_mode: validated.adjustment_mode,
+            amount: validated.amount,
+            movement_type: validated.movement_type,
+            reference_no: validated.reference_no ?? null,
+            notes: validated.notes,
+            price_update: validated.price_update ?? null,
+          })
+        : null;
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      // 0b. Idempotency check transaksional dengan pg_advisory_xact_lock
+      if (idempotencyKey && idempotencyUserId && requestHash) {
+        const idemCheck = await acquireAndCheckIdempotency<any>(client, {
+          userId: idempotencyUserId,
+          scope: idempotencyScope,
+          key: idempotencyKey,
+          requestHash,
+        });
+        if (idemCheck.hit && idemCheck.responseBody) {
+          await client.query('COMMIT');
+          const replayedBody = { ...idemCheck.responseBody };
+          Object.defineProperty(replayedBody, '_idempotent_replayed', {
+            value: true,
+            enumerable: false,
+          });
+          return replayedBody;
+        }
+      }
 
       // 1. Fetch variant and product info with FOR UPDATE lock
       const variantRes = await client.query(
@@ -209,9 +250,7 @@ export class StockService {
         }
       }
 
-      await client.query('COMMIT');
-
-      return {
+      const responsePayload = {
         movement_id: movementId,
         product_id: variant.product_id,
         variant_id: validated.variant_id,
@@ -229,6 +268,21 @@ export class StockService {
         user_id: userId,
         price_updated: priceUpdated,
       };
+
+      if (idempotencyKey && idempotencyUserId && requestHash) {
+        await saveIdempotencyResult(client, {
+          userId: idempotencyUserId,
+          scope: idempotencyScope,
+          key: idempotencyKey,
+          requestHash,
+          statusCode: 200,
+          responseBody: responsePayload,
+        });
+      }
+
+      await client.query('COMMIT');
+
+      return responsePayload;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

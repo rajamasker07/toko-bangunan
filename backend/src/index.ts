@@ -45,8 +45,20 @@ app.use(
       callback(new Error(`Origin ${origin} tidak diizinkan oleh kebijakan CORS`));
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
-    exposedHeaders: ['Content-Disposition', 'X-Request-Id', 'X-App-Version', 'X-API-Version'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Request-Id',
+      'Idempotency-Key',
+      'X-Idempotency-Key',
+    ],
+    exposedHeaders: [
+      'Content-Disposition',
+      'X-Request-Id',
+      'X-App-Version',
+      'X-API-Version',
+      'X-Idempotent-Replayed',
+    ],
   })
 );
 app.use(express.json());

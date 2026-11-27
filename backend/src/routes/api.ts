@@ -195,6 +195,11 @@ router.post(
   requirePermission('products:update'),
   ProductController.bulkMerge
 );
+router.get(
+  '/products/by-barcode/:code',
+  requirePermission('products:read'),
+  ProductController.getByBarcode
+);
 router.get('/products/:id', requirePermission('products:read'), ProductController.getById);
 router.post('/products', requirePermission('products:create'), ProductController.create);
 router.put('/products/:id', requirePermission('products:update'), ProductController.update);
@@ -226,6 +231,7 @@ router.put(
   requirePermission('products:update'),
   VariantController.bulkUpdateAttributes
 );
+router.get('/variants/:id', requirePermission('products:read'), VariantController.getById);
 router.put('/variants/:id', requirePermission('products:update'), VariantController.updateVariant);
 router.patch(
   '/variants/:id/toggle-status',
@@ -302,6 +308,11 @@ router.get('/stock/movements', requirePermission('stock:read'), StockController.
 // Stock Reservations (Titip Barang & Alert Pengambilan Pelanggan)
 router.get('/reservations', requirePermission('reservations:read'), ReservationController.list);
 router.get('/reservations/alerts', requirePermission('reservations:read'), ReservationController.getAlertStats);
+router.get(
+  '/reservations/by-code/:code',
+  requirePermission('reservations:read'),
+  ReservationController.getByCode
+);
 router.get('/reservations/:id', requirePermission('reservations:read'), ReservationController.getById);
 router.post('/reservations', requirePermission('reservations:create'), ReservationController.create);
 router.post('/reservations/:id/pickup', requirePermission('reservations:pickup'), ReservationController.pickup);
