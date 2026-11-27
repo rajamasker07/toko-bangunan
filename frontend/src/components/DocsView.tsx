@@ -1,13 +1,28 @@
 import React from 'react';
-import { BookOpen, Database, Layers, SlidersHorizontal, Cpu, CheckCircle, Sparkles, Brain } from 'lucide-react';
+import { BookOpen, Database, Layers, SlidersHorizontal, Cpu, CheckCircle, Sparkles, Brain, Tag } from 'lucide-react';
+import { CLIENT_VERSION_INFO } from '../utils/version';
 
 export const DocsView: React.FC = () => {
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
-      <div className="p-6 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 text-white shadow-xl space-y-2">
-        <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs tracking-wider uppercase">
-          <BookOpen className="w-4 h-4" />
-          <span>Dokumentasi Arsitektur & Panduan Penggunaan</span>
+      <div className="p-6 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 text-white shadow-xl space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs tracking-wider uppercase">
+            <BookOpen className="w-4 h-4" />
+            <span>Dokumentasi Arsitektur & Panduan Penggunaan</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/30 text-amber-300 font-bold">
+              <Tag className="w-3 h-3" />
+              {CLIENT_VERSION_INFO.displayVersion}
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300">
+              commit: {CLIENT_VERSION_INFO.commit}
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 uppercase font-bold">
+              API {CLIENT_VERSION_INFO.apiVersion}
+            </span>
+          </div>
         </div>
         <h2 className="text-2xl font-black tracking-tight">
           Sistem POS & Inventaris Toko Bahan Bangunan

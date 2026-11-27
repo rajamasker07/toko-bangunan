@@ -7,6 +7,7 @@ import { initializeDatabase } from './db/init.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { logger } from './utils/logger.js';
 import { EmbeddingService } from './services/embeddingService.js';
+import { getAppVersionInfo } from './utils/version.js';
 
 const app = express();
 const port = env.port;
@@ -45,34 +46,56 @@ app.use(
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
-    exposedHeaders: ['Content-Disposition', 'X-Request-Id'],
+    exposedHeaders: ['Content-Disposition', 'X-Request-Id', 'X-App-Version', 'X-API-Version'],
   })
 );
 app.use(express.json());
 
+// Sisipkan metadata versi aplikasi & kontrak API pada setiap respons HTTP
+app.use((_req, res, next) => {
+  const versionInfo = getAppVersionInfo();
+  res.setHeader('X-App-Version', versionInfo.version);
+  res.setHeader('X-API-Version', versionInfo.apiVersion);
+  next();
+});
+
 // Production-ready correlated request logger with ANSI terminal output, file storage & ring-buffer
 app.use(requestLogger);
 
-// API Routes
+// API Routes (/api/v1 harus dipasang lebih dulu agar prefix tidak tertangkap oleh /api)
+app.use('/api/v1', apiRouter);
 app.use('/api', apiRouter);
 
 // Health check
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'Toko Bangunan API', timestamp: new Date() });
+  const versionInfo = getAppVersionInfo();
+  res.json({
+    status: 'ok',
+    service: 'Toko Bangunan API',
+    version: versionInfo.version,
+    apiVersion: versionInfo.apiVersion,
+    commit: versionInfo.commit,
+    uptimeSeconds: versionInfo.uptimeSeconds,
+    timestamp: new Date(),
+  });
 });
 
 // Root welcome
 app.get('/', (_req, res) => {
+  const versionInfo = getAppVersionInfo();
   res.json({
     name: 'Toko Bangunan Backend API',
-    version: '1.0.0',
+    version: versionInfo.version,
+    apiVersion: versionInfo.apiVersion,
+    commit: versionInfo.commit,
     documentation: '/api/docs',
     endpoints: {
+      version: '/api/version',
       products: '/api/products',
       categories: '/api/categories',
       stock: '/api/stock/movements',
-      dashboard: '/api/dashboard/summary'
-    }
+      dashboard: '/api/dashboard/summary',
+    },
   });
 });
 
@@ -157,7 +180,11 @@ async function startServer() {
   try {
     await initializeDatabase();
     app.listen(port, () => {
-      logger.info('SYSTEM', `🚀 Toko Bangunan API server running on http://localhost:${port}`);
+      const v = getAppVersionInfo();
+      logger.info(
+        'SYSTEM',
+        `🚀 Toko Bangunan API v${v.version} (${v.commit}, ${v.apiVersion}) running on http://localhost:${port}`
+      );
       // Inisialisasi semantic search & embedding engine di latar belakang (non-blocking)
       EmbeddingService.initializeInBackground().catch((err) => {
         logger.warn('AI_EMBEDDING', `Inisialisasi embedding background gagal: ${err.message}`);

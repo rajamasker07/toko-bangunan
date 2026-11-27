@@ -16,6 +16,7 @@ import { UserController } from '../controllers/userController.js';
 import { VariantController } from '../controllers/variantController.js';
 import { PriceHistoryController } from '../controllers/priceHistoryController.js';
 import { LogController } from '../controllers/logController.js';
+import { getAppVersionInfo } from '../utils/version.js';
 import {
   requireAnyPermission,
   requireAuth,
@@ -27,8 +28,11 @@ import { importFileUpload, sqlFileUpload } from '../middleware/upload.js';
 const router = Router();
 
 // ==========================================
-// PUBLIC AUTH ROUTES
+// PUBLIC SYSTEM METADATA & AUTH ROUTES
 // ==========================================
+router.get('/version', (_req, res) => {
+  res.json({ success: true, data: getAppVersionInfo() });
+});
 router.post('/auth/login', loginRateLimiter, AuthController.login);
 router.post('/auth/refresh', AuthController.refresh);
 

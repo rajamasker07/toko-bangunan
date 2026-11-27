@@ -46,6 +46,7 @@ import {
   BulkPricePreviewResponse,
   PriceUpdateOnRestock,
 } from '../types';
+import { reportServerVersion, SystemVersionPayload } from '../utils/version';
 
 const BASE_URL = '/api';
 const ACCESS_TOKEN_KEY = 'auth_access_token';
@@ -246,6 +247,7 @@ async function executeWithAuthRetry(
 ): Promise<Response> {
   const token = getAuthToken();
   const response = await fetch(`${BASE_URL}${url}`, buildRequestInit(token));
+  reportServerVersion(response.headers.get('X-App-Version'));
 
   if (response.status === 401) {
     const json = await safeParseJson(response);
@@ -1177,4 +1179,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  getSystemVersion: async (): Promise<SystemVersionPayload> => {
+    const data = await fetchJson<SystemVersionPayload>('/version');
+    reportServerVersion(data?.version);
+    return data;
+  },
 };

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { HardHat, Loader2, RefreshCw, LogOut, WifiOff } from 'lucide-react';
+import { HardHat, Loader2, RefreshCw, LogOut, WifiOff, Sparkles, X } from 'lucide-react';
 import { api } from './services/api';
+import { CLIENT_VERSION_INFO, subscribeServerVersionMismatch } from './utils/version';
 import {
   Product,
   ProductVariant,
@@ -58,6 +59,18 @@ export const App: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
+  const [detectedServerVersion, setDetectedServerVersion] = useState<string | null>(null);
+  const [dismissedServerVersion, setDismissedServerVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = subscribeServerVersionMismatch((serverVer) => {
+      setDetectedServerVersion(serverVer);
+    });
+    api.getSystemVersion().catch(() => {
+      // Abaikan jika offline saat pengecekan awal
+    });
+    return unsubscribe;
+  }, []);
 
   // Independent Data States
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -701,8 +714,41 @@ export const App: React.FC = () => {
 
   const isForcedPasswordChange = Boolean(user?.must_change_password);
 
+  const showUpdateBanner =
+    Boolean(detectedServerVersion) && detectedServerVersion !== dismissedServerVersion;
+
   return (
     <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors overflow-hidden">
+      {/* New App Version Available Banner */}
+      {showUpdateBanner && (
+        <div className="bg-gradient-to-r from-amber-600 to-orange-500 text-white px-4 py-2 text-xs flex items-center justify-between gap-3 shrink-0 shadow-sm z-30">
+          <div className="flex items-center gap-2 min-w-0">
+            <Sparkles className="w-4 h-4 shrink-0" />
+            <span className="truncate">
+              Pembaruan aplikasi <strong>v{detectedServerVersion}</strong> telah tersedia (versi tab ini:{' '}
+              <span className="font-mono">{CLIENT_VERSION_INFO.displayVersion}</span>). Muat ulang halaman agar sinkron dengan server.
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="px-3 py-1 rounded-lg bg-white text-amber-700 hover:bg-amber-50 font-bold transition-colors shadow-xs"
+            >
+              Muat Ulang Sekarang
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissedServerVersion(detectedServerVersion)}
+              className="p-1 rounded-lg hover:bg-white/20 transition-colors"
+              aria-label="Tutup pemberitahuan pembaruan"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Navbar */}
       <Navbar
         lowStockCount={summary?.low_stock_count || 0}
