@@ -64,6 +64,9 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
   const { can } = useAuth();
   const canWrite = can('master:write');
   const canDelete = can('master:delete');
+  const canViewFinancial = can('products:view_buy_price');
+  const canManageInvoices = canWrite && canViewFinancial;
+  const canDeleteInvoices = canDelete && canViewFinancial;
 
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [loading, setLoading] = useState(true);
@@ -334,8 +337,8 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
     setInvPoNo(inv.purchase_order_no || '');
     setInvDate(inv.invoice_date.slice(0, 10));
     setInvDueDate(inv.due_date.slice(0, 10));
-    setInvTotalAmount(String(inv.total_amount));
-    setInvPaidAmount(String(inv.paid_amount));
+    setInvTotalAmount(inv.total_amount !== null ? String(inv.total_amount) : '');
+    setInvPaidAmount(inv.paid_amount !== null ? String(inv.paid_amount) : '0');
     setInvNotes(inv.notes || '');
     setIsInvoiceModalOpen(true);
   };
@@ -416,7 +419,7 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
   // Quick Payment Modal Open
   const openPayModal = (inv: SupplierInvoice) => {
     setPayingInvoice(inv);
-    setPayAmount(String(inv.remaining_amount));
+    setPayAmount(inv.remaining_amount !== null ? String(inv.remaining_amount) : '');
     setIsPayModalOpen(true);
   };
 
@@ -429,8 +432,9 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
       showToast('Nominal pembayaran harus lebih besar dari 0', 'error');
       return;
     }
-    if (amt > payingInvoice.remaining_amount) {
-      showToast(`Nominal melebihi sisa tagihan (${formatRupiah(payingInvoice.remaining_amount)})`, 'error');
+    const maxRemaining = payingInvoice.remaining_amount ?? 0;
+    if (amt > maxRemaining) {
+      showToast(`Nominal melebihi sisa tagihan (${formatRupiah(maxRemaining)})`, 'error');
       return;
     }
 
@@ -565,21 +569,34 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
           </div>
         </div>
 
-        {/* Card 2: Total Hutang Nota / Beban */}
+        {/* Card 2: Total Hutang Nota / Status Nota */}
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center gap-3.5">
           <div className="p-3 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
             <DollarSign className="w-6 h-6" />
           </div>
           <div>
             <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 block">
-              Sisa Tagihan / Beban
+              {canViewFinancial ? 'Sisa Tagihan / Beban' : 'Status Nota Pembelian'}
             </span>
-            <span className="text-lg font-black text-slate-900 dark:text-white tabular-nums block">
-              {formatRupiah(invoiceSummary?.total_debt_amount || 0)}
-            </span>
-            <span className="text-[10px] text-slate-500 font-medium">
-              Dari total {formatRupiah(invoiceSummary?.total_invoice_amount || 0)}
-            </span>
+            {canViewFinancial && invoiceSummary?.total_debt_amount !== null ? (
+              <>
+                <span className="text-lg font-black text-slate-900 dark:text-white tabular-nums block">
+                  {formatRupiah(invoiceSummary?.total_debt_amount || 0)}
+                </span>
+                <span className="text-[10px] text-slate-500 font-medium">
+                  Dari total {formatRupiah(invoiceSummary?.total_invoice_amount || 0)}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-sm font-black text-slate-700 dark:text-slate-200 block">
+                  Nominal Disembunyikan
+                </span>
+                <span className="text-[10px] text-slate-500 font-medium">
+                  {(invoiceSummary?.unpaid_count || 0) + (invoiceSummary?.partial_count || 0) + (invoiceSummary?.overdue_count || 0)} aktif dari {invoiceSummary?.total_invoices || 0} nota
+                </span>
+              </>
+            )}
           </div>
         </div>
 
@@ -886,7 +903,7 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
                 </button>
               </div>
 
-              {canWrite && (
+              {canManageInvoices && (
                 <button
                   onClick={openCreateInvoiceModal}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs transition-colors shrink-0"
@@ -913,7 +930,7 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
                 Catat nota tagihan pembelian dari supplier ini agar sistem dapat memantau tanggal jatuh tempo secara akurat.
               </p>
-              {canWrite && (
+              {canManageInvoices && (
                 <button
                   onClick={openCreateInvoiceModal}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700"
@@ -997,32 +1014,40 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
-                        <span className="text-slate-500">Total Nilai Nota:</span>
-                        <span className="font-extrabold text-slate-900 dark:text-white">
-                          {formatRupiah(inv.total_amount)}
-                        </span>
-                      </div>
+                      {canViewFinancial && inv.total_amount !== null ? (
+                        <>
+                          <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                            <span className="text-slate-500">Total Nilai Nota:</span>
+                            <span className="font-extrabold text-slate-900 dark:text-white">
+                              {formatRupiah(inv.total_amount)}
+                            </span>
+                          </div>
 
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-500">Telah Dibayar:</span>
-                        <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                          {formatRupiah(inv.paid_amount)}
-                        </span>
-                      </div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-500">Telah Dibayar:</span>
+                            <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                              {formatRupiah(inv.paid_amount)}
+                            </span>
+                          </div>
 
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
-                        <span className="font-bold text-slate-700 dark:text-slate-300">
-                          Sisa Tagihan / Beban:
-                        </span>
-                        <span
-                          className={`font-black text-sm tabular-nums ${
-                            inv.remaining_amount > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600'
-                          }`}
-                        >
-                          {formatRupiah(inv.remaining_amount)}
-                        </span>
-                      </div>
+                          <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                            <span className="font-bold text-slate-700 dark:text-slate-300">
+                              Sisa Tagihan / Beban:
+                            </span>
+                            <span
+                              className={`font-black text-sm tabular-nums ${
+                                (inv.remaining_amount ?? 0) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600'
+                              }`}
+                            >
+                              {formatRupiah(inv.remaining_amount)}
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px] text-slate-500 dark:text-slate-400 italic">
+                          Nominal tagihan disembunyikan sesuai hak akses peran (memerlukan izin HPP).
+                        </div>
+                      )}
                     </div>
 
                     {/* Notes */}
@@ -1035,7 +1060,7 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
                     {/* Actions */}
                     <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
                       <div>
-                        {canWrite && !isPaid && (
+                        {canManageInvoices && !isPaid && (
                           <button
                             onClick={() => openPayModal(inv)}
                             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors"
@@ -1047,7 +1072,7 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1">
-                        {canWrite && (
+                        {canManageInvoices && (
                           <button
                             onClick={() => openEditInvoiceModal(inv)}
                             className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40"
@@ -1056,7 +1081,7 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                         )}
-                        {canDelete && (
+                        {canDeleteInvoices && (
                           <button
                             onClick={() => handleDeleteInvoice(inv)}
                             className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
@@ -1601,7 +1626,7 @@ export const SupplierDetailView: React.FC<SupplierDetailViewProps> = ({
                 <input
                   type="number"
                   min="1"
-                  max={payingInvoice.remaining_amount}
+                  max={payingInvoice.remaining_amount ?? undefined}
                   value={payAmount}
                   onChange={(e) => setPayAmount(e.target.value)}
                   placeholder="Masukkan nominal pembayaran..."

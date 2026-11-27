@@ -155,22 +155,22 @@ router.get(
 );
 router.post(
   '/suppliers/:supplierId/invoices',
-  requirePermission('master:write'),
+  requirePermission('master:write', 'products:view_buy_price'),
   SupplierInvoiceController.create
 );
 router.put(
   '/supplier-invoices/:id',
-  requirePermission('master:write'),
+  requirePermission('master:write', 'products:view_buy_price'),
   SupplierInvoiceController.update
 );
 router.post(
   '/supplier-invoices/:id/payment',
-  requirePermission('master:write'),
+  requirePermission('master:write', 'products:view_buy_price'),
   SupplierInvoiceController.recordPayment
 );
 router.delete(
   '/supplier-invoices/:id',
-  requirePermission('master:delete'),
+  requirePermission('master:delete', 'products:view_buy_price'),
   SupplierInvoiceController.delete
 );
 

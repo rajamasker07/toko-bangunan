@@ -13,9 +13,9 @@ export interface SupplierInvoice {
   purchase_order_no: string | null;
   invoice_date: string;
   due_date: string;
-  total_amount: number;
-  paid_amount: number;
-  remaining_amount: number;
+  total_amount: number | null;
+  paid_amount: number | null;
+  remaining_amount: number | null;
   status: InvoicePaymentStatus;
   notes: string | null;
   created_at: string;
@@ -53,9 +53,41 @@ export interface SupplierInvoiceSummary {
   paid_count: number;
   overdue_count: number;
   due_soon_count: number;
-  total_invoice_amount: number;
-  total_paid_amount: number;
-  total_debt_amount: number;
+  total_invoice_amount: number | null;
+  total_paid_amount: number | null;
+  total_debt_amount: number | null;
+}
+
+/**
+ * Menyensor nominal rupiah faktur supplier menjadi null bagi role tanpa izin finansial/HPP.
+ */
+export function redactInvoiceFinancials(
+  invoice: SupplierInvoice,
+  includeFinancials: boolean
+): SupplierInvoice {
+  if (includeFinancials) return invoice;
+  return {
+    ...invoice,
+    total_amount: null,
+    paid_amount: null,
+    remaining_amount: null,
+  };
+}
+
+/**
+ * Menyensor total nominal rupiah ringkasan faktur supplier menjadi null bagi role tanpa izin finansial/HPP.
+ */
+export function redactInvoiceSummaryFinancials(
+  summary: SupplierInvoiceSummary,
+  includeFinancials: boolean
+): SupplierInvoiceSummary {
+  if (includeFinancials) return summary;
+  return {
+    ...summary,
+    total_invoice_amount: null,
+    total_paid_amount: null,
+    total_debt_amount: null,
+  };
 }
 
 function calculateInvoiceStatus(
@@ -136,8 +168,10 @@ function enrichInvoice(row: any): SupplierInvoice {
 export class SupplierInvoiceService {
   static async getBySupplierId(
     supplierId: string,
-    filters?: { status?: string; search?: string }
+    filters?: { status?: string; search?: string },
+    options?: { includeFinancials?: boolean }
   ): Promise<SupplierInvoice[]> {
+    const includeFinancials = options?.includeFinancials ?? true;
     const params: any[] = [supplierId];
     const conditions: string[] = ['supplier_id = $1'];
 
@@ -171,11 +205,19 @@ export class SupplierInvoiceService {
       invoices = invoices.filter((inv) => inv.status.toLowerCase() === filters.status?.toLowerCase());
     }
 
+    if (!includeFinancials) {
+      return invoices.map((inv) => redactInvoiceFinancials(inv, false));
+    }
+
     return invoices;
   }
 
-  static async getSummaryBySupplierId(supplierId: string): Promise<SupplierInvoiceSummary> {
-    const invoices = await this.getBySupplierId(supplierId);
+  static async getSummaryBySupplierId(
+    supplierId: string,
+    options?: { includeFinancials?: boolean }
+  ): Promise<SupplierInvoiceSummary> {
+    const includeFinancials = options?.includeFinancials ?? true;
+    const invoices = await this.getBySupplierId(supplierId, undefined, { includeFinancials: true });
 
     const summary: SupplierInvoiceSummary = {
       total_invoices: invoices.length,
@@ -184,12 +226,12 @@ export class SupplierInvoiceService {
       paid_count: invoices.filter((i) => i.status === 'PAID').length,
       overdue_count: invoices.filter((i) => i.is_overdue).length,
       due_soon_count: invoices.filter((i) => i.is_due_soon).length,
-      total_invoice_amount: invoices.reduce((acc, i) => acc + i.total_amount, 0),
-      total_paid_amount: invoices.reduce((acc, i) => acc + i.paid_amount, 0),
-      total_debt_amount: invoices.reduce((acc, i) => acc + i.remaining_amount, 0),
+      total_invoice_amount: invoices.reduce((acc, i) => acc + (i.total_amount ?? 0), 0),
+      total_paid_amount: invoices.reduce((acc, i) => acc + (i.paid_amount ?? 0), 0),
+      total_debt_amount: invoices.reduce((acc, i) => acc + (i.remaining_amount ?? 0), 0),
     };
 
-    return summary;
+    return redactInvoiceSummaryFinancials(summary, includeFinancials);
   }
 
   static async create(supplierId: string, input: CreateInvoiceInput, db: Queryable = pool): Promise<SupplierInvoice> {

@@ -13,6 +13,7 @@
     "test:pricing": "tsx src/scripts/testPriceHistory.ts",
     "test:stock": "tsx src/scripts/testStockGuardrails.ts",
     "test:reservation": "tsx src/scripts/testReservationAudit.ts",
+    "test:rbac-supplier": "tsx src/scripts/testRbacAndSupplierRedaction.ts",
     "embeddings:backfill": "tsx src/scripts/backfillEmbeddings.ts",
     "search:eval": "tsx src/scripts/evaluateSearch.ts",
     "logs": "tsx src/scripts/viewLogs.ts"

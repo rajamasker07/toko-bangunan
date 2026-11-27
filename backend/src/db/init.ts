@@ -5,7 +5,7 @@ import { generateUUIDv7 } from '../utils/uuid.js';
 import { brandKey, normalizeBrandName } from '../utils/brand.js';
 import { generateRandomPassword, hashPassword } from '../utils/password.js';
 import { ALL_PERMISSIONS } from '../types/auth.js';
-import { syncRolesCacheFromDb } from '../config/rbac.js';
+import { DEFAULT_ROLE_PERMISSIONS, syncRolesCacheFromDb } from '../config/rbac.js';
 
 async function columnExists(client: PoolClient, table: string, column: string): Promise<boolean> {
   const res = await client.query(
@@ -174,7 +174,9 @@ export async function initializeDatabase() {
       // Abaikan jika tipe sudah sesuai
     }
 
-    // 0c. Seed / sync 4 role default ('owner', 'admin', 'gudang', 'kasir')
+    // 0c. Seed 4 role sistem bawaan ('owner', 'admin', 'gudang', 'kasir') hanya jika belum ada.
+    //     Menggunakan ON CONFLICT (code) DO NOTHING agar kustomisasi izin/metadata oleh admin
+    //     tidak ter-reset saat server restart (Issue #3).
     const defaultRolesSeed = [
       {
         code: 'owner',
@@ -185,7 +187,7 @@ export async function initializeDatabase() {
         badge_color: 'purple',
         hierarchy_level: 100,
         is_system: true,
-        permissions: ALL_PERMISSIONS,
+        permissions: DEFAULT_ROLE_PERMISSIONS.owner,
       },
       {
         code: 'admin',
@@ -196,7 +198,7 @@ export async function initializeDatabase() {
         badge_color: 'blue',
         hierarchy_level: 80,
         is_system: true,
-        permissions: ALL_PERMISSIONS.filter((p) => p !== 'users:delete'),
+        permissions: DEFAULT_ROLE_PERMISSIONS.admin,
       },
       {
         code: 'gudang',
@@ -207,18 +209,7 @@ export async function initializeDatabase() {
         badge_color: 'amber',
         hierarchy_level: 50,
         is_system: true,
-        permissions: [
-          'dashboard:read',
-          'products:read',
-          'products:create',
-          'products:update',
-          'master:read',
-          'suppliers:read',
-          'stock:read',
-          'stock:adjust',
-          'reservations:read',
-          'reservations:pickup',
-        ],
+        permissions: DEFAULT_ROLE_PERMISSIONS.gudang,
       },
       {
         code: 'kasir',
@@ -229,16 +220,7 @@ export async function initializeDatabase() {
         badge_color: 'emerald',
         hierarchy_level: 30,
         is_system: true,
-        permissions: [
-          'dashboard:read',
-          'products:read',
-          'master:read',
-          'stock:read',
-          'reservations:read',
-          'reservations:create',
-          'reservations:pickup',
-          'reservations:cancel',
-        ],
+        permissions: DEFAULT_ROLE_PERMISSIONS.kasir,
       },
     ];
 
@@ -251,15 +233,7 @@ export async function initializeDatabase() {
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
-        ON CONFLICT (code) DO UPDATE SET
-          name = EXCLUDED.name,
-          short_name = EXCLUDED.short_name,
-          description = EXCLUDED.description,
-          badge_color = EXCLUDED.badge_color,
-          hierarchy_level = EXCLUDED.hierarchy_level,
-          is_system = TRUE,
-          permissions = EXCLUDED.permissions,
-          updated_at = CURRENT_TIMESTAMP
+        ON CONFLICT (code) DO NOTHING
       `,
         [
           generateUUIDv7(),
@@ -274,6 +248,25 @@ export async function initializeDatabase() {
         ]
       );
     }
+
+    // Pastikan role 'owner' selalu memiliki daftar ALL_PERMISSIONS terbaru di DB
+    // (karena permissions & hierarchy_level owner terkunci di RoleService),
+    // tanpa menimpa metadata tampilan (name/short_name/description/badge_color) ataupun role lain.
+    await client.query(
+      `
+      UPDATE roles
+      SET permissions = $1::jsonb,
+          is_system = TRUE,
+          hierarchy_level = 100
+      WHERE LOWER(code) = 'owner'
+        AND (
+          permissions IS DISTINCT FROM $1::jsonb
+          OR is_system IS DISTINCT FROM TRUE
+          OR hierarchy_level IS DISTINCT FROM 100
+        )
+      `,
+      [JSON.stringify(ALL_PERMISSIONS)]
+    );
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS user_sessions (

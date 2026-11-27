@@ -443,7 +443,7 @@ export class ExportService {
   /**
    * Dataset Faktur Pembelian Supplier
    */
-  static async buildSupplierInvoicesDataset(): Promise<ExportDataset> {
+  static async buildSupplierInvoicesDataset(canViewBuyPrice = true): Promise<ExportDataset> {
     const sql = `
       SELECT 
         si.invoice_number as nomor_invoice,
@@ -464,20 +464,27 @@ export class ExportService {
     `;
 
     const res = await query(sql);
-    const rows = res.rows.map((r) => ({
-      nomor_invoice: r.nomor_invoice || '',
-      kode_supplier: r.kode_supplier || '',
-      nama_supplier: r.nama_supplier || '',
-      no_po: r.no_po || '',
-      tanggal_invoice: r.tanggal_invoice || '',
-      jatuh_tempo: r.jatuh_tempo || '',
-      total_tagihan: Number(r.total_tagihan) || 0,
-      jumlah_terbayar: Number(r.jumlah_terbayar) || 0,
-      sisa_tagihan: Number(r.sisa_tagihan) || 0,
-      status: r.status || '',
-      catatan: r.catatan || '',
-      dibuat_pada: r.dibuat_pada || '',
-    }));
+    const rows = res.rows.map((r) => {
+      const baseRow: Record<string, any> = {
+        nomor_invoice: r.nomor_invoice || '',
+        kode_supplier: r.kode_supplier || '',
+        nama_supplier: r.nama_supplier || '',
+        no_po: r.no_po || '',
+        tanggal_invoice: r.tanggal_invoice || '',
+        jatuh_tempo: r.jatuh_tempo || '',
+      };
+
+      if (canViewBuyPrice) {
+        baseRow.total_tagihan = Number(r.total_tagihan) || 0;
+        baseRow.jumlah_terbayar = Number(r.jumlah_terbayar) || 0;
+        baseRow.sisa_tagihan = Number(r.sisa_tagihan) || 0;
+      }
+
+      baseRow.status = r.status || '';
+      baseRow.catatan = r.catatan || '';
+      baseRow.dibuat_pada = r.dibuat_pada || '';
+      return baseRow;
+    });
 
     const columns: ExportColumnDef[] = [
       { key: 'nomor_invoice', label: 'Nomor Faktur', width: 22, isText: true },
@@ -486,9 +493,13 @@ export class ExportService {
       { key: 'no_po', label: 'No. PO / Ref', width: 18, isText: true },
       { key: 'tanggal_invoice', label: 'Tgl Faktur', width: 14, isText: true },
       { key: 'jatuh_tempo', label: 'Jatuh Tempo', width: 14, isText: true },
-      { key: 'total_tagihan', label: 'Total Tagihan (Rp)', width: 18 },
-      { key: 'jumlah_terbayar', label: 'Terbayar (Rp)', width: 18 },
-      { key: 'sisa_tagihan', label: 'Sisa Hutang (Rp)', width: 18 },
+      ...(canViewBuyPrice
+        ? [
+            { key: 'total_tagihan', label: 'Total Tagihan (Rp)', width: 18 },
+            { key: 'jumlah_terbayar', label: 'Terbayar (Rp)', width: 18 },
+            { key: 'sisa_tagihan', label: 'Sisa Hutang (Rp)', width: 18 },
+          ]
+        : []),
       { key: 'status', label: 'Status Pembayaran', width: 18 },
       { key: 'catatan', label: 'Catatan Faktur', width: 32 },
       { key: 'dibuat_pada', label: 'Waktu Input', width: 20, isText: true },
@@ -783,7 +794,7 @@ export class ExportService {
       case 'units':
         return this.buildUnitsDataset();
       case 'supplier_invoices':
-        return this.buildSupplierInvoicesDataset();
+        return this.buildSupplierInvoicesDataset(canViewBuyPrice);
       case 'stock_movements':
         return this.buildStockMovementsDataset();
       case 'reservations':
@@ -1013,7 +1024,7 @@ export class ExportService {
     this.populateWorksheet(uSheet, dsUnits);
 
     // Sheet 7: Faktur Pembelian Supplier
-    const dsInvoices = await this.buildSupplierInvoicesDataset();
+    const dsInvoices = await this.buildSupplierInvoicesDataset(canViewBuyPrice);
     const iSheet = workbook.addWorksheet('Faktur Supplier', { views: [{ showGridLines: true }] });
     this.populateWorksheet(iSheet, dsInvoices);
 
@@ -1051,7 +1062,7 @@ export class ExportService {
       this.buildCategoriesDataset(),
       this.buildBrandsDataset(),
       this.buildUnitsDataset(),
-      this.buildSupplierInvoicesDataset(),
+      this.buildSupplierInvoicesDataset(canViewBuyPrice),
       this.buildStockMovementsDataset(),
       this.buildReservationsDataset(),
     ]);

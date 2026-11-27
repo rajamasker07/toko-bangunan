@@ -55,9 +55,9 @@ export interface SupplierInvoice {
   purchase_order_no: string | null;
   invoice_date: string;
   due_date: string;
-  total_amount: number;
-  paid_amount: number;
-  remaining_amount: number;
+  total_amount: number | null;
+  paid_amount: number | null;
+  remaining_amount: number | null;
   status: InvoicePaymentStatus;
   notes: string | null;
   created_at: string;
@@ -75,9 +75,9 @@ export interface SupplierInvoiceSummary {
   paid_count: number;
   overdue_count: number;
   due_soon_count: number;
-  total_invoice_amount: number;
-  total_paid_amount: number;
-  total_debt_amount: number;
+  total_invoice_amount: number | null;
+  total_paid_amount: number | null;
+  total_debt_amount: number | null;
 }
 
 export interface Supplier {
@@ -103,7 +103,7 @@ export interface Supplier {
     unpaid_count: number;
     overdue_count: number;
     due_soon_count: number;
-    total_debt_amount: number;
+    total_debt_amount: number | null;
   };
 }
 
