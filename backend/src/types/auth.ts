@@ -11,6 +11,8 @@ export type Permission =
   | 'products:delete'
   | 'products:view_buy_price'
   | 'pricing:write'
+  | 'pricing:analytics'
+  | 'pricing:threshold'
   | 'master:read'
   | 'suppliers:read'
   | 'master:write'
@@ -26,6 +28,7 @@ export type Permission =
   | 'users:delete'
   | 'roles:manage'
   | 'data:import'
+  | 'data:export'
   | 'logs:read'
   | 'logs:manage';
 
@@ -37,6 +40,8 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'products:delete',
   'products:view_buy_price',
   'pricing:write',
+  'pricing:analytics',
+  'pricing:threshold',
   'master:read',
   'suppliers:read',
   'master:write',
@@ -52,6 +57,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'users:delete',
   'roles:manage',
   'data:import',
+  'data:export',
   'logs:read',
   'logs:manage',
 ] as const;

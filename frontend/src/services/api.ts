@@ -23,7 +23,30 @@ import {
   ImportDuplicateMode,
   ImportPreviewResult,
   ImportCommitResult,
+  ExportEntityType,
+  ExportFileFormat,
+  ExportStatsResponse,
+  RestoreDatabaseResult,
+  ProductSearchMode,
+  EmbeddingStatusResponse,
+  ReindexEmbeddingsResponse,
+  MoveVariantsPayload,
+  MergeProductPayload,
+  BulkMergeProductsPayload,
+  BulkMergeResult,
+  PromoteVariantPayload,
+  RestructureResult,
+  PriceHistoryEntry,
+  PriceTrendPoint,
+  VariantPriceAnalytics,
+  ProductPriceAnalytics,
+  MarginAlertItem,
+  PriceOverviewAnalytics,
+  BulkPriceUpdatePayload,
+  BulkPricePreviewResponse,
+  PriceUpdateOnRestock,
 } from '../types';
+import { reportServerVersion, SystemVersionPayload } from '../utils/version';
 
 const BASE_URL = '/api';
 const ACCESS_TOKEN_KEY = 'auth_access_token';
@@ -33,6 +56,8 @@ const SESSION_ERROR_CODES = new Set([
   'TOKEN_EXPIRED',
   'TOKEN_INVALID',
   'TOKEN_MISSING',
+  'TOKEN_REPLAY_DETECTED',
+  'INVALID_REFRESH_TOKEN',
   'USER_NOT_FOUND',
   'SESSION_REVOKED',
   'SESSION_INVALIDATED',
@@ -120,16 +145,18 @@ export function invalidateMasterDataCache(prefix?: string): void {
   }
 }
 
+let unauthorizedHandler: ((message?: string) => void) | null = null;
+let tokensRefreshedHandler: ((session: AuthSessionPayload) => void) | null = null;
+let inFlightRefreshPromise: Promise<AuthSessionPayload> | null = null;
+let authSessionEpoch = 0;
+let isHandlingUnauthorized = false;
+
 export function clearAuthTokens(): void {
+  authSessionEpoch += 1;
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   invalidateMasterDataCache();
 }
-
-let unauthorizedHandler: ((message?: string) => void) | null = null;
-let tokensRefreshedHandler: ((session: AuthSessionPayload) => void) | null = null;
-let refreshPromise: Promise<boolean> | null = null;
-let isHandlingUnauthorized = false;
 
 export function setUnauthorizedHandler(handler: ((message?: string) => void) | null): void {
   unauthorizedHandler = handler;
@@ -157,41 +184,60 @@ async function safeParseJson(response: Response): Promise<any> {
   }
 }
 
-async function tryRefreshSession(): Promise<boolean> {
-  if (refreshPromise) {
-    return refreshPromise;
+/**
+ * Single-flight refresh mutex:
+ * Seluruh pemanggil (401 interceptor maupun AuthContext.hydrateSession) berbagi satu
+ * promise in-flight agar request paralel hanya menembakkan 1 POST /api/auth/refresh.
+ * Gangguan jaringan / 5xx TIDAK menghapus refresh_token lokal agar sesi tetap dapat pulih.
+ */
+export async function refreshSessionSingleFlight(
+  explicitRefreshToken?: string
+): Promise<AuthSessionPayload> {
+  if (inFlightRefreshPromise) {
+    return inFlightRefreshPromise;
   }
 
-  const refreshToken = getRefreshToken();
+  const refreshToken = getRefreshToken() ?? explicitRefreshToken;
   if (!refreshToken) {
-    return false;
+    throw new ApiError('Sesi Anda telah berakhir. Silakan login kembali.', 401, 'TOKEN_MISSING');
   }
 
-  refreshPromise = (async () => {
-    try {
-      const response = await fetch(`${BASE_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-      const json = await safeParseJson(response);
-      if (!response.ok || json?.success === false || !json?.data?.access_token) {
-        clearAuthTokens();
-        return false;
-      }
+  const epochAtStart = authSessionEpoch;
+  inFlightRefreshPromise = (async () => {
+    const response = await fetch(`${BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
 
-      const session = json.data as AuthSessionPayload;
+    const json = await safeParseJson(response);
+    if (!response.ok || json?.success === false) {
+      if (response.status === 401 || response.status === 403) {
+        clearAuthTokens();
+      }
+      throwApiErrorFromPayload(response, json);
+    }
+
+    const session = json?.data as AuthSessionPayload | undefined;
+    if (!session?.access_token || !session?.refresh_token) {
+      throw new ApiError(
+        json?.message || 'Respons pembaruan sesi tidak valid.',
+        response.status || 502,
+        json?.code
+      );
+    }
+
+    // Jangan tulis ulang token jika user baru saja logout saat refresh sedang berjalan
+    if (epochAtStart === authSessionEpoch) {
       setAuthTokens(session.access_token, session.refresh_token);
       tokensRefreshedHandler?.(session);
-      return true;
-    } catch {
-      return false;
-    } finally {
-      refreshPromise = null;
     }
-  })();
+    return session;
+  })().finally(() => {
+    inFlightRefreshPromise = null;
+  });
 
-  return refreshPromise;
+  return inFlightRefreshPromise;
 }
 
 async function executeWithAuthRetry(
@@ -201,6 +247,7 @@ async function executeWithAuthRetry(
 ): Promise<Response> {
   const token = getAuthToken();
   const response = await fetch(`${BASE_URL}${url}`, buildRequestInit(token));
+  reportServerVersion(response.headers.get('X-App-Version'));
 
   if (response.status === 401) {
     const json = await safeParseJson(response);
@@ -215,10 +262,30 @@ async function executeWithAuthRetry(
       throw new ApiError(message, 401, code, json?.details);
     }
 
-    if (!_isRetry && getRefreshToken()) {
-      const refreshed = await tryRefreshSession();
-      if (refreshed) {
+    if (!_isRetry) {
+      // Jika request paralel lain baru saja selesai memperbarui access token,
+      // langsung retry memakai token terbaru tanpa memicu POST /auth/refresh kedua.
+      const latestToken = getAuthToken();
+      if (latestToken && latestToken !== token) {
         return executeWithAuthRetry(url, buildRequestInit, true);
+      }
+
+      if (getRefreshToken()) {
+        try {
+          await refreshSessionSingleFlight();
+          return executeWithAuthRetry(url, buildRequestInit, true);
+        } catch (refreshErr) {
+          if (
+            refreshErr instanceof ApiError &&
+            (refreshErr.status === 401 || refreshErr.status === 403)
+          ) {
+            notifyUnauthorizedOnce(refreshErr.message || message);
+            throw refreshErr;
+          }
+          // Gangguan jaringan / 5xx server saat refresh:
+          // Jangan hapus refresh_token dan jangan paksa logout!
+          throw refreshErr;
+        }
       }
     }
 
@@ -318,6 +385,24 @@ function extractFilenameFromDisposition(headerValue: string | null): string | nu
   return null;
 }
 
+export function triggerBrowserBlobDownload(
+  blob: Blob,
+  defaultFilename: string,
+  filenameHeader?: string | null
+): void {
+  const finalFilename = filenameHeader || defaultFilename;
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = finalFilename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  }, 250);
+}
+
 async function fetchBlob(
   url: string,
   options?: RequestInit
@@ -354,11 +439,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  refresh: (refreshToken: string) =>
-    fetchJson<AuthSessionPayload>('/auth/refresh', {
-      method: 'POST',
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    }),
+  refresh: (refreshToken?: string) => refreshSessionSingleFlight(refreshToken),
   logout: () =>
     fetchJson<void>('/auth/logout', {
       method: 'POST',
@@ -633,20 +714,37 @@ export const api = {
   // Products
   getProducts: (filters?: {
     search?: string;
+    mode?: ProductSearchMode;
+    searchMode?: ProductSearchMode;
     categoryId?: string;
     brand?: string;
     stockStatus?: string;
     saleStatus?: string;
+    limit?: number;
+    offset?: number;
+    minScore?: number;
   }, options?: RequestInit) => {
     const params = new URLSearchParams();
     if (filters?.search) params.append('search', filters.search);
+    const mode = filters?.searchMode || filters?.mode;
+    if (mode) params.append('mode', mode);
     if (filters?.categoryId) params.append('categoryId', filters.categoryId);
     if (filters?.brand) params.append('brand', filters.brand);
     if (filters?.stockStatus && filters.stockStatus !== 'all') params.append('stockStatus', filters.stockStatus);
     if (filters?.saleStatus && filters.saleStatus !== 'all') params.append('saleStatus', filters.saleStatus);
+    if (filters?.limit) params.append('limit', String(filters.limit));
+    if (filters?.offset) params.append('offset', String(filters.offset));
+    if (filters?.minScore) params.append('minScore', String(filters.minScore));
     const queryStr = params.toString() ? `?${params.toString()}` : '';
     return fetchJson<Product[]>(`/products${queryStr}`, options);
   },
+  getEmbeddingStatus: (options?: RequestInit) =>
+    fetchJson<EmbeddingStatusResponse>('/products/embedding-status', options),
+  reindexProductEmbeddings: (params?: { force?: boolean }) =>
+    fetchJson<ReindexEmbeddingsResponse>('/products/reindex-embeddings', {
+      method: 'POST',
+      body: JSON.stringify(params || {}),
+    }),
   getProductById: (id: string) => fetchJson<Product>(`/products/${id}`),
   createProduct: (data: any) =>
     fetchJson<Product>('/products', {
@@ -673,6 +771,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  bulkUpdateVariantAttributes: (
+    productId: string,
+    data: {
+      updates: Array<{ variant_id: string; attributes: Record<string, string> }>;
+      variant_options?: string[];
+    }
+  ) =>
+    fetchJson<{ success: boolean; message: string; data: any }>(
+      `/products/${productId}/variants/bulk-attributes`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }
+    ),
   updateVariant: (variantId: string, data: any) =>
     fetchJson<any>(`/variants/${variantId}`, {
       method: 'PUT',
@@ -701,6 +813,61 @@ export const api = {
       method: 'DELETE',
     }),
 
+  // Restrukturisasi Katalog (Pindah Varian, Gabung Produk, Promosi Varian)
+  moveVariant: async (
+    variantId: string,
+    data: {
+      target_product_id: string;
+      new_variant_name?: string;
+      new_sku?: string;
+      source_empty_action?: 'delete' | 'deactivate' | 'keep';
+      notes?: string;
+    }
+  ) => {
+    const res = await fetchJson<RestructureResult>(`/variants/${variantId}/move`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    invalidateMasterDataCache();
+    return res;
+  },
+
+  moveVariants: async (productId: string, data: MoveVariantsPayload) => {
+    const res = await fetchJson<RestructureResult>(`/products/${productId}/move-variants`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    invalidateMasterDataCache();
+    return res;
+  },
+
+  mergeProduct: async (sourceProductId: string, data: MergeProductPayload) => {
+    const res = await fetchJson<RestructureResult>(`/products/${sourceProductId}/merge`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    invalidateMasterDataCache();
+    return res;
+  },
+
+  bulkMergeProducts: async (data: BulkMergeProductsPayload) => {
+    const res = await fetchJson<BulkMergeResult>('/products/bulk-merge', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    invalidateMasterDataCache();
+    return res;
+  },
+
+  promoteVariant: async (variantId: string, data: PromoteVariantPayload) => {
+    const res = await fetchJson<RestructureResult>(`/variants/${variantId}/promote`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    invalidateMasterDataCache();
+    return res;
+  },
+
   // Stock Adjustments
   adjustStock: (data: {
     variant_id: string;
@@ -709,6 +876,7 @@ export const api = {
     movement_type: string;
     reference_no?: string;
     notes: string;
+    price_update?: PriceUpdateOnRestock;
   }) =>
     fetchJson<any>('/stock/adjust', {
       method: 'POST',
@@ -787,14 +955,13 @@ export const api = {
       receiver_name: string;
       vehicle_plate?: string;
       notes?: string;
-      handed_by?: string;
       items: Array<{
         item_id: string;
-        qty_picked_up: number;
+        qty_picked_up_base: number;
       }>;
     }
   ) =>
-    fetchJson<any>(`/reservations/${id}/pickup`, {
+    fetchJson<StockReservation>(`/reservations/${id}/pickup`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -918,5 +1085,104 @@ export const api = {
     const result = await fetchFormData<ImportCommitResult>(`/import/${entity}/commit`, formData, options);
     invalidateMasterDataCache(); // Clear master data caches so subsequent views receive freshly imported data
     return result;
+  },
+
+  // Data Export & Database Backup
+  getExportStats: () => fetchJson<ExportStatsResponse>('/export/stats'),
+
+  downloadEntityExport: async (
+    entity: ExportEntityType,
+    format: ExportFileFormat = 'xlsx'
+  ) => {
+    const { blob, filename } = await fetchBlob(`/export/${entity}?format=${format}`);
+    triggerBrowserBlobDownload(blob, `bangunjaya-export-${entity}.${format}`, filename);
+  },
+
+  downloadFullWorkbook: async (format: 'xlsx' | 'json' = 'xlsx') => {
+    const { blob, filename } = await fetchBlob(`/export/full-workbook?format=${format}`);
+    triggerBrowserBlobDownload(blob, `bangunjaya-full-backup.${format}`, filename);
+  },
+
+  downloadDatabaseSql: async () => {
+    const { blob, filename } = await fetchBlob('/export/database/sql');
+    triggerBrowserBlobDownload(blob, 'bangunjaya-database-dump.sql', filename);
+  },
+
+  restoreDatabase: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const result = await fetchFormData<RestoreDatabaseResult>(
+      '/export/database/restore',
+      formData
+    );
+    invalidateMasterDataCache();
+    return result;
+  },
+
+  // Price History & Analytics
+  getPriceHistory: (params?: {
+    product_id?: string;
+    variant_id?: string;
+    unit_name?: string;
+    supplier_id?: string;
+    source?: string;
+    direction?: string;
+    search?: string;
+    start_date?: string;
+    end_date?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const query = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') {
+          query.set(k, String(v));
+        }
+      });
+    }
+    const qStr = query.toString();
+    return fetchJson<{
+      entries: PriceHistoryEntry[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/price-history${qStr ? `?${qStr}` : ''}`);
+  },
+
+  getVariantPriceAnalytics: (variantId: string) =>
+    fetchJson<VariantPriceAnalytics>(`/variants/${variantId}/price-analytics`),
+
+  getProductPriceAnalytics: (productId: string) =>
+    fetchJson<ProductPriceAnalytics>(`/products/${productId}/price-analytics`),
+
+  getPriceOverviewAnalytics: () =>
+    fetchJson<PriceOverviewAnalytics>('/price-analytics/overview'),
+
+  getMarginThreshold: () =>
+    fetchJson<{ margin_threshold: number }>('/pricing/threshold'),
+
+  updateMarginThreshold: (threshold: number) =>
+    fetchJson<{ success: boolean; margin_threshold: number; message: string }>('/pricing/threshold', {
+      method: 'PUT',
+      body: JSON.stringify({ margin_threshold: threshold }),
+    }),
+
+  previewBulkPriceUpdate: (payload: BulkPriceUpdatePayload) =>
+    fetchJson<BulkPricePreviewResponse>('/pricing/bulk-update/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  commitBulkPriceUpdate: (payload: BulkPriceUpdatePayload) =>
+    fetchJson<{ success: boolean; updated_count: number; message: string; batch_id?: string }>('/pricing/bulk-update/commit', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getSystemVersion: async (): Promise<SystemVersionPayload> => {
+    const data = await fetchJson<SystemVersionPayload>('/version');
+    reportServerVersion(data?.version);
+    return data;
   },
 };

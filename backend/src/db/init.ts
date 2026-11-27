@@ -5,7 +5,7 @@ import { generateUUIDv7 } from '../utils/uuid.js';
 import { brandKey, normalizeBrandName } from '../utils/brand.js';
 import { generateRandomPassword, hashPassword } from '../utils/password.js';
 import { ALL_PERMISSIONS } from '../types/auth.js';
-import { syncRolesCacheFromDb } from '../config/rbac.js';
+import { DEFAULT_ROLE_PERMISSIONS, syncRolesCacheFromDb } from '../config/rbac.js';
 
 async function columnExists(client: PoolClient, table: string, column: string): Promise<boolean> {
   const res = await client.query(
@@ -174,7 +174,9 @@ export async function initializeDatabase() {
       // Abaikan jika tipe sudah sesuai
     }
 
-    // 0c. Seed / sync 4 role default ('owner', 'admin', 'gudang', 'kasir')
+    // 0c. Seed 4 role sistem bawaan ('owner', 'admin', 'gudang', 'kasir') hanya jika belum ada.
+    //     Menggunakan ON CONFLICT (code) DO NOTHING agar kustomisasi izin/metadata oleh admin
+    //     tidak ter-reset saat server restart (Issue #3).
     const defaultRolesSeed = [
       {
         code: 'owner',
@@ -185,7 +187,7 @@ export async function initializeDatabase() {
         badge_color: 'purple',
         hierarchy_level: 100,
         is_system: true,
-        permissions: ALL_PERMISSIONS,
+        permissions: DEFAULT_ROLE_PERMISSIONS.owner,
       },
       {
         code: 'admin',
@@ -196,7 +198,7 @@ export async function initializeDatabase() {
         badge_color: 'blue',
         hierarchy_level: 80,
         is_system: true,
-        permissions: ALL_PERMISSIONS.filter((p) => p !== 'users:delete'),
+        permissions: DEFAULT_ROLE_PERMISSIONS.admin,
       },
       {
         code: 'gudang',
@@ -207,18 +209,7 @@ export async function initializeDatabase() {
         badge_color: 'amber',
         hierarchy_level: 50,
         is_system: true,
-        permissions: [
-          'dashboard:read',
-          'products:read',
-          'products:create',
-          'products:update',
-          'master:read',
-          'suppliers:read',
-          'stock:read',
-          'stock:adjust',
-          'reservations:read',
-          'reservations:pickup',
-        ],
+        permissions: DEFAULT_ROLE_PERMISSIONS.gudang,
       },
       {
         code: 'kasir',
@@ -229,16 +220,7 @@ export async function initializeDatabase() {
         badge_color: 'emerald',
         hierarchy_level: 30,
         is_system: true,
-        permissions: [
-          'dashboard:read',
-          'products:read',
-          'master:read',
-          'stock:read',
-          'reservations:read',
-          'reservations:create',
-          'reservations:pickup',
-          'reservations:cancel',
-        ],
+        permissions: DEFAULT_ROLE_PERMISSIONS.kasir,
       },
     ];
 
@@ -251,15 +233,7 @@ export async function initializeDatabase() {
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
-        ON CONFLICT (code) DO UPDATE SET
-          name = EXCLUDED.name,
-          short_name = EXCLUDED.short_name,
-          description = EXCLUDED.description,
-          badge_color = EXCLUDED.badge_color,
-          hierarchy_level = EXCLUDED.hierarchy_level,
-          is_system = TRUE,
-          permissions = EXCLUDED.permissions,
-          updated_at = CURRENT_TIMESTAMP
+        ON CONFLICT (code) DO NOTHING
       `,
         [
           generateUUIDv7(),
@@ -275,11 +249,32 @@ export async function initializeDatabase() {
       );
     }
 
+    // Pastikan role 'owner' selalu memiliki daftar ALL_PERMISSIONS terbaru di DB
+    // (karena permissions & hierarchy_level owner terkunci di RoleService),
+    // tanpa menimpa metadata tampilan (name/short_name/description/badge_color) ataupun role lain.
+    await client.query(
+      `
+      UPDATE roles
+      SET permissions = $1::jsonb,
+          is_system = TRUE,
+          hierarchy_level = 100
+      WHERE LOWER(code) = 'owner'
+        AND (
+          permissions IS DISTINCT FROM $1::jsonb
+          OR is_system IS DISTINCT FROM TRUE
+          OR hierarchy_level IS DISTINCT FROM 100
+        )
+      `,
+      [JSON.stringify(ALL_PERMISSIONS)]
+    );
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS user_sessions (
         id UUID PRIMARY KEY,
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         refresh_token_hash VARCHAR(64) NOT NULL,
+        previous_refresh_token_hash VARCHAR(64),
+        rotated_at TIMESTAMPTZ,
         user_agent VARCHAR(255),
         ip_address VARCHAR(64),
         expires_at TIMESTAMPTZ NOT NULL,
@@ -289,6 +284,16 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
       CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
     `);
+
+    // Migrasi kolom rotation grace window pada user_sessions (kompatibel PostgreSQL 9.5)
+    if (!(await columnExists(client, 'user_sessions', 'previous_refresh_token_hash'))) {
+      await client.query(
+        'ALTER TABLE user_sessions ADD COLUMN previous_refresh_token_hash VARCHAR(64);'
+      );
+    }
+    if (!(await columnExists(client, 'user_sessions', 'rotated_at'))) {
+      await client.query('ALTER TABLE user_sessions ADD COLUMN rotated_at TIMESTAMPTZ;');
+    }
 
     // 1. Categories Table (Supports multi-level subcategories)
     await client.query(`
@@ -426,6 +431,22 @@ export async function initializeDatabase() {
       await client.query('ALTER TABLE products ADD COLUMN specifications TEXT;');
     }
 
+    // 3e. Kolom semantic search & AI embeddings
+    if (!(await columnExists(client, 'products', 'embedding'))) {
+      await client.query('ALTER TABLE products ADD COLUMN embedding REAL[];');
+    }
+    if (!(await columnExists(client, 'products', 'embedding_text'))) {
+      await client.query('ALTER TABLE products ADD COLUMN embedding_text TEXT;');
+    }
+    if (!(await columnExists(client, 'products', 'embedding_updated_at'))) {
+      await client.query('ALTER TABLE products ADD COLUMN embedding_updated_at TIMESTAMPTZ;');
+    }
+
+    // 3f. Kolom daftar nama opsi atribut dinamis per produk (e.g. ['Kemasan', 'Warna'])
+    if (!(await columnExists(client, 'products', 'variant_options'))) {
+      await client.query("ALTER TABLE products ADD COLUMN variant_options JSONB DEFAULT '[]'::jsonb NOT NULL;");
+    }
+
     // 3. Product Variants Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS product_variants (
@@ -438,6 +459,7 @@ export async function initializeDatabase() {
         reserved_stock NUMERIC(12, 2) DEFAULT 0 NOT NULL,
         min_stock NUMERIC(12, 2) DEFAULT 5 NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
+        attributes JSONB DEFAULT '{}'::jsonb NOT NULL,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
@@ -449,6 +471,12 @@ export async function initializeDatabase() {
     // 3e. Kolom reserved_stock jika belum ada
     if (!(await columnExists(client, 'product_variants', 'reserved_stock'))) {
       await client.query('ALTER TABLE product_variants ADD COLUMN reserved_stock NUMERIC(12, 2) DEFAULT 0 NOT NULL;');
+    }
+
+    // 3g. Kolom nilai atribut dinamis varian jika belum ada (e.g. {"Kemasan": "1kg", "Warna": "Super Black"})
+    if (!(await columnExists(client, 'product_variants', 'attributes'))) {
+      await client.query("ALTER TABLE product_variants ADD COLUMN attributes JSONB DEFAULT '{}'::jsonb NOT NULL;");
+      await client.query("CREATE INDEX IF NOT EXISTS idx_product_variants_attributes ON product_variants USING gin (attributes);");
     }
 
     // 4. Variant Units (Satuan Harga bertingkat / multi-unit)
@@ -467,6 +495,149 @@ export async function initializeDatabase() {
       );
       CREATE INDEX IF NOT EXISTS idx_variant_units_variant ON variant_units(variant_id);
     `);
+
+    // 4b. Price History (Audit Trail & Log Perubahan Harga Modal, Jual, dan Grosir)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS price_history (
+        id UUID PRIMARY KEY,
+        product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        variant_id UUID NOT NULL REFERENCES product_variants(id) ON DELETE CASCADE,
+        variant_unit_id UUID REFERENCES variant_units(id) ON DELETE SET NULL,
+        unit_name VARCHAR(50) NOT NULL,
+        supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL,
+
+        old_buy_price NUMERIC(14, 2),
+        new_buy_price NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        old_sell_price NUMERIC(14, 2),
+        new_sell_price NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        old_wholesale_price NUMERIC(14, 2),
+        new_wholesale_price NUMERIC(14, 2),
+
+        buy_price_diff NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        buy_price_change_pct NUMERIC(8, 2),
+        sell_price_diff NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        sell_price_change_pct NUMERIC(8, 2),
+        old_margin_pct NUMERIC(8, 2),
+        new_margin_pct NUMERIC(8, 2),
+
+        change_direction VARCHAR(20) NOT NULL DEFAULT 'INITIAL',
+        changed_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+        change_source VARCHAR(40) NOT NULL DEFAULT 'MANUAL_EDIT',
+        batch_id UUID,
+        reference_no VARCHAR(100),
+        reason TEXT,
+
+        discount_pct NUMERIC(6, 2) DEFAULT 0,
+        discount_tiers JSONB DEFAULT '[]'::jsonb,
+        discount_amount NUMERIC(14, 2) DEFAULT 0,
+        tax_pct NUMERIC(6, 2) DEFAULT 0,
+        tax_amount NUMERIC(14, 2) DEFAULT 0,
+
+        additional_costs JSONB DEFAULT '[]'::jsonb,
+        total_additional_cost NUMERIC(14, 2) DEFAULT 0,
+
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_by VARCHAR(100) NOT NULL DEFAULT 'Admin',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_price_history_product ON price_history(product_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_price_history_variant ON price_history(variant_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_price_history_unit ON price_history(variant_unit_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_price_history_supplier ON price_history(supplier_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_price_history_user ON price_history(user_id);
+      CREATE INDEX IF NOT EXISTS idx_price_history_source ON price_history(change_source);
+      CREATE INDEX IF NOT EXISTS idx_price_history_batch ON price_history(batch_id) WHERE batch_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_price_history_created ON price_history(created_at DESC);
+    `);
+
+    // Pastikan kolom tambahan tersedia untuk tabel price_history versi lama (kompatibel PostgreSQL 9.5)
+    const priceHistoryExtraCols: Array<[string, string]> = [
+      ['discount_pct', 'NUMERIC(6, 2) DEFAULT 0'],
+      ['discount_tiers', "JSONB DEFAULT '[]'::jsonb"],
+      ['discount_amount', 'NUMERIC(14, 2) DEFAULT 0'],
+      ['tax_pct', 'NUMERIC(6, 2) DEFAULT 0'],
+      ['tax_amount', 'NUMERIC(14, 2) DEFAULT 0'],
+      ['additional_costs', "JSONB DEFAULT '[]'::jsonb"],
+      ['total_additional_cost', 'NUMERIC(14, 2) DEFAULT 0'],
+      ['user_id', 'UUID REFERENCES users(id) ON DELETE SET NULL'],
+      ['created_by', "VARCHAR(100) NOT NULL DEFAULT 'Admin'"],
+    ];
+    for (const [col, def] of priceHistoryExtraCols) {
+      if (!(await columnExists(client, 'price_history', col))) {
+        await client.query(`ALTER TABLE price_history ADD COLUMN ${col} ${def};`);
+      }
+    }
+
+    // 4c. Store Settings (Pengaturan Global Toko Bangunan Termasuk Ambang Batas Margin)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS store_settings (
+        key VARCHAR(100) PRIMARY KEY,
+        value JSONB NOT NULL,
+        description VARCHAR(255),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_by UUID REFERENCES users(id) ON DELETE SET NULL
+      );
+    `);
+
+    await client.query(`
+      INSERT INTO store_settings (key, value, description)
+      VALUES (
+        'margin_alert_threshold',
+        '{"threshold_pct": 10.0}'::jsonb,
+        'Ambang batas persentase gross margin untuk peringatan margin tipis/kritis'
+      )
+      ON CONFLICT (key) DO NOTHING;
+    `);
+
+    // 4d. Snapshot baseline harga awal untuk varian yang sudah ada jika price_history masih kosong
+    const priceHistCount = await client.query('SELECT COUNT(*)::int AS count FROM price_history');
+    if (priceHistCount.rows[0].count === 0) {
+      const existingUnitsRes = await client.query(`
+        SELECT vu.id as unit_id, vu.unit_name, vu.buy_price, vu.sell_price, vu.wholesale_price,
+               pv.id as variant_id, pv.product_id, p.supplier_id
+        FROM variant_units vu
+        JOIN product_variants pv ON vu.variant_id = pv.id
+        JOIN products p ON pv.product_id = p.id
+      `);
+
+      if (existingUnitsRes.rows.length > 0) {
+        console.log(`📊 Menyiapkan snapshot baseline awal riwayat harga (${existingUnitsRes.rows.length} satuan)...`);
+        for (const row of existingUnitsRes.rows) {
+          const buyP = Number(row.buy_price) || 0;
+          const sellP = Number(row.sell_price) || 0;
+          const wholesaleP = row.wholesale_price !== null && row.wholesale_price !== undefined ? Number(row.wholesale_price) : null;
+          const marginPct = sellP > 0 ? Number((((sellP - buyP) / sellP) * 100).toFixed(2)) : null;
+
+          await client.query(`
+            INSERT INTO price_history (
+              id, product_id, variant_id, variant_unit_id, unit_name, supplier_id,
+              old_buy_price, new_buy_price, old_sell_price, new_sell_price, old_wholesale_price, new_wholesale_price,
+              buy_price_diff, buy_price_change_pct, sell_price_diff, sell_price_change_pct,
+              old_margin_pct, new_margin_pct, change_direction, changed_fields, change_source,
+              reason, created_by, created_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6,
+              NULL, $7, NULL, $8, NULL, $9,
+              0, NULL, 0, NULL,
+              NULL, $10, 'INITIAL', '["buy_price", "sell_price", "wholesale_price"]'::jsonb, 'INITIAL_SNAPSHOT',
+              'Baseline inisialisasi awal sistem histori harga', 'System', CURRENT_TIMESTAMP
+            )
+          `, [
+            generateUUIDv7(),
+            row.product_id,
+            row.variant_id,
+            row.unit_id,
+            row.unit_name,
+            row.supplier_id || null,
+            buyP,
+            sellP,
+            wholesaleP,
+            marginPct
+          ]);
+        }
+      }
+    }
 
     // 5. Stock Movements (Log Transaksi Perubahan Stok)
     await client.query(`
@@ -793,6 +964,16 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_stock_reservation_pickups_res ON stock_reservation_pickups(reservation_id);
       CREATE INDEX IF NOT EXISTS idx_stock_reservation_pickups_date ON stock_reservation_pickups(picked_up_at DESC);
     `);
+
+    // 8d. Tambah kolom stock_reservation_pickups.user_id jika belum ada (kompatibel PostgreSQL 9.5)
+    if (!(await columnExists(client, 'stock_reservation_pickups', 'user_id'))) {
+      await client.query(
+        'ALTER TABLE stock_reservation_pickups ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE SET NULL;'
+      );
+      await client.query(
+        'CREATE INDEX IF NOT EXISTS idx_stock_reservation_pickups_user ON stock_reservation_pickups(user_id);'
+      );
+    }
 
     // 9. Bootstrap akun Owner awal jika tabel users masih kosong
     await ensureBootstrapOwner(client);

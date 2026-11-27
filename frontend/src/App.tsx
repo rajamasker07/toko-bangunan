@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { HardHat, Loader2, RefreshCw, LogOut, WifiOff } from 'lucide-react';
+import { HardHat, Loader2, RefreshCw, LogOut, WifiOff, Sparkles, X } from 'lucide-react';
 import { api } from './services/api';
+import { CLIENT_VERSION_INFO, subscribeServerVersionMismatch } from './utils/version';
 import {
   Product,
   ProductVariant,
@@ -10,6 +11,7 @@ import {
   DashboardSummary,
   ReservationAlertSummary,
   ImportEntityType,
+  ExportEntityType,
 } from './types';
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
@@ -22,6 +24,11 @@ import { AddVariantModal } from './components/AddVariantModal';
 import { ProductFormModal } from './components/ProductFormModal';
 import { EditProductModal } from './components/EditProductModal';
 import { EditVariantModal } from './components/EditVariantModal';
+import { MoveVariantModal } from './components/MoveVariantModal';
+import { MergeProductModal } from './components/MergeProductModal';
+import { BulkMergeProductsModal } from './components/BulkMergeProductsModal';
+import { SimilarProductsDetectorModal } from './components/SimilarProductsDetectorModal';
+import { PromoteVariantModal } from './components/PromoteVariantModal';
 import { StockAdjustmentModal } from './components/StockAdjustmentModal';
 import { StockAdjustmentView } from './components/StockAdjustmentView';
 import { CategoryManagementView } from './components/CategoryManagementView';
@@ -32,6 +39,8 @@ import { LoginView } from './components/LoginView';
 import { ProfileAccountModal } from './components/ProfileAccountModal';
 import { UserManagementView } from './components/UserManagementView';
 import { ImportDataView } from './components/ImportDataView';
+import { ExportDataView } from './components/ExportDataView';
+import { PriceAnalyticsView } from './components/PriceAnalyticsView';
 import { useToast } from './components/Toast';
 import { useAuth } from './context/AuthContext';
 
@@ -50,6 +59,18 @@ export const App: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
+  const [detectedServerVersion, setDetectedServerVersion] = useState<string | null>(null);
+  const [dismissedServerVersion, setDismissedServerVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = subscribeServerVersionMismatch((serverVer) => {
+      setDetectedServerVersion(serverVer);
+    });
+    api.getSystemVersion().catch(() => {
+      // Abaikan jika offline saat pengecekan awal
+    });
+    return unsubscribe;
+  }, []);
 
   // Independent Data States
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -95,9 +116,28 @@ export const App: React.FC = () => {
   const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
   const [editingVariantProductName, setEditingVariantProductName] = useState<string>('');
 
+  // Catalog Restructuring Modals state
+  const [isMoveVariantOpen, setIsMoveVariantOpen] = useState<boolean>(false);
+  const [moveVariantSourceProduct, setMoveVariantSourceProduct] = useState<Product | null>(null);
+  const [moveVariantsList, setMoveVariantsList] = useState<ProductVariant[]>([]);
+
+  const [isMergeProductOpen, setIsMergeProductOpen] = useState<boolean>(false);
+  const [mergeProductSource, setMergeProductSource] = useState<Product | null>(null);
+
+  const [isBulkMergeOpen, setIsBulkMergeOpen] = useState<boolean>(false);
+  const [bulkMergeSourceProducts, setBulkMergeSourceProducts] = useState<Product[]>([]);
+  const [bulkMergeLockedTarget, setBulkMergeLockedTarget] = useState<Product | null>(null);
+
+  const [isDetectorOpen, setIsDetectorOpen] = useState<boolean>(false);
+
+  const [isPromoteVariantOpen, setIsPromoteVariantOpen] = useState<boolean>(false);
+  const [promoteVariantSourceProduct, setPromoteVariantSourceProduct] = useState<Product | null>(null);
+  const [promoteVariantItem, setPromoteVariantItem] = useState<ProductVariant | null>(null);
+
   // Import Data context state (pre-selected entity & return target when opened via shortcut)
   const [importInitialEntity, setImportInitialEntity] = useState<ImportEntityType | undefined>(undefined);
   const [importReturnTab, setImportReturnTab] = useState<ActiveTab | null>(null);
+  const [exportInitialEntity, setExportInitialEntity] = useState<ExportEntityType | null>(null);
 
   // Sidebar collapsed state with localStorage persistence
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -546,6 +586,76 @@ export const App: React.FC = () => {
     setIsCreateOpen(true);
   };
 
+  // Handle Catalog Restructuring Operations
+  const handleOpenMoveVariants = (sourceProduct: Product, variants: ProductVariant[]) => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin memindahkan varian produk.', 'error');
+      return;
+    }
+    setMoveVariantSourceProduct(sourceProduct);
+    setMoveVariantsList(variants);
+    setIsMoveVariantOpen(true);
+  };
+
+  const handleOpenMergeProduct = (sourceProduct: Product) => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin menggabungkan produk.', 'error');
+      return;
+    }
+    setMergeProductSource(sourceProduct);
+    setIsMergeProductOpen(true);
+  };
+
+  const handleOpenBulkMerge = (sourceProducts: Product[], lockedTarget?: Product | null) => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin menggabungkan produk.', 'error');
+      return;
+    }
+    setBulkMergeSourceProducts(sourceProducts);
+    setBulkMergeLockedTarget(lockedTarget || null);
+    setIsBulkMergeOpen(true);
+  };
+
+  const handleOpenDetector = () => {
+    if (!can('products:update')) {
+      showToast('Anda tidak memiliki izin mengelola katalog produk.', 'error');
+      return;
+    }
+    setIsDetectorOpen(true);
+  };
+
+  const handleOpenPromoteVariant = (sourceProduct: Product, variant: ProductVariant) => {
+    if (!can('products:create')) {
+      showToast('Anda tidak memiliki izin membuat produk mandiri dari varian.', 'error');
+      return;
+    }
+    if (categoriesTree.length === 0) {
+      loadCategories();
+    }
+    setPromoteVariantSourceProduct(sourceProduct);
+    setPromoteVariantItem(variant);
+    setIsPromoteVariantOpen(true);
+  };
+
+  const handleRestructureSuccess = async (targetOrNewProductId?: string) => {
+    await loadProducts();
+    await loadSummary();
+    if (targetOrNewProductId) {
+      try {
+        const freshList = await api.getProducts();
+        const found = freshList.find((p) => p.id === targetOrNewProductId);
+        if (found) {
+          setSelectedProduct(found);
+          setSelectedVariant(null);
+          return;
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setSelectedVariant(null);
+  };
+
   if (isHydrating) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-6">
@@ -604,8 +714,41 @@ export const App: React.FC = () => {
 
   const isForcedPasswordChange = Boolean(user?.must_change_password);
 
+  const showUpdateBanner =
+    Boolean(detectedServerVersion) && detectedServerVersion !== dismissedServerVersion;
+
   return (
     <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors overflow-hidden">
+      {/* New App Version Available Banner */}
+      {showUpdateBanner && (
+        <div className="bg-gradient-to-r from-amber-600 to-orange-500 text-white px-4 py-2 text-xs flex items-center justify-between gap-3 shrink-0 shadow-sm z-30">
+          <div className="flex items-center gap-2 min-w-0">
+            <Sparkles className="w-4 h-4 shrink-0" />
+            <span className="truncate">
+              Pembaruan aplikasi <strong>v{detectedServerVersion}</strong> telah tersedia (versi tab ini:{' '}
+              <span className="font-mono">{CLIENT_VERSION_INFO.displayVersion}</span>). Muat ulang halaman agar sinkron dengan server.
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="px-3 py-1 rounded-lg bg-white text-amber-700 hover:bg-amber-50 font-bold transition-colors shadow-xs"
+            >
+              Muat Ulang Sekarang
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissedServerVersion(detectedServerVersion)}
+              className="p-1 rounded-lg hover:bg-white/20 transition-colors"
+              aria-label="Tutup pemberitahuan pembaruan"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Navbar */}
       <Navbar
         lowStockCount={summary?.low_stock_count || 0}
@@ -623,6 +766,7 @@ export const App: React.FC = () => {
           setActiveTab={handleTabChange}
           lowStockCount={summary?.low_stock_count}
           alertCount={(reservationAlerts?.overdue_count || 0) + (reservationAlerts?.due_soon_count || 0)}
+          criticalMarginCount={summary?.critical_margin_count || 0}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={toggleSidebar}
         />
@@ -638,6 +782,7 @@ export const App: React.FC = () => {
               onOpenCreateProduct={handleOpenCreateProduct}
               onOpenStockAdjust={handleOpenAdjust}
               onNavigateToProducts={handleNavigateToProducts}
+              onNavigateToPricing={() => setActiveTab('price-analytics')}
               onNavigateToMovements={() => {
                 setAdjustInitialTab('history');
                 setActiveTab('adjust');
@@ -647,6 +792,30 @@ export const App: React.FC = () => {
 
           {activeTab === 'products' && (
             <>
+              <div className={selectedProduct ? 'hidden' : 'block'}>
+                <ProductListView
+                  products={products}
+                  categories={categories}
+                  brands={brands}
+                  loading={loadingProducts}
+                  onRefresh={loadProducts}
+                  onOpenCreate={handleOpenCreateProduct}
+                  onOpenImport={() => handleOpenImport('products', 'products')}
+                  onOpenDetail={(p) => {
+                    setSelectedProduct(p);
+                    setSelectedVariant(null);
+                  }}
+                  onOpenAdjust={handleOpenAdjust}
+                  onDeleteProduct={handleDeleteProduct}
+                  onEditProduct={handleOpenEditProduct}
+                  onToggleProductStatus={handleToggleProductStatus}
+                  onOpenBulkMerge={(selected) => handleOpenBulkMerge(selected)}
+                  onOpenDetector={handleOpenDetector}
+                  initialStockFilter={productStockFilter}
+                  showToast={showToast}
+                />
+              </div>
+
               {selectedProduct && selectedVariant ? (
                 <VariantDetailView
                   product={selectedProduct}
@@ -660,6 +829,8 @@ export const App: React.FC = () => {
                   showToast={showToast}
                   onEditVariant={(v) => handleOpenEditVariant(v, selectedProduct.name)}
                   onToggleVariantStatus={handleToggleVariantStatus}
+                  onMoveVariant={(v) => handleOpenMoveVariants(selectedProduct, [v])}
+                  onPromoteVariant={(v) => handleOpenPromoteVariant(selectedProduct, v)}
                   onRefresh={() => {
                     loadProducts();
                     loadSummary();
@@ -684,28 +855,21 @@ export const App: React.FC = () => {
                   onEditVariant={(v) => handleOpenEditVariant(v, selectedProduct.name)}
                   onToggleProductStatus={handleToggleProductStatus}
                   onToggleVariantStatus={handleToggleVariantStatus}
-                />
-              ) : (
-                <ProductListView
-                  products={products}
-                  categories={categories}
-                  brands={brands}
-                  loading={loadingProducts}
-                  onRefresh={loadProducts}
-                  onOpenCreate={handleOpenCreateProduct}
-                  onOpenImport={() => handleOpenImport('products', 'products')}
-                  onOpenDetail={(p) => {
-                    setSelectedProduct(p);
-                    setSelectedVariant(null);
+                  onMergeProduct={(p) => handleOpenMergeProduct(p)}
+                  onAbsorbProducts={(targetProd) => handleOpenBulkMerge([], targetProd)}
+                  onMoveVariants={(vars) => handleOpenMoveVariants(selectedProduct, vars)}
+                  onRefresh={() => {
+                    loadProducts();
+                    loadSummary();
                   }}
-                  onOpenAdjust={handleOpenAdjust}
-                  onDeleteProduct={handleDeleteProduct}
-                  onEditProduct={handleOpenEditProduct}
-                  onToggleProductStatus={handleToggleProductStatus}
-                  initialStockFilter={productStockFilter}
+                  showToast={showToast}
                 />
-              )}
+              ) : null}
             </>
+          )}
+
+          {activeTab === 'price-analytics' && (
+            <PriceAnalyticsView />
           )}
 
           {activeTab === 'adjust' && (
@@ -787,6 +951,19 @@ export const App: React.FC = () => {
             />
           )}
 
+          {activeTab === 'export' && canAccess('export') && (
+            <ExportDataView
+              initialEntity={exportInitialEntity}
+              showToast={showToast}
+              onRefreshMasterData={() => {
+                loadProducts();
+                loadCategories(true);
+                loadBrands(true);
+                loadSuppliers(true);
+              }}
+            />
+          )}
+
           {activeTab === 'users' && canAccess('users') && (
             <UserManagementView showToast={showToast} />
           )}
@@ -838,6 +1015,7 @@ export const App: React.FC = () => {
           onClose={() => setIsAddVariantOpen(false)}
           productId={addVariantProductId}
           productName={addVariantProductName}
+          product={selectedProduct || products.find((p) => p.id === addVariantProductId)}
           onSuccess={() => {
             loadProducts();
             loadSummary();
@@ -872,10 +1050,87 @@ export const App: React.FC = () => {
           }}
           variant={editingVariant}
           productName={editingVariantProductName}
+          product={selectedProduct || products.find((p) => p.variants?.some((v) => v.id === editingVariant?.id))}
           onSuccess={() => {
             loadProducts();
             loadSummary();
           }}
+          showToast={showToast}
+        />
+      )}
+
+      {can('products:update') && moveVariantSourceProduct && (
+        <MoveVariantModal
+          isOpen={isMoveVariantOpen}
+          onClose={() => {
+            setIsMoveVariantOpen(false);
+            setMoveVariantSourceProduct(null);
+            setMoveVariantsList([]);
+          }}
+          sourceProduct={moveVariantSourceProduct}
+          variantsToMove={moveVariantsList}
+          allProducts={products}
+          onSuccess={(targetId) => handleRestructureSuccess(targetId)}
+          showToast={showToast}
+        />
+      )}
+
+      {can('products:update') && mergeProductSource && (
+        <MergeProductModal
+          isOpen={isMergeProductOpen}
+          onClose={() => {
+            setIsMergeProductOpen(false);
+            setMergeProductSource(null);
+          }}
+          sourceProduct={mergeProductSource}
+          allProducts={products}
+          onSuccess={(targetId) => handleRestructureSuccess(targetId)}
+          showToast={showToast}
+        />
+      )}
+
+      {can('products:update') && (
+        <BulkMergeProductsModal
+          isOpen={isBulkMergeOpen}
+          onClose={() => {
+            setIsBulkMergeOpen(false);
+            setBulkMergeSourceProducts([]);
+            setBulkMergeLockedTarget(null);
+          }}
+          initialSourceProducts={bulkMergeSourceProducts}
+          lockedTargetProduct={bulkMergeLockedTarget}
+          allProducts={products}
+          categories={categories}
+          brands={brands}
+          onSuccess={(targetId) => handleRestructureSuccess(targetId)}
+          showToast={showToast}
+        />
+      )}
+
+      {can('products:update') && (
+        <SimilarProductsDetectorModal
+          isOpen={isDetectorOpen}
+          onClose={() => setIsDetectorOpen(false)}
+          products={products}
+          onSelectGroup={(groupProducts) => {
+            setIsDetectorOpen(false);
+            handleOpenBulkMerge(groupProducts);
+          }}
+        />
+      )}
+
+      {can('products:create') && promoteVariantSourceProduct && promoteVariantItem && (
+        <PromoteVariantModal
+          isOpen={isPromoteVariantOpen}
+          onClose={() => {
+            setIsPromoteVariantOpen(false);
+            setPromoteVariantSourceProduct(null);
+            setPromoteVariantItem(null);
+          }}
+          sourceProduct={promoteVariantSourceProduct}
+          variant={promoteVariantItem}
+          categories={categoriesTree}
+          onSuccess={(newId) => handleRestructureSuccess(newId)}
           showToast={showToast}
         />
       )}

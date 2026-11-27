@@ -1392,7 +1392,10 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
                             </div>
 
                             <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-2">
-                              <span>Petugas Toko: <strong>{p.handed_by || 'Admin'}</strong></span>
+                              <span>
+                                Petugas Toko: <strong>{p.handed_by || 'Admin'}</strong>
+                                {p.handed_by_username ? ` (@${p.handed_by_username})` : ''}
+                              </span>
                               {p.notes && <span>• Catatan: {p.notes}</span>}
                             </div>
 
@@ -1405,7 +1408,7 @@ export const StockReservationView: React.FC<StockReservationViewProps> = ({
                                       key={iIdx}
                                       className="inline-block px-2 py-0.5 bg-blue-50 dark:bg-blue-950/50 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-900 rounded-md font-medium"
                                     >
-                                      {it.product_name || it.item_id}: {formatStock(it.qty_picked_up_base ?? it.qty_picked_up)} {it.unit_name || 'unit'}
+                                      {it.product_name || it.item_id}: {formatStock(it.qty_picked_up_base ?? it.qty_picked_up)} {it.base_unit_name || it.unit_name || 'unit'}
                                     </span>
                                   ))}
                                 </div>

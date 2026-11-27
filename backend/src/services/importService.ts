@@ -22,6 +22,7 @@ import {
 } from './import/shared.js';
 import { runSupplierImport } from './import/supplierImport.js';
 import { ImportTemplateService } from './importTemplateService.js';
+import { EmbeddingService } from './embeddingService.js';
 
 function mapPostgresError(err: any): AppHttpError | null {
   const code = err?.code;
@@ -177,6 +178,10 @@ export class ImportService {
       );
 
       await client.query('COMMIT');
+
+      if (entity === 'products') {
+        EmbeddingService.initializeInBackground().catch(() => {});
+      }
 
       return {
         entity,

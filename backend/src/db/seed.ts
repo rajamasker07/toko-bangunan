@@ -2,6 +2,7 @@ import { pool } from '../config/db.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 import { brandKey, normalizeBrandName } from '../utils/brand.js';
 import { ensureBootstrapOwner } from './init.js';
+import { EmbeddingService } from '../services/embeddingService.js';
 
 export async function seedDatabase() {
   const client = await pool.connect();
@@ -10,7 +11,7 @@ export async function seedDatabase() {
     await client.query('BEGIN');
 
     // Clean product/category/stock tables while preserving users, user_sessions, brands, suppliers, units
-    await client.query('TRUNCATE stock_movements, variant_units, product_variants, products, categories CASCADE;');
+    await client.query('TRUNCATE price_history, stock_movements, variant_units, product_variants, products, categories CASCADE;');
 
     const bootstrapOwner = await ensureBootstrapOwner(client);
 
@@ -308,6 +309,11 @@ export async function seedDatabase() {
 
     await client.query('COMMIT');
     console.log('✅ Seeding completed with realistic building materials data!');
+
+    // Reindex embedding AI untuk semua produk hasil seeding
+    console.log('🧠 Menghasilkan embedding AI lokal untuk produk hasil seed...');
+    await EmbeddingService.reindexAllProducts({ force: true });
+    console.log('✅ Embedding AI lokal siap.');
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('❌ Seeding failed:', error);

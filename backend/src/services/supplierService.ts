@@ -61,7 +61,26 @@ export interface Supplier {
     unpaid_count: number;
     overdue_count: number;
     due_soon_count: number;
-    total_debt_amount: number;
+    total_debt_amount: number | null;
+  };
+}
+
+/**
+ * Menyensor nominal total hutang supplier menjadi null bagi role tanpa izin finansial/HPP.
+ */
+export function redactSupplierFinancials<T extends Supplier>(
+  supplier: T,
+  includeFinancials: boolean
+): T {
+  if (includeFinancials || !supplier.invoice_summary) {
+    return supplier;
+  }
+  return {
+    ...supplier,
+    invoice_summary: {
+      ...supplier.invoice_summary,
+      total_debt_amount: null,
+    },
   };
 }
 
@@ -121,7 +140,11 @@ export class SupplierService {
   /**
    * List all suppliers with product count and sales array
    */
-  static async getAll(filters?: { search?: string; isActive?: boolean }): Promise<Supplier[]> {
+  static async getAll(
+    filters?: { search?: string; isActive?: boolean },
+    options?: { includeFinancials?: boolean }
+  ): Promise<Supplier[]> {
+    const includeFinancials = options?.includeFinancials ?? true;
     const params: any[] = [];
     const conditions: string[] = [];
 
@@ -200,25 +223,34 @@ export class SupplierService {
     `;
 
     const res = await query(sql, params);
-    return res.rows.map((row) => ({
-      ...row,
-      sales: row.sales || [],
-      sales_count: (row.sales || []).length,
-      active_sales_count: (row.sales || []).filter((s: SupplierSales) => s.is_active).length,
-      invoice_summary: row.invoice_summary || {
-        total_invoices: 0,
-        unpaid_count: 0,
-        overdue_count: 0,
-        due_soon_count: 0,
-        total_debt_amount: 0,
-      },
-    }));
+    return res.rows.map((row) =>
+      redactSupplierFinancials(
+        {
+          ...row,
+          sales: row.sales || [],
+          sales_count: (row.sales || []).length,
+          active_sales_count: (row.sales || []).filter((s: SupplierSales) => s.is_active).length,
+          invoice_summary: row.invoice_summary || {
+            total_invoices: 0,
+            unpaid_count: 0,
+            overdue_count: 0,
+            due_soon_count: 0,
+            total_debt_amount: 0,
+          },
+        },
+        includeFinancials
+      )
+    );
   }
 
   /**
    * Get single supplier by ID
    */
-  static async getById(id: string): Promise<Supplier | null> {
+  static async getById(
+    id: string,
+    options?: { includeFinancials?: boolean }
+  ): Promise<Supplier | null> {
+    const includeFinancials = options?.includeFinancials ?? true;
     const res = await query(
       `SELECT 
         s.*,
@@ -267,19 +299,22 @@ export class SupplierService {
 
     if (!res.rows[0]) return null;
     const row = res.rows[0];
-    return {
-      ...row,
-      sales: row.sales || [],
-      sales_count: (row.sales || []).length,
-      active_sales_count: (row.sales || []).filter((s: SupplierSales) => s.is_active).length,
-      invoice_summary: row.invoice_summary || {
-        total_invoices: 0,
-        unpaid_count: 0,
-        overdue_count: 0,
-        due_soon_count: 0,
-        total_debt_amount: 0,
+    return redactSupplierFinancials(
+      {
+        ...row,
+        sales: row.sales || [],
+        sales_count: (row.sales || []).length,
+        active_sales_count: (row.sales || []).filter((s: SupplierSales) => s.is_active).length,
+        invoice_summary: row.invoice_summary || {
+          total_invoices: 0,
+          unpaid_count: 0,
+          overdue_count: 0,
+          due_soon_count: 0,
+          total_debt_amount: 0,
+        },
       },
-    };
+      includeFinancials
+    );
   }
 
   /**

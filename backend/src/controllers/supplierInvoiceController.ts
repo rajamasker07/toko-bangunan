@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { hasPermission } from '../config/rbac.js';
 import { SupplierInvoiceService } from '../services/supplierInvoiceService.js';
 
 export class SupplierInvoiceController {
@@ -7,11 +8,18 @@ export class SupplierInvoiceController {
       const supplierId = String(req.params.supplierId);
       const status = req.query.status as string;
       const search = req.query.search as string;
+      const includeFinancials = req.user
+        ? hasPermission(req.user.role, 'products:view_buy_price')
+        : false;
 
-      const invoices = await SupplierInvoiceService.getBySupplierId(supplierId, {
-        status,
-        search,
-      });
+      const invoices = await SupplierInvoiceService.getBySupplierId(
+        supplierId,
+        {
+          status,
+          search,
+        },
+        { includeFinancials }
+      );
 
       res.json({ success: true, data: invoices });
     } catch (error: any) {
@@ -22,7 +30,12 @@ export class SupplierInvoiceController {
   static async getSummaryBySupplier(req: Request, res: Response) {
     try {
       const supplierId = String(req.params.supplierId);
-      const summary = await SupplierInvoiceService.getSummaryBySupplierId(supplierId);
+      const includeFinancials = req.user
+        ? hasPermission(req.user.role, 'products:view_buy_price')
+        : false;
+      const summary = await SupplierInvoiceService.getSummaryBySupplierId(supplierId, {
+        includeFinancials,
+      });
       res.json({ success: true, data: summary });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });

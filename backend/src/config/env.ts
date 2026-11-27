@@ -61,6 +61,14 @@ function resolveCorsOrigins(): string[] {
 
 const refreshDaysRaw = Number(process.env.JWT_REFRESH_TTL_DAYS || 7);
 
+function resolveRefreshGraceWindowSeconds(): number {
+  const raw = process.env.JWT_REFRESH_GRACE_WINDOW_SECONDS?.trim().toLowerCase();
+  if (!raw) return 15;
+  if (raw === '0' || raw === '0s') return 0;
+  const parsed = parseDurationToSeconds(raw, 15);
+  return Math.min(Math.max(parsed, 0), 120);
+}
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
@@ -68,6 +76,7 @@ export const env = {
   jwtAccessSecret: resolveJwtAccessSecret(),
   jwtAccessTtlSeconds: parseDurationToSeconds(process.env.JWT_ACCESS_EXPIRES_IN, 15 * 60),
   jwtRefreshTtlDays: Number.isFinite(refreshDaysRaw) && refreshDaysRaw > 0 ? refreshDaysRaw : 7,
+  jwtRefreshGraceWindowSeconds: resolveRefreshGraceWindowSeconds(),
   corsOrigins: resolveCorsOrigins(),
   bootstrapOwner: {
     username: (process.env.BOOTSTRAP_OWNER_USERNAME || 'owner').trim().toLowerCase(),

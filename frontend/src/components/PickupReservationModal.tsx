@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { StockReservation, ReservationItem } from '../types';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { formatStock, formatDate } from '../utils/format';
 import {
   X,
@@ -33,11 +34,13 @@ export const PickupReservationModal: React.FC<PickupReservationModalProps> = ({
   onSuccess,
   showToast,
 }) => {
+  const { user } = useAuth();
+  const authenticatedStaffLabel = user?.full_name || user?.username || 'Petugas Login';
+
   const [mode, setMode] = useState<'all' | 'partial'>('all');
   const [receiverName, setReceiverName] = useState<string>('');
   const [vehiclePlate, setVehiclePlate] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
-  const [handedBy, setHandedBy] = useState<string>('Kasir / Gudang');
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
@@ -51,7 +54,6 @@ export const PickupReservationModal: React.FC<PickupReservationModalProps> = ({
       setReceiverName(reservation.customer_name || '');
       setVehiclePlate('');
       setNotes('');
-      setHandedBy('Petugas Gudang');
       setShowHistory(false);
       setSubmitting(false);
 
@@ -148,7 +150,7 @@ export const PickupReservationModal: React.FC<PickupReservationModalProps> = ({
       .filter(([_, qty]) => qty > 0)
       .map(([itemId, qty]) => ({
         item_id: itemId,
-        qty_picked_up: Number(qty),
+        qty_picked_up_base: Number(qty),
       }));
 
     setSubmitting(true);
@@ -157,7 +159,6 @@ export const PickupReservationModal: React.FC<PickupReservationModalProps> = ({
         receiver_name: receiverName.trim(),
         vehicle_plate: vehiclePlate.trim() || undefined,
         notes: notes.trim() || undefined,
-        handed_by: handedBy.trim() || 'Admin',
         items: itemsPayload,
       });
 
@@ -388,15 +389,19 @@ export const PickupReservationModal: React.FC<PickupReservationModalProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Diserahkan Oleh (Petugas Toko)
+                Diserahkan Oleh (Petugas Login)
               </label>
-              <input
-                type="text"
-                value={handedBy}
-                onChange={(e) => setHandedBy(e.target.value)}
-                placeholder="Nama kasir atau staf gudang"
-                className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-white"
-              />
+              <div className="w-full px-3 py-2 text-sm bg-slate-100/90 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 rounded-xl text-slate-700 dark:text-slate-200 flex items-center justify-between gap-2">
+                <span className="font-semibold truncate">{authenticatedStaffLabel}</span>
+                {user?.username && (
+                  <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 shrink-0">
+                    @{user.username}
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Tercatat otomatis dari akun yang login untuk audit stok.
+              </p>
             </div>
 
             <div>
@@ -439,13 +444,19 @@ export const PickupReservationModal: React.FC<PickupReservationModalProps> = ({
                         <span className="text-[11px] text-slate-400">{formatDate(p.picked_up_at)}</span>
                       </div>
                       <div className="text-[11px] text-slate-500">
-                        Diserahkan oleh: {p.handed_by} {p.notes ? `• Catatan: ${p.notes}` : ''}
+                        Diserahkan oleh: <strong className="text-slate-700 dark:text-slate-300">{p.handed_by}</strong>
+                        {p.handed_by_username ? ` (@${p.handed_by_username})` : ''}
+                        {p.notes ? ` • Catatan: ${p.notes}` : ''}
                       </div>
                       {p.items && Array.isArray(p.items) && p.items.length > 0 && (
                         <div className="text-[11px] text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/40 p-1.5 rounded-md mt-1">
                           Barang diserahkan:{' '}
                           {p.items
-                            .map((it: any) => `${it.product_name || it.item_id}: ${it.qty_picked_up}`)
+                            .map((it) => {
+                              const qty = it.qty_picked_up_base ?? it.qty_picked_up ?? 0;
+                              const unit = it.base_unit_name || it.unit_name || 'unit';
+                              return `${it.product_name || it.item_id}: ${formatStock(qty)} ${unit}`;
+                            })
                             .join(', ')}
                         </div>
                       )}

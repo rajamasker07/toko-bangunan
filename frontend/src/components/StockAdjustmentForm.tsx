@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue } from 'react';
-import { Product, VariantUnit } from '../types';
+import { Product, VariantUnit, PriceUpdateOnRestock } from '../types';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { formatStock } from '../utils/format';
+import { formatIdNumber } from './common/NumericInput';
 import { SearchableSelect, SearchableOption } from './common/SearchableSelect';
 import { 
   Search, 
@@ -23,6 +24,8 @@ import {
   ShieldCheck,
   Boxes,
   Folder,
+  Tag,
+  TrendingUp,
   User
 } from 'lucide-react';
 
@@ -42,6 +45,7 @@ export interface FlattenedVariant {
   brand?: string | null;
   supplier_name?: string | null;
   product_is_active?: boolean;
+  attributes?: Record<string, string>;
   _searchIndex: string;
 }
 
@@ -113,6 +117,21 @@ const VariantListItem = React.memo<VariantListItemProps>(({
               </span>
             )}
           </div>
+
+          {/* Dynamic Variant Attributes Badges */}
+          {v.attributes && Object.keys(v.attributes).length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap pt-0.5">
+              {Object.entries(v.attributes).map(([attrKey, attrVal]) => (
+                <span
+                  key={attrKey}
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200/50 dark:border-amber-800/50"
+                >
+                  <span className="text-slate-400 font-normal">{attrKey}:</span>
+                  <span>{attrVal}</span>
+                </span>
+              ))}
+            </div>
+          )}
 
           <div className="flex items-center gap-2.5 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
             <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
@@ -192,7 +211,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
   showToast,
   isModal = false,
 }) => {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
 
   // Stepper State (Step 1: Cari Variant Produk -> Step 2: Metode Penyesuaian)
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
@@ -218,6 +237,14 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
+  // Price update on restock
+  const canViewBuyPrice = can('products:view_buy_price');
+  const canWritePricing = can('pricing:write');
+  const [shouldUpdatePrice, setShouldUpdatePrice] = useState<boolean>(false);
+  const [restockBuyPrice, setRestockBuyPrice] = useState<number | ''>('');
+  const [restockSellPrice, setRestockSellPrice] = useState<number | ''>('');
+  const [restockWholesalePrice, setRestockWholesalePrice] = useState<string>('');
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const amountInputRef = useRef<HTMLInputElement>(null);
 
@@ -227,8 +254,9 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
     for (const p of products) {
       const vars = p.variants || [];
       for (const v of vars) {
-        // Pre-normalize search tokens into a single lowercase index for O(1) matching
-        const searchIndex = `${p.name} ${v.variant_name} ${v.sku} ${p.sku} ${v.barcode || ''} ${p.category_name || ''} ${p.brand || ''}`.toLowerCase();
+        // Pre-normalize search tokens into a single lowercase index for O(1) matching including materials, specifications, and dynamic attributes
+        const attrTokens = v.attributes ? Object.entries(v.attributes).map(([k, val]) => `${k} ${val}`).join(' ') : '';
+        const searchIndex = `${p.name} ${v.variant_name} ${v.sku} ${p.sku} ${v.barcode || ''} ${p.category_name || ''} ${p.brand || ''} ${p.material || ''} ${p.specifications || ''} ${p.description || ''} ${attrTokens}`.toLowerCase();
         list.push({
           id: v.id,
           variant_name: v.variant_name,
@@ -238,6 +266,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
           min_stock: Number(v.min_stock) || 0,
           is_active: v.is_active !== false,
           units: v.units || [],
+          attributes: v.attributes,
           product_id: p.id,
           product_name: p.name,
           product_sku: p.sku,
@@ -368,6 +397,14 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
     return availableUnits.find((u) => u.is_base_unit) || availableUnits[0];
   }, [availableUnits]);
 
+  useEffect(() => {
+    if (activeUnit) {
+      setRestockBuyPrice(activeUnit.buy_price != null ? Number(activeUnit.buy_price) : '');
+      setRestockSellPrice(activeUnit.sell_price != null ? Number(activeUnit.sell_price) : '');
+      setRestockWholesalePrice(activeUnit.wholesale_price ? String(activeUnit.wholesale_price) : '');
+    }
+  }, [activeUnit]);
+
   // High performance multi-token search & filter for Step 1
   const filteredVariants = useMemo(() => {
     const rawTokens = deferredSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
@@ -494,6 +531,18 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
         finalNotes = `[${inputQty} ${activeUnit.unit_name} @${conversionFactor} ${baseUnit.unit_name}] ${finalNotes}`;
       }
 
+      let priceUpdate: PriceUpdateOnRestock | undefined = undefined;
+      if (movementType === 'PURCHASE_RESTOCK' && shouldUpdatePrice && activeUnit) {
+        priceUpdate = {
+          unit_id: activeUnit.id,
+          new_buy_price: canViewBuyPrice && restockBuyPrice !== '' ? Number(restockBuyPrice) : undefined,
+          new_sell_price: restockSellPrice !== '' ? Number(restockSellPrice) : undefined,
+          new_wholesale_price: restockWholesalePrice !== '' ? Number(restockWholesalePrice) : null,
+          reason: `Restock nota: ${finalNotes}`,
+          reference_no: referenceNo.trim() || undefined,
+        };
+      }
+
       await api.adjustStock({
         variant_id: currentVariant.id,
         adjustment_mode: mode,
@@ -501,6 +550,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
         movement_type: movementType,
         reference_no: referenceNo.trim() || `ADJ-${Date.now().toString().slice(-6)}`,
         notes: finalNotes,
+        price_update: priceUpdate,
       });
 
       showToast(`Penyesuaian stok untuk "${currentVariant.product_name} (${currentVariant.variant_name})" berhasil disimpan!`, 'success');
@@ -1225,6 +1275,79 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                   Pengurangan melebihi stok yang tersedia saat ini! Stok fisik tidak dapat bernilai kurang dari 0.
                 </p>
+              )}
+            </div>
+          )}
+
+          {/* Optional: Update Price on Restock */}
+          {movementType === 'PURCHASE_RESTOCK' && canWritePricing && activeUnit && (
+            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4 border border-slate-200 dark:border-slate-700 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="updatePriceOnRestock"
+                    checked={shouldUpdatePrice}
+                    onChange={(e) => setShouldUpdatePrice(e.target.checked)}
+                    className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                  />
+                  <label
+                    htmlFor="updatePriceOnRestock"
+                    className="text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5 text-amber-500" />
+                    Perbarui Harga Satuan dari Nota Masuk Ini?
+                  </label>
+                </div>
+                <span className="text-[10px] text-slate-400">Otomatis catat histori harga</span>
+              </div>
+
+              {shouldUpdatePrice && (
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 grid grid-cols-1 sm:grid-cols-3 gap-3 animate-in fade-in">
+                  {canViewBuyPrice && (
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Harga Modal Baru ({activeUnit.unit_name}):
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={restockBuyPrice}
+                        onChange={(e) => setRestockBuyPrice(e.target.value === '' ? '' : Number(e.target.value))}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold font-mono text-slate-900 dark:text-white"
+                        placeholder="Harga modal nota"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                      Harga Jual Baru ({activeUnit.unit_name}):
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={restockSellPrice}
+                      onChange={(e) => setRestockSellPrice(e.target.value === '' ? '' : Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold font-mono text-emerald-600 dark:text-emerald-400"
+                      placeholder="Harga jual toko"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                      Harga Grosir (Opsional):
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={restockWholesalePrice}
+                      onChange={(e) => setRestockWholesalePrice(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono text-slate-900 dark:text-white"
+                      placeholder="Kosongkan jika sama"
+                    />
+                  </div>
+                </div>
               )}
             </div>
           )}

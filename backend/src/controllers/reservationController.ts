@@ -1,6 +1,12 @@
 import { Request, Response } from 'express';
 import { ReservationService } from '../services/reservationService.js';
 
+function resolveAuthenticatedActor(req: Request): { userId: string | null; fullName: string } {
+  const userId = req.user?.id ?? null;
+  const fullName = (req.user?.full_name || req.user?.username || 'Admin').trim().slice(0, 100) || 'Admin';
+  return { userId, fullName };
+}
+
 export class ReservationController {
   static async list(req: Request, res: Response) {
     try {
@@ -55,7 +61,6 @@ export class ReservationController {
         invoice_no,
         pickup_deadline,
         notes,
-        created_by,
         items
       } = req.body;
 
@@ -66,8 +71,7 @@ export class ReservationController {
         });
       }
 
-      const finalCreatedBy =
-        (created_by && String(created_by).trim()) || req.user?.full_name || 'Admin';
+      const actor = resolveAuthenticatedActor(req);
 
       const result = await ReservationService.createReservation({
         customer_name,
@@ -76,7 +80,8 @@ export class ReservationController {
         invoice_no,
         pickup_deadline,
         notes,
-        created_by: finalCreatedBy,
+        user_id: actor.userId,
+        created_by: actor.fullName,
         items
       });
 
@@ -93,7 +98,7 @@ export class ReservationController {
   static async pickup(req: Request, res: Response) {
     try {
       const id = String(req.params.id);
-      const { receiver_name, vehicle_plate, notes, handed_by, items } = req.body;
+      const { receiver_name, vehicle_plate, notes, items } = req.body;
 
       if (!receiver_name || !items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({
@@ -102,14 +107,14 @@ export class ReservationController {
         });
       }
 
-      const finalHandedBy =
-        (handed_by && String(handed_by).trim()) || req.user?.full_name || 'Admin';
+      const actor = resolveAuthenticatedActor(req);
 
       const result = await ReservationService.pickupReservation(id, {
         receiver_name,
         vehicle_plate,
         notes,
-        handed_by: finalHandedBy,
+        user_id: actor.userId,
+        handed_by: actor.fullName,
         items
       });
 
@@ -151,9 +156,7 @@ export class ReservationController {
     try {
       const id = String(req.params.id);
       const cancel_reason = req.body.cancel_reason || req.body.reason;
-      const rawCancelledBy = req.body.cancelled_by || req.body.cancelledBy;
-      const finalCancelledBy =
-        (rawCancelledBy && String(rawCancelledBy).trim()) || req.user?.full_name || 'Admin';
+      const actor = resolveAuthenticatedActor(req);
 
       if (!cancel_reason || !String(cancel_reason).trim()) {
         return res.status(400).json({
@@ -162,7 +165,12 @@ export class ReservationController {
         });
       }
 
-      const result = await ReservationService.cancelReservation(id, String(cancel_reason).trim(), finalCancelledBy);
+      const result = await ReservationService.cancelReservation(
+        id,
+        String(cancel_reason).trim(),
+        actor.fullName,
+        actor.userId
+      );
       res.json({
         success: true,
         data: result,
@@ -178,9 +186,7 @@ export class ReservationController {
       const id = String(req.params.id);
       const settlement_type = req.body.settlement_type;
       const reason = req.body.reason || req.body.settlement_notes || req.body.notes;
-      const rawClosedBy = req.body.closed_by || req.body.closedBy;
-      const finalClosedBy =
-        (rawClosedBy && String(rawClosedBy).trim()) || req.user?.full_name || 'Admin';
+      const actor = resolveAuthenticatedActor(req);
 
       if (!settlement_type) {
         return res.status(400).json({
@@ -199,7 +205,8 @@ export class ReservationController {
       const result = await ReservationService.closePartialReservation(id, {
         settlement_type,
         reason: String(reason).trim(),
-        closed_by: finalClosedBy
+        user_id: actor.userId,
+        closed_by: actor.fullName
       });
 
       res.json({

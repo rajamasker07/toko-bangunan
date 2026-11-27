@@ -1,0 +1,17 @@
+{
+  "name": "toko-bangunan-monorepo",
+  "private": true,
+  "version": "1.1.0",
+  "description": "Sistem POS & Inventaris Toko Bahan Bangunan (Monorepo)",
+  "scripts": {
+    "version:sync": "node scripts/release.mjs sync",
+    "release:patch": "node scripts/release.mjs patch",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major",
+    "release:dry": "node scripts/release.mjs patch --dry-run",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "test:version": "npm --prefix backend run test:version"
+  }
+}

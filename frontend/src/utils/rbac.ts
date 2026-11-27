@@ -3,12 +3,14 @@ import { Permission, RoleDefinition, UserRole } from '../types';
 export type AppTab =
   | 'dashboard'
   | 'products'
+  | 'price-analytics'
   | 'adjust'
   | 'reservations'
   | 'categories'
   | 'brands'
   | 'suppliers'
   | 'import'
+  | 'export'
   | 'users'
   | 'docs';
 
@@ -20,6 +22,8 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'products:delete',
   'products:view_buy_price',
   'pricing:write',
+  'pricing:analytics',
+  'pricing:threshold',
   'master:read',
   'suppliers:read',
   'master:write',
@@ -35,6 +39,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'reservations:cancel',
   'roles:manage',
   'data:import',
+  'data:export',
 ];
 
 export const ROLE_ORDER: readonly UserRole[] = ['owner', 'admin', 'gudang', 'kasir'];
@@ -147,6 +152,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'products:delete',
     'products:view_buy_price',
     'pricing:write',
+    'pricing:analytics',
+    'pricing:threshold',
     'master:read',
     'suppliers:read',
     'master:write',
@@ -162,6 +169,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'reservations:cancel',
     'roles:manage',
     'data:import',
+    'data:export',
   ],
   admin: [
     'dashboard:read',
@@ -171,6 +179,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'products:delete',
     'products:view_buy_price',
     'pricing:write',
+    'pricing:analytics',
+    'pricing:threshold',
     'master:read',
     'suppliers:read',
     'master:write',
@@ -185,6 +195,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'reservations:cancel',
     'roles:manage',
     'data:import',
+    'data:export',
   ],
   gudang: [
     'dashboard:read',
@@ -350,6 +361,8 @@ export function canAccessTab(
       return hasPermission(permissions, role, 'dashboard:read');
     case 'products':
       return hasPermission(permissions, role, 'products:read');
+    case 'price-analytics':
+      return hasPermission(permissions, role, 'pricing:analytics');
     case 'adjust':
       return hasAnyPermission(permissions, role, ['stock:adjust', 'stock:read']);
     case 'reservations':
@@ -364,6 +377,8 @@ export function canAccessTab(
         hasPermission(permissions, role, 'data:import') &&
         hasAnyPermission(permissions, role, ['products:create', 'master:write'])
       );
+    case 'export':
+      return hasPermission(permissions, role, 'data:export');
     case 'users':
       return hasAnyPermission(permissions, role, ['users:read', 'users:manage', 'roles:manage']);
     case 'docs':

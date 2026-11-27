@@ -84,6 +84,7 @@ export interface ImportExecutionContext {
   createdBy: string;
   allowBuyPrice: boolean;
   allowPricingWrite: boolean;
+  filename?: string | null;
 }
 
 export interface ParsedSpreadsheetRow {

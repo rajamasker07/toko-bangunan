@@ -46,6 +46,18 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
     description: 'Menambah, mengubah, dan menghapus harga jual satuan bertingkat (multi-satuan)',
     module: 'Harga & Satuan',
   },
+  {
+    id: 'pricing:analytics',
+    label: 'Lihat Analitik & Margin Harga',
+    description: 'Melihat histori perubahan harga modal/jual, grafik tren, alert margin, dan inflasi supplier',
+    module: 'Harga & Satuan',
+  },
+  {
+    id: 'pricing:threshold',
+    label: 'Atur Ambang Batas Margin',
+    description: 'Mengatur persentase ambang batas peringatan margin tipis/kritis untuk operasional toko',
+    module: 'Harga & Satuan',
+  },
   // Master Data
   {
     id: 'master:read',
@@ -142,7 +154,15 @@ export const PERMISSION_CATALOG: PermissionCatalogItem[] = [
     label: 'Import Data Massal (Excel / CSV)',
     description:
       'Mengunduh template, memvalidasi pratinjau, dan mengimpor data produk, supplier, kategori, serta merek secara massal',
-    module: 'Import Data',
+    module: 'Import & Export Data',
+  },
+  // Export & Backup Data
+  {
+    id: 'data:export',
+    label: 'Export Data & Backup Database',
+    description:
+      'Mengekspor data master, transaksi mutasi, faktur, nota titipan ke Excel/CSV, serta mencadangkan (backup) dan memulihkan (restore) database PostgreSQL',
+    module: 'Import & Export Data',
   },
   // Sistem & Log
   {

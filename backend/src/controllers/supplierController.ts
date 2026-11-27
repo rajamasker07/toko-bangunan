@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { SupplierService } from '../services/supplierService.js';
+import { hasPermission } from '../config/rbac.js';
+import { redactSupplierFinancials, SupplierService } from '../services/supplierService.js';
 
 export class SupplierController {
   // ==========================================
@@ -10,7 +11,10 @@ export class SupplierController {
     try {
       const search = req.query.search as string;
       const isActive = req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined;
-      const suppliers = await SupplierService.getAll({ search, isActive });
+      const includeFinancials = req.user
+        ? hasPermission(req.user.role, 'products:view_buy_price')
+        : false;
+      const suppliers = await SupplierService.getAll({ search, isActive }, { includeFinancials });
       res.json({ success: true, data: suppliers });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
@@ -19,7 +23,10 @@ export class SupplierController {
 
   static async getById(req: Request, res: Response) {
     try {
-      const supplier = await SupplierService.getById(String(req.params.id));
+      const includeFinancials = req.user
+        ? hasPermission(req.user.role, 'products:view_buy_price')
+        : false;
+      const supplier = await SupplierService.getById(String(req.params.id), { includeFinancials });
       if (!supplier) {
         return res.status(404).json({ success: false, message: 'Supplier tidak ditemukan' });
       }
@@ -61,13 +68,16 @@ export class SupplierController {
   static async update(req: Request, res: Response) {
     try {
       const id = String(req.params.id);
+      const includeFinancials = req.user
+        ? hasPermission(req.user.role, 'products:view_buy_price')
+        : false;
       const supplier = await SupplierService.update(id, req.body);
       if (!supplier) {
         return res.status(404).json({ success: false, message: 'Supplier tidak ditemukan' });
       }
       res.json({
         success: true,
-        data: supplier,
+        data: redactSupplierFinancials(supplier, includeFinancials),
         message: `Supplier "${supplier.name}" berhasil diperbarui`,
       });
     } catch (error: any) {

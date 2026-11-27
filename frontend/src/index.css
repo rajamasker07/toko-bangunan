@@ -28,3 +28,20 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(156, 163, 175, 0.6);
 }
+
+/* Smooth indeterminate progress bar for live backend search */
+@keyframes search-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(60%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.animate-search-progress {
+  animation: search-indeterminate 1.25s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

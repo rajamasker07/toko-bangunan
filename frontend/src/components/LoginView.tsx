@@ -245,9 +245,9 @@ export const LoginView: React.FC = () => {
         </div>
       </div>
 
-      {/* Subtle Bottom Copyright */}
+      {/* Subtle Bottom Copyright & Version */}
       <p className="text-center text-xs text-slate-400 dark:text-slate-600">
-        BangunJaya POS &bull; Sistem Inventaris Bahan Bangunan
+        BangunJaya POS <span className="font-mono font-semibold">{`v${typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.0'}`}</span> &bull; Sistem Inventaris Bahan Bangunan
       </p>
     </div>
   );

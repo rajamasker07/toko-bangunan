@@ -1,6 +1,6 @@
 {
   "name": "toko-bangunan-backend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Backend API for Toko Bangunan Management System",
   "type": "module",
   "main": "dist/index.js",
@@ -10,6 +10,14 @@
     "start": "node dist/index.js",
     "db:init": "tsx src/db/init.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "test:pricing": "tsx src/scripts/testPriceHistory.ts",
+    "test:version": "tsx src/scripts/testVersioning.ts",
+    "test:stock": "tsx src/scripts/testStockGuardrails.ts",
+    "test:reservation": "tsx src/scripts/testReservationAudit.ts",
+    "test:rbac-supplier": "tsx src/scripts/testRbacAndSupplierRedaction.ts",
+    "test:auth-refresh": "tsx src/scripts/testRefreshTokenGraceWindow.ts",
+    "embeddings:backfill": "tsx src/scripts/backfillEmbeddings.ts",
+    "search:eval": "tsx src/scripts/evaluateSearch.ts",
     "logs": "tsx src/scripts/viewLogs.ts"
   },
   "keywords": [
@@ -21,6 +29,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@huggingface/transformers": "^3.4.0",
     "cors": "^2.8.5",
     "csv-parse": "^7.0.3",
     "dotenv": "^16.4.7",

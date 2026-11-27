@@ -23,7 +23,8 @@ import {
   Clock,
   AlertTriangle,
   DollarSign,
-  Upload
+  Upload,
+  Download,
 } from 'lucide-react';
 
 interface SupplierManagementViewProps {
@@ -44,8 +45,11 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
   const { can } = useAuth();
   const canWrite = can('master:write');
   const canImport = can('data:import') && canWrite;
+  const canExport = can('data:export');
   const canDelete = can('master:delete');
+  const canViewFinancial = can('products:view_buy_price');
 
+  const [isExporting, setIsExporting] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [salesFilter, setSalesFilter] = useState<'all' | 'has_sales' | 'no_sales'>('all');
@@ -79,7 +83,10 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
   const totalActiveProducts = suppliers.reduce((acc, s) => acc + (s.active_product_count || 0), 0);
   const totalSalesCount = suppliers.reduce((acc, s) => acc + (s.sales?.length || 0), 0);
   const activeSalesCount = suppliers.reduce((acc, s) => acc + (s.sales?.filter(x => x.is_active).length || 0), 0);
-  const totalDebt = suppliers.reduce((acc, s) => acc + (s.invoice_summary?.total_debt_amount || 0), 0);
+  const totalDebt = canViewFinancial
+    ? suppliers.reduce((acc, s) => acc + (Number(s.invoice_summary?.total_debt_amount) || 0), 0)
+    : null;
+  const totalUnpaidInvoices = suppliers.reduce((acc, s) => acc + (s.invoice_summary?.unpaid_count || 0), 0);
   const totalOverdueInvoices = suppliers.reduce((acc, s) => acc + (s.invoice_summary?.overdue_count || 0), 0);
 
   // Filtered suppliers
@@ -266,6 +273,28 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-500' : ''}`} />
                 </button>
               )}
+              {canExport && (
+                <button
+                  type="button"
+                  disabled={isExporting}
+                  onClick={async () => {
+                    setIsExporting(true);
+                    try {
+                      await api.downloadEntityExport('suppliers', 'xlsx');
+                      showToast('Data supplier berhasil diekspor ke Excel', 'success');
+                    } catch (e: any) {
+                      showToast(e.message || 'Gagal mengekspor supplier', 'error');
+                    } finally {
+                      setIsExporting(false);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-xs transition-colors disabled:opacity-50"
+                  title="Unduh master supplier & sales dalam format Excel"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>{isExporting ? 'Mengekspor...' : 'Export'}</span>
+                </button>
+              )}
               {canImport && onOpenImport && (
                 <button
                   type="button"
@@ -333,16 +362,26 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
               <div className={`p-3 rounded-xl ${totalOverdueInvoices > 0 ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 animate-pulse' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'}`}>
                 <DollarSign className="w-5 h-5" />
               </div>
-              <div>
-                <span className="text-[11px] font-medium text-slate-400 block">Sisa Beban Tagihan</span>
-                <span className="text-lg font-black text-slate-900 dark:text-white truncate block">{formatRupiah(totalDebt)}</span>
+              <div className="min-w-0">
+                <span className="text-[11px] font-medium text-slate-400 block">
+                  {canViewFinancial ? 'Sisa Beban Tagihan' : 'Status Nota Supplier'}
+                </span>
+                {canViewFinancial && totalDebt !== null ? (
+                  <span className="text-lg font-black text-slate-900 dark:text-white truncate block">
+                    {formatRupiah(totalDebt)}
+                  </span>
+                ) : (
+                  <span className="text-lg font-black text-slate-900 dark:text-white truncate block">
+                    {totalUnpaidInvoices} Nota Aktif
+                  </span>
+                )}
                 {totalOverdueInvoices > 0 ? (
                   <span className="text-[10px] font-bold text-rose-500 block">
-                    {totalOverdueInvoices} Nota Lewat Tempo!
+                    {totalOverdueInvoices} Nota Lewat Tempo!{!canViewFinancial ? ' • Nominal terbatas' : ''}
                   </span>
                 ) : (
                   <span className="text-[10px] text-slate-400 block">
-                    Semua nota aman
+                    {canViewFinancial ? 'Semua nota aman' : 'Semua nota aman • Nominal terbatas'}
                   </span>
                 )}
               </div>
@@ -559,49 +598,68 @@ export const SupplierManagementView: React.FC<SupplierManagementViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Jumlah Tagihan */}
-                    <div className="flex items-center gap-2.5 min-w-[130px]">
-                      <div
-                        className={`p-2 rounded-xl shrink-0 ${
-                          (s.invoice_summary?.overdue_count || 0) > 0
-                            ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 animate-pulse'
-                            : (s.invoice_summary?.total_debt_amount || 0) > 0
-                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                            : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                        }`}
-                      >
-                        {(s.invoice_summary?.overdue_count || 0) > 0 ? (
-                          <AlertTriangle className="w-4 h-4" />
-                        ) : (
-                          <DollarSign className="w-4 h-4" />
-                        )}
-                      </div>
-                      <div>
-                        <span className="text-[10px] uppercase font-semibold tracking-wider text-slate-400 block">
-                          Jumlah Tagihan
-                        </span>
-                        {(s.invoice_summary?.total_debt_amount || 0) > 0 ? (
-                          <div>
-                            <span className="font-black text-sm text-slate-900 dark:text-white tabular-nums block">
-                              {formatRupiah(s.invoice_summary?.total_debt_amount)}
-                            </span>
-                            {(s.invoice_summary?.overdue_count || 0) > 0 ? (
-                              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-                                <AlertTriangle className="w-2.5 h-2.5" /> {s.invoice_summary?.overdue_count} Lewat Tempo
-                              </span>
-                            ) : (s.invoice_summary?.due_soon_count || 0) > 0 ? (
-                              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                                <Clock className="w-2.5 h-2.5" /> Tempo Dekat
-                              </span>
-                            ) : null}
+                    {/* Jumlah Tagihan / Status Nota */}
+                    {(() => {
+                      const debtVal = s.invoice_summary?.total_debt_amount;
+                      const showDebtAmount = canViewFinancial && debtVal !== null && debtVal !== undefined;
+                      const unpaidCount = s.invoice_summary?.unpaid_count || 0;
+                      const overdueCount = s.invoice_summary?.overdue_count || 0;
+                      const dueSoonCount = s.invoice_summary?.due_soon_count || 0;
+                      const hasActiveDebt = showDebtAmount ? Number(debtVal) > 0 : unpaidCount > 0;
+
+                      return (
+                        <div className="flex items-center gap-2.5 min-w-[130px]">
+                          <div
+                            className={`p-2 rounded-xl shrink-0 ${
+                              overdueCount > 0
+                                ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 animate-pulse'
+                                : hasActiveDebt
+                                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            }`}
+                          >
+                            {overdueCount > 0 ? (
+                              <AlertTriangle className="w-4 h-4" />
+                            ) : (
+                              <DollarSign className="w-4 h-4" />
+                            )}
                           </div>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle2 className="w-3.5 h-3.5" /> Lunas
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-semibold tracking-wider text-slate-400 block">
+                              {canViewFinancial ? 'Jumlah Tagihan' : 'Status Nota'}
+                            </span>
+                            {hasActiveDebt ? (
+                              <div>
+                                {showDebtAmount ? (
+                                  <span className="font-black text-sm text-slate-900 dark:text-white tabular-nums block">
+                                    {formatRupiah(debtVal)}
+                                  </span>
+                                ) : (
+                                  <span className="font-black text-sm text-slate-900 dark:text-white tabular-nums block">
+                                    {unpaidCount} Nota Aktif
+                                  </span>
+                                )}
+                                {overdueCount > 0 ? (
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                                    <AlertTriangle className="w-2.5 h-2.5" /> {overdueCount} Lewat Tempo
+                                  </span>
+                                ) : dueSoonCount > 0 ? (
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                    <Clock className="w-2.5 h-2.5" /> Tempo Dekat
+                                  </span>
+                                ) : !showDebtAmount ? (
+                                  <span className="text-[9px] text-slate-400 block">Nominal terbatas</span>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Lunas
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Kolom 3: Tombol Aksi Cepat Sebelah Kanan */}

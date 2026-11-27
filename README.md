@@ -54,5 +54,6 @@ Buka peramban di: **`http://localhost:3000`**
 ## 📖 Dokumentasi Detail Tiap Proyek
 
 Untuk dokumentasi teknis mendalam, silakan baca dokumentasi masing-masing sub-proyek:
+- 📗 [Panduan Tips & Trik Import Data Produk, Varian, dan Multi-Satuan](./docs/PANDUAN_TIPS_TRIK_IMPORT_PRODUK.md)
 - 📘 [Dokumentasi Lengkap Backend (API, Skema DB & SQL)](./backend/README.md)
 - 📙 [Dokumentasi Lengkap Frontend (Komponen, UX & State)](./frontend/README.md)

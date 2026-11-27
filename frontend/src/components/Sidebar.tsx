@@ -17,9 +17,13 @@ import {
   Users,
   ShoppingBag,
   FileUp,
+  Download,
+  TrendingUp,
+  Tag,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { AppTab } from '../utils/rbac';
+import { CLIENT_VERSION_INFO } from '../utils/version';
 
 /** Format angka badge: tampilkan "99+" jika melebihi 99 agar badge tetap ringkas */
 const formatBadgeCount = (count: number): string => (count > 99 ? '99+' : String(count));
@@ -46,6 +50,7 @@ interface SidebarProps {
   setActiveTab: (tab: ActiveTab) => void;
   lowStockCount?: number;
   alertCount?: number;
+  criticalMarginCount?: number;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -55,6 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   lowStockCount = 0,
   alertCount = 0,
+  criticalMarginCount = 0,
   isCollapsed = false,
   onToggleCollapse,
 }) => {
@@ -78,6 +84,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badgeIcon: AlertTriangle,
           badgeTitle: `${lowStockCount} varian dengan stok menipis`,
           badgeColor: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400',
+        },
+        {
+          id: 'price-analytics',
+          label: 'Analitik & Harga',
+          icon: TrendingUp,
+          badge: criticalMarginCount > 0 ? formatBadgeCount(criticalMarginCount) : null,
+          badgeIcon: AlertTriangle,
+          badgeTitle: `${criticalMarginCount} produk dengan margin kritis`,
+          badgeColor: 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400',
         },
         {
           id: 'adjust',
@@ -121,6 +136,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           id: 'import',
           label: 'Import Data',
           icon: FileUp,
+          badge: null,
+        },
+        {
+          id: 'export',
+          label: 'Export & Backup',
+          icon: Download,
           badge: null,
         },
       ],
@@ -304,16 +325,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="shrink-0 p-3 border-t border-slate-100 dark:border-slate-800/80 space-y-2 bg-white dark:bg-slate-900">
         {!isCollapsed ? (
           <>
-            {/* Toko Bangunan Quick Badge Card */}
-            <div className="p-3 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-slate-800/80 dark:to-slate-800/40 border border-amber-200/60 dark:border-slate-700/60 text-xs">
-              <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-400 mb-1">
-                <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                <span>UUIDv7 Architecture</span>
+            {/* App Version & Architecture Info */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('docs')}
+              title={
+                CLIENT_VERSION_INFO.buildTime
+                  ? `Versi ${CLIENT_VERSION_INFO.displayVersion} (${CLIENT_VERSION_INFO.commit}) • Build: ${new Date(CLIENT_VERSION_INFO.buildTime).toLocaleString('id-ID')}`
+                  : `Versi ${CLIENT_VERSION_INFO.displayVersion} (${CLIENT_VERSION_INFO.commit})`
+              }
+              className="w-full text-left p-3 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-slate-800/80 dark:to-slate-800/40 border border-amber-200/60 dark:border-slate-700/60 hover:border-amber-400/70 dark:hover:border-slate-600 transition-colors text-xs space-y-1.5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 font-bold text-amber-900 dark:text-amber-400">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>UUIDv7 Engine</span>
+                </span>
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/80 dark:bg-slate-900/80 border border-amber-200/80 dark:border-slate-700 text-[10px] font-mono font-bold text-slate-700 dark:text-slate-200">
+                  <Tag className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400" />
+                  {CLIENT_VERSION_INFO.displayVersion}
+                </span>
               </div>
-              <p className="text-slate-600 dark:text-slate-400 text-[11px] leading-relaxed">
-                Stok & data terurut berbasis waktu untuk performa tinggi.
-              </p>
-            </div>
+              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                <span>Commit: {CLIENT_VERSION_INFO.commit}</span>
+                <span className="uppercase font-semibold text-emerald-600 dark:text-emerald-400">
+                  API {CLIENT_VERSION_INFO.apiVersion}
+                </span>
+              </div>
+            </button>
 
             {/* Bottom Collapse Button */}
             {onToggleCollapse && (
@@ -331,10 +370,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ) : (
           <div className="flex flex-col items-center gap-2">
             <div
-              className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 cursor-help"
-              title="UUIDv7 Architecture: Database terindeks berbasis waktu untuk efisiensi tinggi"
+              className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 cursor-help text-center"
+              title={`BangunJaya POS ${CLIENT_VERSION_INFO.displayVersion} (${CLIENT_VERSION_INFO.commit}) • API ${CLIENT_VERSION_INFO.apiVersion}`}
             >
-              <Sparkles className="w-4 h-4" />
+              <Sparkles className="w-4 h-4 mx-auto" />
+              <span className="block text-[9px] font-mono font-bold mt-0.5 leading-none">
+                {CLIENT_VERSION_INFO.displayVersion}
+              </span>
             </div>
 
             {onToggleCollapse && (
