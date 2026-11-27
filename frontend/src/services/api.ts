@@ -55,6 +55,8 @@ const SESSION_ERROR_CODES = new Set([
   'TOKEN_EXPIRED',
   'TOKEN_INVALID',
   'TOKEN_MISSING',
+  'TOKEN_REPLAY_DETECTED',
+  'INVALID_REFRESH_TOKEN',
   'USER_NOT_FOUND',
   'SESSION_REVOKED',
   'SESSION_INVALIDATED',
@@ -142,16 +144,18 @@ export function invalidateMasterDataCache(prefix?: string): void {
   }
 }
 
+let unauthorizedHandler: ((message?: string) => void) | null = null;
+let tokensRefreshedHandler: ((session: AuthSessionPayload) => void) | null = null;
+let inFlightRefreshPromise: Promise<AuthSessionPayload> | null = null;
+let authSessionEpoch = 0;
+let isHandlingUnauthorized = false;
+
 export function clearAuthTokens(): void {
+  authSessionEpoch += 1;
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   invalidateMasterDataCache();
 }
-
-let unauthorizedHandler: ((message?: string) => void) | null = null;
-let tokensRefreshedHandler: ((session: AuthSessionPayload) => void) | null = null;
-let refreshPromise: Promise<boolean> | null = null;
-let isHandlingUnauthorized = false;
 
 export function setUnauthorizedHandler(handler: ((message?: string) => void) | null): void {
   unauthorizedHandler = handler;
@@ -179,41 +183,60 @@ async function safeParseJson(response: Response): Promise<any> {
   }
 }
 
-async function tryRefreshSession(): Promise<boolean> {
-  if (refreshPromise) {
-    return refreshPromise;
+/**
+ * Single-flight refresh mutex:
+ * Seluruh pemanggil (401 interceptor maupun AuthContext.hydrateSession) berbagi satu
+ * promise in-flight agar request paralel hanya menembakkan 1 POST /api/auth/refresh.
+ * Gangguan jaringan / 5xx TIDAK menghapus refresh_token lokal agar sesi tetap dapat pulih.
+ */
+export async function refreshSessionSingleFlight(
+  explicitRefreshToken?: string
+): Promise<AuthSessionPayload> {
+  if (inFlightRefreshPromise) {
+    return inFlightRefreshPromise;
   }
 
-  const refreshToken = getRefreshToken();
+  const refreshToken = getRefreshToken() ?? explicitRefreshToken;
   if (!refreshToken) {
-    return false;
+    throw new ApiError('Sesi Anda telah berakhir. Silakan login kembali.', 401, 'TOKEN_MISSING');
   }
 
-  refreshPromise = (async () => {
-    try {
-      const response = await fetch(`${BASE_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-      const json = await safeParseJson(response);
-      if (!response.ok || json?.success === false || !json?.data?.access_token) {
-        clearAuthTokens();
-        return false;
-      }
+  const epochAtStart = authSessionEpoch;
+  inFlightRefreshPromise = (async () => {
+    const response = await fetch(`${BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
 
-      const session = json.data as AuthSessionPayload;
+    const json = await safeParseJson(response);
+    if (!response.ok || json?.success === false) {
+      if (response.status === 401 || response.status === 403) {
+        clearAuthTokens();
+      }
+      throwApiErrorFromPayload(response, json);
+    }
+
+    const session = json?.data as AuthSessionPayload | undefined;
+    if (!session?.access_token || !session?.refresh_token) {
+      throw new ApiError(
+        json?.message || 'Respons pembaruan sesi tidak valid.',
+        response.status || 502,
+        json?.code
+      );
+    }
+
+    // Jangan tulis ulang token jika user baru saja logout saat refresh sedang berjalan
+    if (epochAtStart === authSessionEpoch) {
       setAuthTokens(session.access_token, session.refresh_token);
       tokensRefreshedHandler?.(session);
-      return true;
-    } catch {
-      return false;
-    } finally {
-      refreshPromise = null;
     }
-  })();
+    return session;
+  })().finally(() => {
+    inFlightRefreshPromise = null;
+  });
 
-  return refreshPromise;
+  return inFlightRefreshPromise;
 }
 
 async function executeWithAuthRetry(
@@ -237,10 +260,30 @@ async function executeWithAuthRetry(
       throw new ApiError(message, 401, code, json?.details);
     }
 
-    if (!_isRetry && getRefreshToken()) {
-      const refreshed = await tryRefreshSession();
-      if (refreshed) {
+    if (!_isRetry) {
+      // Jika request paralel lain baru saja selesai memperbarui access token,
+      // langsung retry memakai token terbaru tanpa memicu POST /auth/refresh kedua.
+      const latestToken = getAuthToken();
+      if (latestToken && latestToken !== token) {
         return executeWithAuthRetry(url, buildRequestInit, true);
+      }
+
+      if (getRefreshToken()) {
+        try {
+          await refreshSessionSingleFlight();
+          return executeWithAuthRetry(url, buildRequestInit, true);
+        } catch (refreshErr) {
+          if (
+            refreshErr instanceof ApiError &&
+            (refreshErr.status === 401 || refreshErr.status === 403)
+          ) {
+            notifyUnauthorizedOnce(refreshErr.message || message);
+            throw refreshErr;
+          }
+          // Gangguan jaringan / 5xx server saat refresh:
+          // Jangan hapus refresh_token dan jangan paksa logout!
+          throw refreshErr;
+        }
       }
     }
 
@@ -394,11 +437,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  refresh: (refreshToken: string) =>
-    fetchJson<AuthSessionPayload>('/auth/refresh', {
-      method: 'POST',
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    }),
+  refresh: (refreshToken?: string) => refreshSessionSingleFlight(refreshToken),
   logout: () =>
     fetchJson<void>('/auth/logout', {
       method: 'POST',

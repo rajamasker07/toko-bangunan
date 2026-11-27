@@ -273,6 +273,8 @@ export async function initializeDatabase() {
         id UUID PRIMARY KEY,
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         refresh_token_hash VARCHAR(64) NOT NULL,
+        previous_refresh_token_hash VARCHAR(64),
+        rotated_at TIMESTAMPTZ,
         user_agent VARCHAR(255),
         ip_address VARCHAR(64),
         expires_at TIMESTAMPTZ NOT NULL,
@@ -282,6 +284,16 @@ export async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
       CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
     `);
+
+    // Migrasi kolom rotation grace window pada user_sessions (kompatibel PostgreSQL 9.5)
+    if (!(await columnExists(client, 'user_sessions', 'previous_refresh_token_hash'))) {
+      await client.query(
+        'ALTER TABLE user_sessions ADD COLUMN previous_refresh_token_hash VARCHAR(64);'
+      );
+    }
+    if (!(await columnExists(client, 'user_sessions', 'rotated_at'))) {
+      await client.query('ALTER TABLE user_sessions ADD COLUMN rotated_at TIMESTAMPTZ;');
+    }
 
     // 1. Categories Table (Supports multi-level subcategories)
     await client.query(`

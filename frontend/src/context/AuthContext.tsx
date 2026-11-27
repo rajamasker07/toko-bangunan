@@ -93,7 +93,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // ignore if user lacks permission to list roles
         }
       } else if (refreshToken) {
-        const refreshed = await api.refresh(refreshToken);
+        const refreshed = await api.refresh();
         applyAuthSession(refreshed);
         try {
           const rolesData = await api.getRoles();

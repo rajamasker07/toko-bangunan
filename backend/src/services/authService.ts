@@ -10,6 +10,7 @@ import {
   safeCompareSha256Hex,
   signAccessToken,
 } from '../utils/jwt.js';
+import { logger } from '../utils/logger.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { generateUUIDv7 } from '../utils/uuid.js';
 
@@ -21,6 +22,42 @@ export const USER_PUBLIC_COLUMNS = `
 interface UserRow extends UserPublic {
   password_hash: string;
   token_version: number;
+}
+
+interface GraceCacheEntry {
+  userId: string;
+  prevHash: string;
+  currentHash: string;
+  rawRefreshToken: string;
+  expiresAtMs: number;
+}
+
+const MAX_GRACE_CACHE_ENTRIES = 5000;
+const graceTokenCache = new Map<string, GraceCacheEntry>();
+
+function pruneExpiredGraceCache(nowMs = Date.now()): void {
+  for (const [sid, entry] of graceTokenCache.entries()) {
+    if (entry.expiresAtMs <= nowMs) {
+      graceTokenCache.delete(sid);
+    }
+  }
+  while (graceTokenCache.size >= MAX_GRACE_CACHE_ENTRIES) {
+    const oldestKey = graceTokenCache.keys().next().value;
+    if (!oldestKey) break;
+    graceTokenCache.delete(oldestKey);
+  }
+}
+
+function clearGraceCacheForSession(sessionId: string): void {
+  graceTokenCache.delete(sessionId);
+}
+
+function clearGraceCacheForUser(userId: string): void {
+  for (const [sid, entry] of graceTokenCache.entries()) {
+    if (entry.userId === userId) {
+      graceTokenCache.delete(sid);
+    }
+  }
 }
 
 // Constant-time timing mitigation hash when user is not found
@@ -163,18 +200,37 @@ export class AuthService {
     }
   }
 
+  /**
+   * Helper pengujian untuk menyimulasikan cold-cache (misalnya pasca server restart di tengah grace window).
+   */
+  static clearGraceCacheForTesting(sessionId?: string): void {
+    if (sessionId) {
+      clearGraceCacheForSession(sessionId);
+      return;
+    }
+    graceTokenCache.clear();
+  }
+
   static async refresh(rawRefreshToken: string): Promise<AuthTokensResponse> {
     const parsed = parseRefreshToken(rawRefreshToken);
     if (!parsed) {
       throw new AppHttpError(401, 'Refresh token tidak valid.', 'INVALID_REFRESH_TOKEN');
     }
 
+    const graceWindowMs = env.jwtRefreshGraceWindowSeconds * 1000;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
       const sessionRes = await client.query(
-        `SELECT id, user_id, refresh_token_hash, expires_at, revoked_at
+        `SELECT id,
+                user_id,
+                refresh_token_hash,
+                previous_refresh_token_hash,
+                rotated_at,
+                EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - rotated_at)) * 1000 AS rotation_age_ms,
+                expires_at,
+                revoked_at
          FROM user_sessions
          WHERE id = $1
          FOR UPDATE`,
@@ -186,8 +242,11 @@ export class AuthService {
             id: string;
             user_id: string;
             refresh_token_hash: string;
-            expires_at: string;
-            revoked_at: string | null;
+            previous_refresh_token_hash: string | null;
+            rotated_at: string | Date | null;
+            rotation_age_ms: string | number | null;
+            expires_at: string | Date;
+            revoked_at: string | Date | null;
           }
         | undefined;
 
@@ -196,13 +255,37 @@ export class AuthService {
         throw new AppHttpError(401, 'Sesi tidak ditemukan. Silakan login kembali.', 'SESSION_REVOKED');
       }
 
-      if (
-        session.revoked_at !== null ||
-        !safeCompareSha256Hex(session.refresh_token_hash, parsed.secretHash)
-      ) {
-        // Replay of a revoked or rotated refresh token (or tampered secret): revoke all user sessions & bump token_version
+      const nowMs = Date.now();
+      const isRevoked = session.revoked_at !== null;
+      const isCurrentMatch =
+        !isRevoked && safeCompareSha256Hex(session.refresh_token_hash, parsed.secretHash);
+
+      const rotationAgeMs =
+        session.rotation_age_ms !== null && session.rotation_age_ms !== undefined
+          ? Math.max(0, Number(session.rotation_age_ms))
+          : null;
+
+      const isGraceMatch =
+        !isRevoked &&
+        !isCurrentMatch &&
+        graceWindowMs > 0 &&
+        session.previous_refresh_token_hash !== null &&
+        rotationAgeMs !== null &&
+        Number.isFinite(rotationAgeMs) &&
+        rotationAgeMs <= graceWindowMs &&
+        safeCompareSha256Hex(session.previous_refresh_token_hash, parsed.secretHash);
+
+      if (!isCurrentMatch && !isGraceMatch) {
+        // Replay of a revoked, expired-grace, or tampered refresh token: revoke all user sessions & bump token_version
         await AuthService.revokeAllUserSessions(client, session.user_id);
         await client.query('COMMIT');
+        logger.warn('SECURITY', 'Refresh token replay terdeteksi; seluruh sesi pengguna dicabut', {
+          sessionId: session.id,
+          userId: session.user_id,
+          revoked: isRevoked,
+          rotationAgeMs,
+          graceWindowMs,
+        });
         throw new AppHttpError(
           401,
           'Refresh token telah digunakan atau tidak valid. Silakan login kembali.',
@@ -210,12 +293,17 @@ export class AuthService {
         );
       }
 
-      if (new Date(session.expires_at).getTime() <= Date.now()) {
+      if (new Date(session.expires_at).getTime() <= nowMs) {
         await client.query(
-          `UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          `UPDATE user_sessions
+           SET revoked_at = CURRENT_TIMESTAMP,
+               previous_refresh_token_hash = NULL,
+               rotated_at = NULL
+           WHERE id = $1`,
           [session.id]
         );
         await client.query('COMMIT');
+        clearGraceCacheForSession(session.id);
         throw new AppHttpError(401, 'Sesi login telah kedaluwarsa. Silakan login kembali.', 'TOKEN_EXPIRED');
       }
 
@@ -228,10 +316,15 @@ export class AuthService {
 
       if (!userRow || !userRow.is_active) {
         await client.query(
-          `UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          `UPDATE user_sessions
+           SET revoked_at = CURRENT_TIMESTAMP,
+               previous_refresh_token_hash = NULL,
+               rotated_at = NULL
+           WHERE id = $1`,
           [session.id]
         );
         await client.query('COMMIT');
+        clearGraceCacheForSession(session.id);
         throw new AppHttpError(
           401,
           'Sesi dihentikan karena akun tidak aktif.',
@@ -239,17 +332,90 @@ export class AuthService {
         );
       }
 
+      pruneExpiredGraceCache(nowMs);
+
+      if (isGraceMatch) {
+        const cached = graceTokenCache.get(session.id);
+        const isCacheHit = Boolean(
+          cached &&
+            cached.expiresAtMs > nowMs &&
+            safeCompareSha256Hex(cached.prevHash, parsed.secretHash) &&
+            safeCompareSha256Hex(cached.currentHash, session.refresh_token_hash)
+        );
+
+        logger.warn(
+          'AUTH',
+          'Refresh token grace window digunakan untuk toleransi retry jaringan atau request paralel',
+          {
+            sessionId: session.id,
+            userId: session.user_id,
+            rotationAgeMs: rotationAgeMs !== null ? Math.round(rotationAgeMs) : null,
+            graceWindowMs,
+            cacheHit: isCacheHit,
+          }
+        );
+
+        if (isCacheHit && cached) {
+          await client.query('COMMIT');
+          return buildAuthResponse(userRow, session.id, cached.rawRefreshToken);
+        }
+
+        // Cold-cache fallback (e.g., server restarted mid-grace-window):
+        // Rotate current refresh token without resetting previous_refresh_token_hash or rotated_at
+        // so the original grace window cannot be extended indefinitely.
+        const fallbackRotated = generateRefreshToken(session.id);
+        const nextExpiresAt = refreshExpiresAt();
+
+        await client.query(
+          `UPDATE user_sessions
+           SET refresh_token_hash = $1, expires_at = $2
+           WHERE id = $3`,
+          [fallbackRotated.tokenHash, nextExpiresAt, session.id]
+        );
+
+        await client.query('COMMIT');
+
+        const remainingGraceMs = Math.max(0, graceWindowMs - (rotationAgeMs ?? 0));
+        if (remainingGraceMs > 0) {
+          graceTokenCache.set(session.id, {
+            userId: session.user_id,
+            prevHash: parsed.secretHash,
+            currentHash: fallbackRotated.tokenHash,
+            rawRefreshToken: fallbackRotated.rawToken,
+            expiresAtMs: Date.now() + remainingGraceMs,
+          });
+        }
+
+        return buildAuthResponse(userRow, session.id, fallbackRotated.rawToken);
+      }
+
       const rotated = generateRefreshToken(session.id);
       const nextExpiresAt = refreshExpiresAt();
 
       await client.query(
         `UPDATE user_sessions
-         SET refresh_token_hash = $1, expires_at = $2
+         SET previous_refresh_token_hash = refresh_token_hash,
+             refresh_token_hash = $1,
+             rotated_at = CURRENT_TIMESTAMP,
+             expires_at = $2
          WHERE id = $3`,
         [rotated.tokenHash, nextExpiresAt, session.id]
       );
 
       await client.query('COMMIT');
+
+      if (graceWindowMs > 0) {
+        graceTokenCache.set(session.id, {
+          userId: session.user_id,
+          prevHash: session.refresh_token_hash,
+          currentHash: rotated.tokenHash,
+          rawRefreshToken: rotated.rawToken,
+          expiresAtMs: Date.now() + graceWindowMs,
+        });
+      } else {
+        clearGraceCacheForSession(session.id);
+      }
+
       return buildAuthResponse(userRow, session.id, rotated.rawToken);
     } catch (err) {
       if (!(err instanceof AppHttpError)) {
@@ -262,9 +428,12 @@ export class AuthService {
   }
 
   static async logout(sessionId: string): Promise<void> {
+    clearGraceCacheForSession(sessionId);
     await query(
       `UPDATE user_sessions
-       SET revoked_at = CURRENT_TIMESTAMP
+       SET revoked_at = CURRENT_TIMESTAMP,
+           previous_refresh_token_hash = NULL,
+           rotated_at = NULL
        WHERE id = $1 AND revoked_at IS NULL`,
       [sessionId]
     );
@@ -288,6 +457,7 @@ export class AuthService {
    * Shared helper: increment token_version and revoke all active sessions for a user inside a tx.
    */
   static async revokeAllUserSessions(client: PoolClient, userId: string): Promise<void> {
+    clearGraceCacheForUser(userId);
     await client.query(
       `UPDATE users
        SET token_version = token_version + 1, updated_at = CURRENT_TIMESTAMP
@@ -296,7 +466,9 @@ export class AuthService {
     );
     await client.query(
       `UPDATE user_sessions
-       SET revoked_at = CURRENT_TIMESTAMP
+       SET revoked_at = CURRENT_TIMESTAMP,
+           previous_refresh_token_hash = NULL,
+           rotated_at = NULL
        WHERE user_id = $1 AND revoked_at IS NULL`,
       [userId]
     );
@@ -403,10 +575,12 @@ export class AuthService {
       );
       const updatedUser = updatedRes.rows[0] as UserRow;
 
-      // Revoke all other sessions immediately
+      // Revoke all other sessions immediately (and invalidate any grace window)
       await client.query(
         `UPDATE user_sessions
-         SET revoked_at = CURRENT_TIMESTAMP
+         SET revoked_at = CURRENT_TIMESTAMP,
+             previous_refresh_token_hash = NULL,
+             rotated_at = NULL
          WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`,
         [userId, sessionId]
       );
@@ -416,7 +590,10 @@ export class AuthService {
       const nextExpiresAt = refreshExpiresAt();
       const updatedSession = await client.query(
         `UPDATE user_sessions
-         SET refresh_token_hash = $1, expires_at = $2
+         SET refresh_token_hash = $1,
+             previous_refresh_token_hash = NULL,
+             rotated_at = NULL,
+             expires_at = $2
          WHERE id = $3 AND user_id = $4 AND revoked_at IS NULL
          RETURNING id`,
         [rotated.tokenHash, nextExpiresAt, sessionId, userId]
@@ -444,6 +621,7 @@ export class AuthService {
       }
 
       await client.query('COMMIT');
+      clearGraceCacheForUser(userId);
       return buildAuthResponse(updatedUser, activeSessionId, activeRefreshRaw);
     } catch (err) {
       await client.query('ROLLBACK');
